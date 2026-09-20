@@ -1,0 +1,44 @@
+{{- if not .Values.encryptionKey.existingSecret -}}
+{{- fail "encryptionKey.existingSecret is required; create and back up a 64-hex-character encryption key before installing" -}}
+{{- end -}}
+{{- if eq .Values.database.type "sqlite" -}}
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "SQLite requires replicaCount=1; multiple writers are unsafe" -}}
+{{- end -}}
+{{- if .Values.postgresql.enabled -}}
+{{- fail "SQLite requires postgresql.enabled=false" -}}
+{{- end -}}
+{{- else if .Values.postgresql.enabled -}}
+{{- if not .Values.postgresql.existingSecret -}}
+{{- fail "postgresql.existingSecret is required for bundled PostgreSQL; credentials must survive upgrades and PVC restores" -}}
+{{- end -}}
+{{- if .Values.externalPostgresql.host -}}
+{{- fail "externalPostgresql.host and postgresql.enabled=true are mutually exclusive" -}}
+{{- end -}}
+{{- else -}}
+{{- if or (not .Values.externalPostgresql.host) (not .Values.externalPostgresql.existingSecret) -}}
+{{- fail "external PostgreSQL requires externalPostgresql.host and externalPostgresql.existingSecret" -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.host) -}}
+{{- fail "ingress.host is required when ingress.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not (hasPrefix "https://" .Values.publicURL)) -}}
+{{- fail "Ingress requires an HTTPS publicURL; complete bootstrap privately before enabling ingress" -}}
+{{- end -}}
+{{- if and .Values.serviceMonitor.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}
+{{- fail "serviceMonitor.enabled requires the monitoring.coreos.com/v1/ServiceMonitor CRD" -}}
+{{- end -}}
+{{- $reserved := list "JANUS_ENCRYPTION_KEY" "JANUS_DATABASE_URL" "JANUS_PUBLIC_URL" "JANUS_LISTEN_ADDR" "JANUS_ENV" "JANUS_DEV_AUTH" "JANUS_DEV_AUTH_ALLOW_UNSAFE" "JANUS_COOKIE_SECURE" "JANUS_LICENSE_FILE" -}}
+{{- range $settings := list .Values.extraEnv .Values.secretEnv -}}
+{{- range $key, $value := $settings -}}
+{{- if or (has $key $reserved) (hasPrefix "PG" $key) -}}
+{{- fail (printf "%s is chart-managed or reserved; use the dedicated values instead" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $value := .Values.extraEnv -}}
+{{- if hasKey $.Values.secretEnv $key -}}
+{{- fail (printf "%s appears in both extraEnv and secretEnv" $key) -}}
+{{- end -}}
+{{- end -}}

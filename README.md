@@ -28,7 +28,10 @@ Product information and licensing: [janusedge.com](https://janusedge.com).
 Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.1`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: build locally from this release using the Dockerfile (see below).
+- Container: `ghcr.io/torvanis/janus:2026.9.1` (registry authorization may be required); alternatively build locally using the Dockerfile below.
+- [Linux installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.1)
+- [Helm chart installation guide](charts/janus/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
+- [Download Helm chart 0.1.0](https://github.com/Torvanis/janus/releases/download/v2026.9.1/janus-0.1.0.tgz)
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
