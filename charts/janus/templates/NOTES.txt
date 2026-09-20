@@ -1,0 +1,11 @@
+Janus {{ .Chart.AppVersion }} (chart {{ .Chart.Version }})
+
+Complete the first-administrator form PRIVATELY before enabling ingress:
+  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "janus.fullname" . }} 8080:{{ .Values.service.port }}
+
+Public URL: {{ .Values.publicURL }}
+Dev authentication is disabled; OIDC is optional. No default administrator password.
+Back up the database AND the unchanged encryption key. Secrets are externally managed.
+{{ if .Values.postgresql.enabled }}Bundled PostgreSQL is ONE instance, not an HA database. Its PVC is retained by the StatefulSet controller after deletion.{{ end }}
+{{ if eq .Values.database.type "sqlite" }}SQLite is evaluation-only: NEVER attach its PVC to multiple writers.{{ end }}
+Check your license's replica entitlement before scaling. See charts/janus/README.md.

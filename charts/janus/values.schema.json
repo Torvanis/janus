@@ -1,0 +1,341 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "publicURL": {
+      "type": "string",
+      "pattern": "^(https://[^/\\s]+|http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?)/?$"
+    },
+    "encryptionKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "postgresql",
+            "sqlite"
+          ]
+        }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string"
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "passwordKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "type": "string",
+              "minLength": 1
+            },
+            "storageClass": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "externalPostgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "passwordKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sslMode": {
+          "type": "string",
+          "enum": [
+            "disable",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ]
+        },
+        "caSecret": {
+          "type": "string"
+        },
+        "caKey": {
+          "type": "string"
+        }
+      }
+    },
+    "sqlite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingClaim": {
+              "type": "string"
+            },
+            "size": {
+              "type": "string",
+              "minLength": 1
+            },
+            "storageClass": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "host": {
+          "type": "string"
+        },
+        "tls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "secretName",
+              "hosts"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "hosts": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "interval": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+        }
+      }
+    },
+    "resources": {
+      "type": "object"
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "extraEnv": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "secretEnv": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "key"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

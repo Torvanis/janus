@@ -1,0 +1,84 @@
+# Required: pre-create Secrets in the release namespace. This chart never
+# generates or stores credentials in Helm release values. See README.md.
+replicaCount: 1
+nameOverride: ""
+fullnameOverride: ""
+image:
+  repository: ghcr.io/torvanis/janus
+  tag: "2026.9.1"
+  digest: sha256:b789411252a3bd5724c77d15a02c7c388178ba6a3e95c5916367d3a682e094b6
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+# Loopback evaluation by default. Set an HTTPS origin before remote exposure.
+publicURL: http://127.0.0.1:8080
+encryptionKey:
+  existingSecret: ""
+  key: JANUS_ENCRYPTION_KEY
+license:
+  existingSecret: ""
+  key: license
+# Choose ONE mode:
+# 1. Bundled PostgreSQL (DEFAULT): type=postgresql, postgresql.enabled=true;
+#    supply postgresql.existingSecret. Creates exactly one PostgreSQL instance.
+# 2. Existing PostgreSQL: type=postgresql, postgresql.enabled=false;
+#    supply externalPostgresql.host and externalPostgresql.existingSecret.
+# 3. Local SQLite (EVALUATION ONLY): type=sqlite, postgresql.enabled=false,
+#    replicaCount=1; uses the persistent claim configured under sqlite below.
+# Every mode also requires encryptionKey.existingSecret.
+database:
+  type: postgresql
+postgresql:
+  enabled: true
+  image: postgres:16-alpine
+  # Exactly one StatefulSet replica; no operator dependency or HA claims.
+  database: janus
+  username: janus
+  existingSecret: ""
+  passwordKey: password
+  persistence:
+    size: 10Gi
+    storageClass: null
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+externalPostgresql:
+  host: ""
+  port: 5432
+  database: janus
+  username: janus
+  existingSecret: ""
+  passwordKey: password
+  sslMode: verify-full
+  # Optional Secret containing ca.crt (or caKey); verify-full needs a trusted CA.
+  caSecret: ""
+  caKey: ca.crt
+# EVALUATION ONLY. Never scale or share this PVC with another writer.
+sqlite:
+  persistence:
+    existingClaim: ""
+    size: 10Gi
+    storageClass: null
+service:
+  port: 8080
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+serviceMonitor:
+  enabled: false
+  labels: {}
+  interval: 30s
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Map of additional literal app settings. Secrets belong in secretEnv instead.
+# Chart-managed env (database, encryption, auth safety, listen URL) cannot be overridden.
+extraEnv: {}
+# Map: ENV_NAME: {name: existing-secret, key: secret-key}
+secretEnv: {}

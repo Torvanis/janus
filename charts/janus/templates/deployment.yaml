@@ -1,0 +1,187 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "janus.fullname" . }}
+  labels:
+    {{- include "janus.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- if or (eq .Values.database.type "sqlite") (eq (int .Values.replicaCount) 1) }}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "janus.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "janus.selector" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: janus
+          image: {{ include "janus.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: JANUS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.encryptionKey.existingSecret | quote }}
+                  key: {{ .Values.encryptionKey.key | quote }}
+            - name: JANUS_ENV
+              value: production
+            - name: JANUS_DEV_AUTH
+              value: "false"
+            - name: JANUS_DEV_AUTH_ALLOW_UNSAFE
+              value: "false"
+            - name: JANUS_PUBLIC_URL
+              value: {{ .Values.publicURL | quote }}
+            - name: JANUS_LISTEN_ADDR
+              value: ":8080"
+            - name: JANUS_COOKIE_SECURE
+              value: {{ hasPrefix "https://" .Values.publicURL | quote }}
+            {{- if eq .Values.database.type "sqlite" }}
+            - name: JANUS_DATABASE_URL
+              value: sqlite:///data/janus.db
+            {{- else }}
+            {{- $pg := .Values.externalPostgresql }}
+            {{- if .Values.postgresql.enabled }}
+            {{- $pg = .Values.postgresql }}
+            {{- end }}
+            # pgx reads PG* defaults. Never interpolate a password into a URI.
+            - name: JANUS_DATABASE_URL
+              value: "postgres://"
+            - name: PGHOST
+              value: {{ ternary (printf "%s-postgresql" (include "janus.fullname" .)) .Values.externalPostgresql.host .Values.postgresql.enabled | quote }}
+            - name: PGPORT
+              value: {{ ternary 5432 (int .Values.externalPostgresql.port) .Values.postgresql.enabled | quote }}
+            - name: PGDATABASE
+              value: {{ $pg.database | quote }}
+            - name: PGUSER
+              value: {{ $pg.username | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pg.existingSecret | quote }}
+                  key: {{ $pg.passwordKey | quote }}
+            - name: PGSSLMODE
+              value: {{ ternary "disable" .Values.externalPostgresql.sslMode .Values.postgresql.enabled | quote }}
+            {{- if and (not .Values.postgresql.enabled) .Values.externalPostgresql.caSecret }}
+            - name: PGSSLROOTCERT
+              value: /etc/janus/postgresql/ca.crt
+            {{- end }}
+            {{- end }}
+            {{- if .Values.license.existingSecret }}
+            - name: JANUS_LICENSE_FILE
+              value: /etc/janus/license/license
+            {{- end }}
+            {{- range $key, $value := .Values.extraEnv }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $value.name | quote }}
+                  key: {{ $value.key | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+            {{- if .Values.license.existingSecret }}
+            - name: license
+              mountPath: /etc/janus/license
+              readOnly: true
+            {{- end }}
+            {{- if and (eq .Values.database.type "postgresql") (not .Values.postgresql.enabled) .Values.externalPostgresql.caSecret }}
+            - name: pg-ca
+              mountPath: /etc/janus/postgresql
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+        - name: data
+          {{- if eq .Values.database.type "sqlite" }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "janus.fullname" .)) .Values.sqlite.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {sizeLimit: 1Gi}
+          {{- end }}
+        {{- if .Values.license.existingSecret }}
+        - name: license
+          secret:
+            secretName: {{ .Values.license.existingSecret | quote }}
+            items:
+              - key: {{ .Values.license.key | quote }}
+                path: license
+        {{- end }}
+        {{- if and (eq .Values.database.type "postgresql") (not .Values.postgresql.enabled) .Values.externalPostgresql.caSecret }}
+        - name: pg-ca
+          secret:
+            secretName: {{ .Values.externalPostgresql.caSecret | quote }}
+            items:
+              - key: {{ .Values.externalPostgresql.caKey | quote }}
+                path: ca.crt
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

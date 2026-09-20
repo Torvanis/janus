@@ -1,0 +1,11 @@
+apiVersion: v2
+name: janus
+description: Janus Edge AI gateway with optional single-instance PostgreSQL
+type: application
+version: 0.1.0
+appVersion: "2026.9.1"
+kubeVersion: ">=1.25.0-0"
+home: https://janusedge.com
+sources:
+  - https://github.com/Torvanis/janus
+keywords: [janus, ai, gateway]
