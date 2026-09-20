@@ -1,0 +1,14 @@
+/bin/
+/dist/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+*.env
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.key
+__pycache__/

@@ -1,0 +1,7 @@
+dist/
+node_modules/
+public/openapi.json
+package-lock.json
+# Machine-written by scripts/gen-docs.mjs; reformatting it would make the
+# generator's --check drift gate fail.
+src/routes/docs/*.generated.ts

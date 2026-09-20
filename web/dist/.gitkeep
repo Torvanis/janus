@@ -1,0 +1,3 @@
+# Keeps web/dist/ present in fresh clones so the `//go:embed all:dist`
+# directive in web/embed.go resolves before `make web` produces the bundle.
+# Do not delete. See .gitignore carve-out `!web/dist/.gitkeep`.

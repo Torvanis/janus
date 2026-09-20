@@ -1,0 +1,7 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/gen-docs.mjs"
+  ],
+  "ignoreExportsUsedInFile": true
+}

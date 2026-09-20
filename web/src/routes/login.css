@@ -1,0 +1,70 @@
+.auth-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--janus-space-6) var(--janus-space-4);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: color-mix(in srgb, var(--janus-color-bg-surface) 88%, transparent);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--janus-color-border-strong);
+  border-radius: var(--janus-radius-2xl);
+  box-shadow: var(--janus-shadow-4);
+  padding: var(--janus-space-8) var(--janus-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-4);
+}
+
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--janus-space-2);
+}
+.auth-brand h1 {
+  font-size: var(--janus-text-3xl);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  background: var(--janus-gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.auth-brand p {
+  margin: 0;
+  font-size: var(--janus-text-sm);
+  max-width: 34ch;
+}
+
+.auth-provider {
+  text-align: center;
+  margin: 0;
+}
+
+.auth-footer {
+  display: flex;
+  gap: var(--janus-space-2);
+  justify-content: center;
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+  padding-top: var(--janus-space-2);
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--janus-space-3);
+  color: var(--janus-color-fg-muted);
+  font-size: 0.8rem;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--janus-color-border);
+}

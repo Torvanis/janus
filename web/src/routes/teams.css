@@ -1,0 +1,124 @@
+/* Teams discovery and secondary administration; dashboard owns its styling. */
+.team-directory,
+.team-management,
+.team-directory .team-detail {
+  min-width: 0;
+}
+
+.team-directory .team-directory-row {
+  gap: var(--janus-space-4);
+  padding: var(--janus-space-4) 0;
+  flex-wrap: wrap;
+}
+
+.team-directory .team-directory-row + .team-directory-row {
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+
+.team-directory .team-directory-row > .btn {
+  font-weight: 600;
+  white-space: normal;
+  text-align: left;
+}
+
+.team-directory .team-directory-row > .row {
+  flex-wrap: wrap;
+  gap: var(--janus-space-3);
+}
+
+.team-directory .team-request-callout,
+.team-management .team-request-callout {
+  background: var(--janus-color-accent-subtle);
+  color: var(--janus-color-accent-on-subtle);
+  border: 1px solid var(--janus-color-warning-border);
+  font-weight: 600;
+  white-space: normal;
+  justify-content: flex-start;
+  text-decoration: none;
+}
+
+.team-directory .team-request-callout:hover,
+.team-management .team-request-callout:hover {
+  background: var(--janus-color-accent-bg);
+  color: var(--janus-color-accent-fg);
+}
+
+.team-management {
+  padding: var(--janus-space-6);
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-lg);
+  background: var(--janus-color-bg-surface);
+}
+
+.team-management .team-management-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--janus-space-2);
+  padding-block: var(--janus-space-2);
+  border-block: 1px solid var(--janus-color-border-subtle);
+}
+
+.team-management .team-management-nav a {
+  padding: var(--janus-space-3) var(--janus-space-4);
+  border-radius: var(--janus-radius-sm);
+  color: var(--janus-color-text-secondary);
+  text-decoration: none;
+}
+
+.team-management .team-management-nav a[aria-current='page'] {
+  background: var(--janus-color-primary-subtle);
+  color: var(--janus-color-primary-on-subtle);
+  font-weight: 600;
+}
+
+.team-management .team-management-nav a:hover {
+  background: var(--janus-color-bg-surface-hover);
+}
+
+.team-management > .btn,
+.team-directory .team-detail > .btn {
+  align-self: flex-start;
+}
+
+.team-management .table-wrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.team-directory .team-request-history summary {
+  cursor: pointer;
+  color: var(--janus-color-text-secondary);
+  font-weight: 600;
+}
+
+.team-directory .team-request-history > ul {
+  max-height: 50vh;
+  overflow: auto;
+  margin-top: var(--janus-space-4);
+}
+
+.team-directory .team-request-history li + li {
+  margin-top: var(--janus-space-4);
+}
+
+@media (max-width: 640px) {
+  .team-management {
+    padding: var(--janus-space-4);
+  }
+
+  .team-directory > .row-between,
+  .team-directory .page-header {
+    flex-wrap: wrap;
+    gap: var(--janus-space-3);
+  }
+
+  .team-directory .team-directory-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .team-directory .team-directory-row > .row {
+    width: 100%;
+  }
+}

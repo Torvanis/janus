@@ -1,0 +1,280 @@
+/*
+ * Janus design tokens.
+ *
+ * Every colour, space, radius, and duration in the product resolves through one
+ * of these custom properties. A corporate rebrand replaces the --janus-color-*
+ * ramps only; the structural tokens below are not intended to be overridden.
+ */
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --janus-color-bg-canvas: #08090f;
+  --janus-color-bg-sunken: #05060b;
+  --janus-color-bg-surface: #0e1018;
+  --janus-color-bg-surface-raised: #151826;
+  --janus-color-bg-surface-overlay: #1c2033;
+  --janus-color-bg-surface-hover: #1a1e2e;
+  --janus-color-bg-surface-active: #222741;
+  --janus-color-bg-scrim: rgba(5, 6, 11, 0.72);
+
+  /* Borders */
+  --janus-color-border-subtle: #1c2033;
+  --janus-color-border-default: #232840;
+  --janus-color-border-strong: #333a5c;
+  --janus-color-border-focus: #9aa3ff;
+
+  /* Text */
+  --janus-color-text-primary: #eceefb;
+  --janus-color-text-secondary: #a6adcb;
+  --janus-color-text-muted: #757d9e;
+  --janus-color-text-disabled: #4a5279;
+  --janus-color-text-inverse: #0e1018;
+  --janus-color-text-link: #9aa3ff;
+  --janus-color-text-code: #fcd34d;
+
+  /* Brand — the two faces: indigo inward, amber outward */
+  --janus-color-primary-bg: #7c86ff;
+  --janus-color-primary-bg-hover: #9aa3ff;
+  --janus-color-primary-bg-active: #6366f1;
+  --janus-color-primary-subtle: rgba(124, 134, 255, 0.14);
+  --janus-color-primary-border: #6366f1;
+  --janus-color-primary-fg: #0b0d16;
+  --janus-color-primary-on-subtle: #bcc3ff;
+
+  --janus-color-accent-bg: #fbbf24;
+  --janus-color-accent-bg-hover: #fcd34d;
+  --janus-color-accent-subtle: rgba(251, 191, 36, 0.14);
+  --janus-color-accent-fg: #14100a;
+  --janus-color-accent-on-subtle: #fcd34d;
+
+  /* Status */
+  --janus-color-success-bg: rgba(52, 211, 153, 0.14);
+  --janus-color-success-solid: #34d399;
+  --janus-color-success-fg: #6ee7b7;
+  --janus-color-success-border: #10b981;
+  --janus-color-warning-bg: rgba(251, 191, 36, 0.14);
+  --janus-color-warning-solid: #fbbf24;
+  --janus-color-warning-fg: #fcd34d;
+  --janus-color-warning-border: #f59e0b;
+  --janus-color-danger-bg: rgba(248, 113, 113, 0.14);
+  --janus-color-danger-solid: #f87171;
+  --janus-color-danger-fg: #fca5a5;
+  --janus-color-danger-border: #ef4444;
+  --janus-color-info-bg: rgba(96, 165, 250, 0.14);
+  --janus-color-info-solid: #60a5fa;
+  --janus-color-info-fg: #93c5fd;
+  --janus-color-info-border: #3b82f6;
+
+  /* Gradients */
+  --janus-gradient-brand: linear-gradient(135deg, #4f46e5 0%, #7c86ff 55%, #fbbf24 130%);
+  --janus-gradient-aurora:
+    radial-gradient(60% 80% at 20% 0%, rgba(99, 102, 241, 0.28) 0%, transparent 70%),
+    radial-gradient(50% 70% at 85% 10%, rgba(245, 158, 11, 0.18) 0%, transparent 70%);
+  --janus-gradient-sheen: linear-gradient(180deg, rgba(236, 238, 251, 0.05) 0%, rgba(236, 238, 251, 0) 100%);
+
+  /* Charts — distinguishable without relying on hue alone */
+  --janus-chart-1: #7c86ff;
+  --janus-chart-2: #fbbf24;
+  --janus-chart-3: #2dd4bf;
+  --janus-chart-4: #e879f9;
+  --janus-chart-5: #38bdf8;
+  --janus-chart-6: #a3e635;
+  --janus-chart-7: #fb7185;
+  --janus-chart-8: #c4b5fd;
+  --janus-chart-axis: #333a5c;
+  --janus-chart-grid: rgba(51, 58, 92, 0.45);
+
+  /* Elevation */
+  --janus-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(236, 238, 251, 0.04);
+  --janus-shadow-2: 0 4px 12px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(236, 238, 251, 0.05);
+  --janus-shadow-3: 0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(236, 238, 251, 0.06);
+  --janus-shadow-4: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --janus-glow-primary: 0 0 0 1px rgba(124, 134, 255, 0.35), 0 0 24px rgba(99, 102, 241, 0.28);
+  --janus-glow-accent: 0 0 0 1px rgba(251, 191, 36, 0.35), 0 0 24px rgba(245, 158, 11, 0.25);
+
+  --janus-state-hover: rgba(236, 238, 251, 0.06);
+  --janus-state-active: rgba(236, 238, 251, 0.12);
+  --janus-state-selected: rgba(124, 134, 255, 0.16);
+  --janus-focus-ring-offset-color: #08090f;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --janus-color-bg-canvas: #f7f8fc;
+  --janus-color-bg-sunken: #eff1f8;
+  --janus-color-bg-surface: #ffffff;
+  --janus-color-bg-surface-raised: #ffffff;
+  --janus-color-bg-surface-overlay: #ffffff;
+  --janus-color-bg-surface-hover: #f2f4fb;
+  --janus-color-bg-surface-active: #e8ebf7;
+  --janus-color-bg-scrim: rgba(14, 16, 24, 0.44);
+
+  --janus-color-border-subtle: #edeff7;
+  --janus-color-border-default: #e2e5f0;
+  --janus-color-border-strong: #cbd0e3;
+  --janus-color-border-focus: #4f46e5;
+
+  --janus-color-text-primary: #12141f;
+  --janus-color-text-secondary: #454b66;
+  --janus-color-text-muted: #5f6786;
+  --janus-color-text-disabled: #9aa0b8;
+  --janus-color-text-inverse: #eceefb;
+  --janus-color-text-link: #4338ca;
+  --janus-color-text-code: #92400e;
+
+  --janus-color-primary-bg: #4f46e5;
+  --janus-color-primary-bg-hover: #4338ca;
+  --janus-color-primary-bg-active: #3730a3;
+  --janus-color-primary-subtle: rgba(79, 70, 229, 0.1);
+  --janus-color-primary-border: #4f46e5;
+  --janus-color-primary-fg: #ffffff;
+  --janus-color-primary-on-subtle: #3730a3;
+
+  --janus-color-accent-bg: #b45309;
+  --janus-color-accent-bg-hover: #92400e;
+  --janus-color-accent-subtle: rgba(245, 158, 11, 0.14);
+  --janus-color-accent-fg: #ffffff;
+  --janus-color-accent-on-subtle: #92400e;
+
+  --janus-color-success-bg: rgba(5, 150, 105, 0.1);
+  --janus-color-success-solid: #059669;
+  --janus-color-success-fg: #047857;
+  --janus-color-success-border: #10b981;
+  --janus-color-warning-bg: rgba(245, 158, 11, 0.14);
+  --janus-color-warning-solid: #b45309;
+  --janus-color-warning-fg: #92400e;
+  --janus-color-warning-border: #d97706;
+  --janus-color-danger-bg: rgba(220, 38, 38, 0.1);
+  --janus-color-danger-solid: #dc2626;
+  --janus-color-danger-fg: #b91c1c;
+  --janus-color-danger-border: #ef4444;
+  --janus-color-info-bg: rgba(37, 99, 235, 0.1);
+  --janus-color-info-solid: #2563eb;
+  --janus-color-info-fg: #1d4ed8;
+  --janus-color-info-border: #3b82f6;
+
+  --janus-gradient-brand: linear-gradient(135deg, #4f46e5 0%, #6366f1 55%, #d97706 130%);
+  --janus-gradient-aurora:
+    radial-gradient(60% 80% at 20% 0%, rgba(99, 102, 241, 0.14) 0%, transparent 70%),
+    radial-gradient(50% 70% at 85% 10%, rgba(245, 158, 11, 0.1) 0%, transparent 70%);
+  --janus-gradient-sheen: linear-gradient(180deg, rgba(18, 20, 31, 0.03) 0%, rgba(18, 20, 31, 0) 100%);
+
+  --janus-chart-1: #4f46e5;
+  --janus-chart-2: #b45309;
+  --janus-chart-3: #0f766e;
+  --janus-chart-4: #a21caf;
+  --janus-chart-5: #0369a1;
+  --janus-chart-6: #4d7c0f;
+  --janus-chart-7: #be123c;
+  --janus-chart-8: #6d28d9;
+  --janus-chart-axis: #cbd0e3;
+  --janus-chart-grid: rgba(203, 208, 227, 0.6);
+
+  --janus-shadow-1: 0 1px 2px rgba(18, 20, 31, 0.06);
+  --janus-shadow-2: 0 4px 12px rgba(18, 20, 31, 0.08);
+  --janus-shadow-3: 0 12px 32px rgba(18, 20, 31, 0.1);
+  --janus-shadow-4: 0 24px 64px rgba(18, 20, 31, 0.14);
+  --janus-glow-primary: 0 0 0 1px rgba(79, 70, 229, 0.35), 0 0 20px rgba(79, 70, 229, 0.16);
+  --janus-glow-accent: 0 0 0 1px rgba(180, 83, 9, 0.3), 0 0 20px rgba(217, 119, 6, 0.14);
+
+  --janus-state-hover: rgba(18, 20, 31, 0.04);
+  --janus-state-active: rgba(18, 20, 31, 0.08);
+  --janus-state-selected: rgba(79, 70, 229, 0.1);
+  --janus-focus-ring-offset-color: #f7f8fc;
+}
+
+:root {
+  /* Typography */
+  --janus-font-sans: 'Inter var', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --janus-font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --janus-text-3xs: 0.6875rem;
+  --janus-text-2xs: 0.75rem;
+  --janus-text-xs: 0.8125rem;
+  --janus-text-sm: 0.875rem;
+  --janus-text-md: 0.9375rem;
+  --janus-text-lg: 1.0625rem;
+  --janus-text-xl: 1.25rem;
+  --janus-text-2xl: 1.5rem;
+  --janus-text-3xl: 1.875rem;
+  --janus-text-4xl: 2.375rem;
+  --janus-leading-tight: 1.15;
+  --janus-leading-snug: 1.3;
+  --janus-leading-normal: 1.5;
+
+  /* Spacing (4px base) */
+  --janus-space-1: 4px;
+  --janus-space-2: 8px;
+  --janus-space-3: 12px;
+  --janus-space-4: 16px;
+  --janus-space-5: 20px;
+  --janus-space-6: 24px;
+  --janus-space-8: 32px;
+  --janus-space-10: 40px;
+  --janus-space-12: 48px;
+  --janus-space-16: 64px;
+
+  --janus-card-padding: 20px;
+  --janus-page-gutter: 24px;
+
+  /* Radii */
+  --janus-radius-xs: 4px;
+  --janus-radius-sm: 6px;
+  --janus-radius-md: 8px;
+  --janus-radius-lg: 12px;
+  --janus-radius-xl: 16px;
+  --janus-radius-2xl: 24px;
+  --janus-radius-pill: 9999px;
+
+  /* Motion */
+  --janus-duration-instant: 80ms;
+  --janus-duration-fast: 120ms;
+  --janus-duration-normal: 200ms;
+  --janus-duration-slow: 320ms;
+  --janus-duration-slower: 560ms;
+  --janus-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --janus-ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --janus-ease-emphasized: cubic-bezier(0.2, 0, 0, 1.2);
+
+  /* Layout */
+  --janus-sidebar-width: 256px;
+  --janus-sidebar-rail: 72px;
+  --janus-topbar-height: 56px;
+  --janus-bottom-nav-height: 62px;
+  --janus-touch-target: 44px;
+  --janus-row-height: 48px;
+
+  /* Z-index scale */
+  --janus-z-ambient: -1;
+  --janus-z-sticky: 100;
+  --janus-z-dropdown: 400;
+  /* Scrim must sit BELOW the drawer (and the modal) so overlay panels stay
+   * crisp while the page behind them is blurred/dimmed. Invariant enforced by
+   * web/src/components/ui.test.tsx: z-scrim < z-drawer < z-modal. */
+  --janus-z-scrim: 600;
+  --janus-z-drawer: 700;
+  --janus-z-modal: 810;
+  --janus-z-tooltip: 950;
+  --janus-z-toast: 1000;
+}
+
+[data-density='compact'] {
+  --janus-row-height: 36px;
+  --janus-card-padding: 14px;
+}
+
+/*
+ * Reduced motion is a first-class alternate experience, not a degraded one:
+ * layout, spacing, and colour are byte-identical — only animation is removed.
+ */
+[data-motion='reduced'] *,
+[data-motion='reduced'] *::before,
+[data-motion='reduced'] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}

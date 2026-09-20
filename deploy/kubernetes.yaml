@@ -1,0 +1,112 @@
+# Single-node SQLite example. Create secret janus first; see deploy/README.md.
+# ClusterIP only: complete administrator setup over a loopback port-forward.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: janus-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: janus
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: janus
+  template:
+    metadata:
+      labels:
+        app: janus
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: janus
+          image: ghcr.io/torvanis/janus:2026.9.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: JANUS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: janus
+                  key: JANUS_ENCRYPTION_KEY
+            - name: JANUS_DATABASE_URL
+              value: sqlite:///data/janus.db
+            - name: JANUS_PUBLIC_URL
+              value: http://127.0.0.1:8080
+            - name: JANUS_DEV_AUTH
+              value: "false"
+            - name: JANUS_COOKIE_SECURE
+              value: "false"
+            - name: JANUS_ENV
+              value: production
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: janus-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: janus
+spec:
+  type: ClusterIP
+  selector:
+    app: janus
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,0 +1,87 @@
+.team-dashboard-context,
+.team-dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.team-dashboard-context {
+  margin-top: 12px;
+  color: var(--janus-text-secondary);
+  font-size: 13px;
+}
+.team-dashboard-actions {
+  justify-content: flex-end;
+}
+.team-dashboard-pending {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--janus-warning, #b7791f);
+  border-radius: 8px;
+  background: var(--janus-bg-secondary, #f8f7fc);
+  color: var(--janus-text-primary);
+  font-weight: 650;
+  text-decoration: none;
+}
+.team-dashboard-pending::before {
+  content: '!';
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #9b5800;
+  color: #fff;
+  font-size: 13px;
+}
+.team-dashboard-chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.team-dashboard-chart-toolbar h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.team-dashboard-chart-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.team-dashboard .card h2 {
+  font-size: 16px;
+}
+.team-dashboard .tile-value {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .team-dashboard .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .team-dashboard-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .team-dashboard .grid-halves {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .team-dashboard .grid-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .team-dashboard-chart-toolbar label {
+    flex-wrap: wrap;
+  }
+  .team-dashboard .card {
+    min-width: 0;
+  }
+  .team-dashboard .btn,
+  .team-dashboard .select {
+    min-height: 44px;
+  }
+}

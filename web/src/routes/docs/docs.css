@@ -1,0 +1,282 @@
+.docs {
+  min-height: 100dvh;
+  background: var(--janus-color-bg-canvas);
+}
+
+.docs-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--janus-z-sticky);
+  height: var(--janus-topbar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--janus-space-3);
+  padding: 0 var(--janus-page-gutter);
+  border-bottom: 1px solid var(--janus-color-border-default);
+  background: color-mix(in srgb, var(--janus-color-bg-canvas) 88%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.docs-brand {
+  font-weight: 700;
+  font-size: var(--janus-text-lg);
+  letter-spacing: -0.02em;
+  color: var(--janus-color-text-primary);
+  text-decoration: none;
+}
+.docs-brand:hover {
+  text-decoration: none;
+}
+
+.docs-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--janus-space-8);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--janus-space-6) var(--janus-page-gutter) var(--janus-space-16);
+}
+
+.docs-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: calc(var(--janus-topbar-height) + var(--janus-space-6));
+  align-self: start;
+  max-height: calc(100dvh - var(--janus-topbar-height) - var(--janus-space-8));
+  overflow-y: auto;
+}
+
+.docs-link {
+  display: block;
+  padding: 7px var(--janus-space-3);
+  border-radius: var(--janus-radius-sm);
+  color: var(--janus-color-text-secondary);
+  font-size: var(--janus-text-sm);
+  text-decoration: none;
+  min-height: 36px;
+}
+.docs-link:hover {
+  background: var(--janus-state-hover);
+  color: var(--janus-color-text-primary);
+  text-decoration: none;
+}
+.docs-link-active {
+  background: var(--janus-state-selected);
+  color: var(--janus-color-text-primary);
+  font-weight: 500;
+}
+
+.docs-article {
+  max-width: 76ch;
+}
+.docs-article h1 {
+  font-size: var(--janus-text-3xl);
+  letter-spacing: -0.02em;
+  margin-bottom: var(--janus-space-3);
+}
+.docs-article h2 {
+  font-size: var(--janus-text-xl);
+  margin-top: var(--janus-space-8);
+  margin-bottom: var(--janus-space-3);
+  scroll-margin-top: calc(var(--janus-topbar-height) + var(--janus-space-4));
+}
+.docs-article p {
+  color: var(--janus-color-text-secondary);
+  line-height: 1.65;
+}
+.docs-article section {
+  scroll-margin-top: calc(var(--janus-topbar-height) + var(--janus-space-4));
+}
+.docs-article code {
+  background: var(--janus-color-bg-sunken);
+  border: 1px solid var(--janus-color-border-subtle);
+  border-radius: var(--janus-radius-xs);
+  padding: 1px 5px;
+  font-size: 0.92em;
+}
+.docs-article .code-block code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.docs-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--janus-space-3);
+  margin-top: var(--janus-space-12);
+  padding-top: var(--janus-space-4);
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+
+.docs-nav-toggle {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .docs-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .docs-nav {
+    display: none;
+    position: static;
+    max-height: none;
+    padding: var(--janus-space-3);
+    border: 1px solid var(--janus-color-border-default);
+    border-radius: var(--janus-radius-lg);
+    background: var(--janus-color-bg-surface);
+    margin-bottom: var(--janus-space-4);
+  }
+  .docs-nav-open {
+    display: flex;
+  }
+  .docs-nav-toggle {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 600px) {
+  .hide-xs {
+    display: none;
+  }
+}
+
+/* --- Pricing tables (per-modality layouts) ---------------------------------
+   One component, five shapes: the variant class carries what differs per
+   billing model — a per-minute accent for transcription, a provider-unit
+   column for voice, grouped model blocks with modality pills for image and
+   realtime — while the token grid stays plain. */
+.docs-pricing {
+  margin: var(--janus-space-4) 0 0;
+}
+.docs-pricing-caption {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--janus-space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--janus-space-2);
+}
+.docs-pricing-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.docs-pricing-unit {
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+}
+.docs-pricing-wrap {
+  border: 1px solid var(--janus-color-border-default);
+}
+.docs-pricing-table th[scope='col'] {
+  position: static;
+}
+.docs-pricing-table th[scope='row'] {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--janus-color-border-subtle);
+  font-size: var(--janus-text-sm);
+  color: var(--janus-color-text-primary);
+}
+.docs-pricing-label-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--janus-space-2);
+  flex-wrap: wrap;
+}
+.docs-pricing-figure {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.docs-pricing-highlight {
+  white-space: normal;
+  font-weight: 600;
+  color: var(--janus-color-text-primary);
+  background: var(--janus-color-primary-subtle);
+}
+.docs-pricing-footnote {
+  margin: var(--janus-space-2) 0 0;
+}
+
+/* Grouped variants: each model is a block; sub-rows indent under the model
+   name with only their modality pill, and a stronger rule separates blocks. */
+.docs-pricing-group-start th[scope='row'],
+.docs-pricing-group-start td {
+  border-top: 2px solid var(--janus-color-border-strong);
+}
+.docs-pricing-sub th[scope='row'] .docs-pricing-label-inner {
+  padding-left: var(--janus-space-6);
+}
+.docs-pricing-sub th[scope='row'],
+.docs-pricing-sub td {
+  background: var(--janus-color-bg-sunken);
+}
+
+/* Voice: the provider-unit column is descriptive prose, not a figure. */
+.docs-pricing-voice .docs-pricing-table td:nth-child(2),
+.docs-pricing-voice .docs-pricing-table td:nth-child(3) {
+  color: var(--janus-color-text-secondary);
+  font-size: var(--janus-text-xs);
+  text-align: left;
+  white-space: normal;
+}
+.docs-pricing-voice .docs-pricing-table th:nth-child(2),
+.docs-pricing-voice .docs-pricing-table th:nth-child(3) {
+  text-align: left;
+}
+
+/* Transcription: per-minute is the headline unit, so that column leads with
+   a warm accent rail; the use-case column reads as text. */
+.docs-pricing-transcription .docs-pricing-table th:nth-child(2),
+.docs-pricing-transcription .docs-pricing-table td:nth-child(2) {
+  text-align: left;
+  color: var(--janus-color-text-secondary);
+  white-space: normal;
+}
+.docs-pricing-transcription .docs-pricing-table th:nth-child(3),
+.docs-pricing-transcription .docs-pricing-table td:nth-child(3) {
+  border-left: 3px solid var(--janus-color-warning-border);
+}
+
+/* Realtime: audio rows carry the accent, since they dominate the bill. */
+.docs-pricing-realtime .docs-pricing-highlight {
+  background: var(--janus-color-warning-bg);
+}
+
+/* Image: output is what a picture costs. */
+.docs-pricing-image .docs-pricing-highlight {
+  background: var(--janus-color-primary-subtle);
+}
+
+/* Transcription highlights share the per-minute accent. */
+.docs-pricing-transcription .docs-pricing-highlight {
+  background: var(--janus-color-warning-bg);
+}
+
+/* Narrow screens: the table scrolls sideways inside its wrapper; the model
+   column stays pinned so a row keeps its label while the figures scroll,
+   and the clipped edge itself is the scroll affordance. */
+@media (max-width: 720px) {
+  .docs-pricing-sub th[scope='row'] .docs-pricing-label-inner {
+    padding-left: var(--janus-space-3);
+  }
+  .docs-pricing-table th[scope='row'],
+  .docs-pricing-table thead th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--janus-color-bg-surface);
+    box-shadow: 1px 0 0 var(--janus-color-border-default);
+  }
+  .docs-pricing-sub th[scope='row'] {
+    background: var(--janus-color-bg-sunken);
+  }
+}

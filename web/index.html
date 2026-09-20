@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="Janus — authenticated, metered gateway for corporate AI access." />
+    <title>Janus</title>
+    <script>
+      // Resolve theme and motion before first paint so there is never a flash of
+      // the wrong appearance, and reduced-motion users never see an animation.
+      (function () {
+        try {
+          var theme = localStorage.getItem('janus.theme') || 'system';
+          var resolved =
+            theme === 'system'
+              ? window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+              : theme;
+          document.documentElement.setAttribute('data-theme', resolved);
+
+          var motion = localStorage.getItem('janus.motion') || 'system';
+          var reduced =
+            motion === 'reduced' ||
+            (motion === 'system' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          document.documentElement.setAttribute('data-motion', reduced ? 'reduced' : 'full');
+
+          var density = localStorage.getItem('janus.density') || 'comfortable';
+          document.documentElement.setAttribute('data-density', density);
+        } catch (e) {
+          /* storage unavailable: defaults in the markup already apply */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
