@@ -31,6 +31,7 @@ const mocked = vi.mocked(api);
 
 function doc(overrides: Partial<LicenseDocument['license']> = {}, seatsUsed = 3): LicenseDocument {
   return {
+    license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' },
     license: {
       installed: false,
       edition: 'community',
@@ -203,6 +204,14 @@ function renderBanner() {
 }
 
 describe('LicenseBanner', () => {
+  it.each(['revoked', 'subscription_attention', 'stale', 'network'])('shows %s attention even for a valid signed key', (reason) => {
+    sessionMe = { role: 'admin', license: { edition: 'business', status: 'valid', restricted: false, features: [], renewal_notice: { suppress_expiring: false, reason } } };
+    renderBanner();
+    expect(screen.getByRole('status').textContent).toMatch(/administrator/);
+    expect(screen.getByRole('link', { name: 'Manage license' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
+
   afterEach(() => {
     cleanup();
     sessionMe = null;

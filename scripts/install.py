@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checksum-verified Linux archive installer; never starts a service.
 
-Online: python3 install.py --version 2026.9.1
+Online: python3 install.py --version 2026.9.2
 Offline: python3 install.py --archive FILE --checksums SHA256SUMS
 Checksums detect corruption, not a compromised release publisher.
 """
@@ -96,7 +96,7 @@ def install(archive, checksums, prefix):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default="2026.9.1")
+    parser.add_argument("--version", default="2026.9.2")
     parser.add_argument("--prefix", type=Path, default=Path.home() / ".local")
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--checksums", type=Path)

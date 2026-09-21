@@ -49,6 +49,11 @@ type Config struct {
 	// LicenseFile is an optional path to a JANUS-LICENSE-1 key file; when set
 	// and present it takes precedence over a key installed via Admin → System.
 	LicenseFile string
+	// LicenseSync nil leaves UI/database opt-in authoritative (default off).
+	// An explicitly supplied boolean pins runtime state, including false.
+	LicenseSync         *bool
+	LicenseSyncToken    string `json:"-"`
+	LicenseSyncTokenSet bool
 	// UpdateCheck enables the daily, opt-in version check against
 	// janusedge.com. Forced off by Offline.
 	UpdateCheck bool
@@ -298,6 +303,18 @@ func Load() (*Config, error) {
 	c.DatabaseURLDefaulted = strings.TrimSpace(os.Getenv("JANUS_DATABASE_URL")) == ""
 
 	var err error
+	if raw, supplied := os.LookupEnv("JANUS_LICENSE_SYNC"); supplied {
+		v, parseErr := strconv.ParseBool(strings.TrimSpace(raw))
+		if parseErr != nil {
+			return nil, fmt.Errorf("JANUS_LICENSE_SYNC must be a boolean")
+		}
+		c.LicenseSync = &v
+	}
+	c.LicenseSyncToken, c.LicenseSyncTokenSet = os.LookupEnv("JANUS_LICENSE_SYNC_TOKEN")
+	c.LicenseSyncToken = strings.TrimSpace(c.LicenseSyncToken)
+	if len(c.LicenseSyncToken) > 4096 || strings.ContainsAny(c.LicenseSyncToken, "\r\n	 ") {
+		return nil, fmt.Errorf("JANUS_LICENSE_SYNC_TOKEN has invalid format")
+	}
 	if c.SMTPPort, err = envInt("JANUS_SMTP_PORT", 587); err != nil {
 		return nil, err
 	}

@@ -174,6 +174,11 @@ func run() error {
 		return err
 	}
 
+	licenseSync := license.NewSync(licenseMgr, db, cipher, license.SyncOptions{
+		Offline: cfg.Offline, Enabled: cfg.LicenseSync, Token: cfg.LicenseSyncToken, TokenSet: cfg.LicenseSyncTokenSet,
+	})
+	go licenseSync.Run(ctx)
+
 	// The shared outbound client (discovery, alert webhooks, OIDC) must trust
 	// the JANUS_CA_BUNDLE roots just like the proxy transport does, or every
 	// call to an internally-signed endpoint fails with x509 errors.
@@ -263,21 +268,22 @@ func run() error {
 		Store:  db,
 		// Built here rather than lazily in Handler() because the instance
 		// heartbeat feeds it the replica count before the first request.
-		RateLimits: quota.NewRateLimiter(),
-		Sessions:   auth.NewDBSessionStore(db, cfg.SessionTTL, cfg.SessionIdleTimeout),
-		OIDC:       oidcProvider,
-		Registry:   registry,
-		Cipher:     cipher,
-		Quota:      quotaEngine,
-		Metrics:    metrics,
-		Trace:      otlp,
-		Alerts:     alerts,
-		Discovery:  discoverySvc,
-		License:    licenseMgr,
-		Updates:    updater,
-		Logger:     logger,
-		WebAssets:  webAssets,
-		StartedAt:  time.Now().UTC(),
+		RateLimits:  quota.NewRateLimiter(),
+		Sessions:    auth.NewDBSessionStore(db, cfg.SessionTTL, cfg.SessionIdleTimeout),
+		OIDC:        oidcProvider,
+		Registry:    registry,
+		Cipher:      cipher,
+		Quota:       quotaEngine,
+		Metrics:     metrics,
+		Trace:       otlp,
+		Alerts:      alerts,
+		Discovery:   discoverySvc,
+		License:     licenseMgr,
+		LicenseSync: licenseSync,
+		Updates:     updater,
+		Logger:      logger,
+		WebAssets:   webAssets,
+		StartedAt:   time.Now().UTC(),
 		// Troubleshooting mode: captures only while an admin has enabled a
 		// session; the recorder itself is inert otherwise.
 		Troubleshoot: troubleshoot.New(db, cipher, cfg.TroubleshootDir, logger),

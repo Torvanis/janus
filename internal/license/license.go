@@ -46,6 +46,7 @@ var EnterpriseFeatures = append(append([]string{}, BusinessFeatures...),
 // Claims is the signed payload.
 type Claims struct {
 	KeyID            string     `json:"key_id"`
+	BillingMode      string     `json:"billing_mode,omitempty"` // absent means legacy live; sandbox uses isolated signer trust
 	LicenseID        string     `json:"license_id"`
 	Org              string     `json:"org"`
 	IssuedTo         string     `json:"issued_to"`
@@ -66,6 +67,9 @@ type Claims struct {
 
 // Validate checks structural sanity of claims before signing.
 func (c *Claims) Validate() error {
+	if c.BillingMode != "" && c.BillingMode != "live" && c.BillingMode != "sandbox" {
+		return errors.New("license: bad billing_mode")
+	}
 	switch c.Edition {
 	case EditionCommunity, EditionBusiness, EditionEnterprise:
 	default:

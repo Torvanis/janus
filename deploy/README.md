@@ -26,8 +26,9 @@ intend to delete it. Compose builds the image locally from this source checkout.
 
 Build the Dockerfile, push the resulting image to a registry your cluster can
 access, and replace the `image:` value in `deploy/kubernetes.yaml` with that
-image (preferably pinned by digest) before applying it. The registry reference
-in the template is illustrative; this source release does not publish an image.
+image (preferably pinned by digest) before applying it. The template references
+`ghcr.io/torvanis/janus:2026.9.2`; registry authorization may be required to
+pull it, or build and push your own image from this checkout.
 
 Requires a default StorageClass supporting filesystem volumes and `fsGroup`,
 and permission to create resources in your chosen namespace. This example does
@@ -56,17 +57,18 @@ stable across upgrades, replicas, restores, and database migrations.
 ## Standalone archives
 
 Python 3.9+ is needed for the installer and local launcher. The gateway binary
-itself has no Python dependency. For this source release, build the Linux
-archives and installer locally with `make release`, then install from `dist/`:
+itself has no Python dependency. Prebuilt Linux amd64/arm64 archives, `install.py`,
+and `SHA256SUMS` are attached to each GitHub release; `python3 install.py --version 2026.9.2`
+downloads and verifies them. To build the archives and installer locally instead,
+run `make release` and install from `dist/`:
 
 ```sh
 make release
-python3 dist/install.py --archive dist/janus_2026.9.1_linux_amd64.tar.gz --checksums dist/SHA256SUMS
+python3 dist/install.py --archive dist/janus_2026.9.2_linux_amd64.tar.gz --checksums dist/SHA256SUMS
 python3 ~/.local/share/janus/run-local.py --binary ~/.local/bin/janus
 ```
 
-The installer also supports `--version` for releases that provide binary assets;
-this initial source-only release does not. Inspect the installer before running it. Checksums detect
+Inspect the installer before running it. Checksums detect
 corruption, not compromise of the release publisher. Installation defaults to
 `~/.local`; `--prefix /chosen/path` changes it. No sudo, service creation, or
 automatic startup occurs. Legal notices and examples are installed under

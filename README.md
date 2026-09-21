@@ -23,26 +23,27 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.9.1
+## Release 2026.9.2
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.1`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.2`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.9.1` (registry authorization may be required); alternatively build locally using the Dockerfile below.
-- [Linux installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.1)
+- Container: `ghcr.io/torvanis/janus:2026.9.2` (registry authorization may be required); alternatively build locally using the Dockerfile below.
+- [Linux installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.2)
 - [Helm chart installation guide](charts/janus/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.1.0](https://github.com/Torvanis/janus/releases/download/v2026.9.1/janus-0.1.0.tgz)
+- [Download Helm chart 0.1.1](https://github.com/Torvanis/janus/releases/download/v2026.9.2/janus-0.1.1.tgz)
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL, and a checkout of this release (see Build from source).
-No prebuilt registry image is promised by this source release. Build the image:
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.9.2` (registry
+authorization may be required) or build the image from a checkout of this
+release (see Build from source):
 
 ```sh
-docker build -t janus:2026.9.1 .
+docker build -t janus:2026.9.2 .
 ```
 
 This starts a **local evaluation** instance;
@@ -61,7 +62,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.9.1
+  janus:2026.9.2
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -130,7 +131,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.9.1
+git checkout v2026.9.2
 make web-deps
 make verify
 make build

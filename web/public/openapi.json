@@ -1371,7 +1371,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Verified license state (edition, status valid|expiring|grace|expired|invalid, claims, effective seats/nodes/features), seats_used over the trailing 30 days, nodes_live (gateway processes that heartbeated in the last minute; over the licensed count is a warning, never a refusal), this gateway's instance_id, the configured key file path, build version and date, and `update` — the cached result of the opt-in daily version check (enabled, offline, checked_at, current, latest, notes_url, advisory, min_supported, update_available, unsupported). Community with no key reports edition community, status valid."
+            "description": "Verified license state (edition, status valid|expiring|grace|expired|invalid, claims, effective seats/nodes/features), seats_used over the trailing 30 days, nodes_live (gateway processes that heartbeated in the last minute; over the licensed count is a warning, never a refusal), this gateway's instance_id, the configured key file path, build version and date, and `update` — the cached result of the opt-in daily version check (enabled, offline, checked_at, current, latest, notes_url, advisory, min_supported, update_available, unsupported). Community with no key reports edition community, status valid. Additive license_sync exposes credential-free sync health; renewal_notice contains suppress_expiring, reason, and optional fresh_until. Suppress only ordinary expiring warnings with explicit true and a future fresh_until; never hide grace, expired or invalid states."
           }
         }
       },
@@ -1425,6 +1425,46 @@
           "200": {
             "description": "The database copy was removed; the gateway returns to Community limits unless a key file is configured."
           }
+        }
+      }
+    },
+    "/api/v1/admin/system/license/sync": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "License sync configuration and health",
+        "security": [{"sessionCookie": []}],
+        "responses": {
+          "200": {"description": "Enabled (off by default), has_token (never the token), enabled_managed and token_managed environment pins, mode manual|online|offline|file, health never|healthy|stale|error|disabled, last_attempt_at, last_success_at, fresh_until, sanitized error_code and optional subscription metadata. No network request is made by this read."}
+        }
+      },
+      "put": {
+        "tags": ["admin"],
+        "summary": "Configure opt-in automatic license sync",
+        "security": [{"sessionCookie": []}],
+        "description": "Administrator session and CSRF required. Adding a token does not enable sync. Environment-managed fields are read-only. Offline overrides remote sync; mounted key files are never written.",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "enabled": {"type": "boolean"},
+              "token": {"type": "string", "writeOnly": true, "description": "Raw portal sync token, or license_id.token with an exact match to the installed license. Foreign identities and header text are rejected. Blank or omitted preserves the stored credential."},
+              "clear_token": {"type": "boolean", "description": "Explicitly remove stored credential; cannot combine with a nonblank token."}
+            }
+          }}}
+        },
+        "responses": {
+          "200": {"description": "Configuration saved; credentials are never returned."},
+          "400": {"description": "Invalid or contradictory settings."}
+        }
+      },
+      "post": {
+        "tags": ["admin"],
+        "summary": "Sync license now",
+        "security": [{"sessionCookie": []}],
+        "description": "Administrator session and CSRF required. Runs the configured opt-in license sync, separate from software update checking. Preserves signed expiry and grace authority.",
+        "responses": {
+          "200": {"description": "Sync result. Read configuration and license state for current health and renewal notice."}
         }
       }
     },

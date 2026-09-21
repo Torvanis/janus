@@ -17,12 +17,20 @@ const seatWindow = 30 * 24 * time.Hour
 // licenseSummary is the non-admin view: enough for the shell banner, nothing
 // a regular user shouldn't see (no org, license_id or notes).
 func (s *Server) licenseSummary() map[string]any {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if s.License != nil {
+		_ = s.License.Refresh(ctx)
+	}
+	syncState, notice := s.licenseSyncView(ctx)
 	st := s.licenseState()
+	notice = noticeForLicense(st, syncState, notice)
 	features := st.Features
 	if features == nil {
 		features = []string{}
 	}
 	out := map[string]any{"edition": st.Edition, "status": st.Status, "restricted": st.Restricted(), "features": features}
+	out["renewal_notice"] = notice
 	if st.ExpiresAt != nil {
 		out["expires_at"] = st.ExpiresAt
 	}
@@ -58,7 +66,12 @@ func (s *Server) checkSeatAvailable(ctx context.Context) error {
 
 // handleGetLicense returns the full license state plus seat and node usage.
 func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
+	if s.License != nil {
+		_ = s.License.Refresh(r.Context())
+	}
+	syncState, notice := s.licenseSyncView(r.Context())
 	st := s.licenseState()
+	notice = noticeForLicense(st, syncState, notice)
 	used, err := s.seatsUsed(r)
 	if err != nil {
 		WriteError(w, r, err)
@@ -75,16 +88,18 @@ func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"license":     st,
-		"seats_used":  used,
-		"nodes_live":  liveNodes,
-		"seat_window": "30d",
-		"instance_id": instanceID,
-		"file":        s.Config.LicenseFile,
-		"version":     s.Config.BuildVersion,
-		"build_date":  s.Config.BuildDate,
-		"portal_url":  "https://janusedge.com/portal",
-		"update":      s.updateResult(),
+		"license":        st,
+		"seats_used":     used,
+		"nodes_live":     liveNodes,
+		"seat_window":    "30d",
+		"instance_id":    instanceID,
+		"file":           s.Config.LicenseFile,
+		"version":        s.Config.BuildVersion,
+		"build_date":     s.Config.BuildDate,
+		"portal_url":     "https://janusedge.com/portal",
+		"update":         s.updateResult(),
+		"license_sync":   syncState,
+		"renewal_notice": notice,
 	})
 }
 

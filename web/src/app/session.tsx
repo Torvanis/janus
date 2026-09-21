@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import type { Me } from '../lib/types';
+import { LICENSE_POLL_MS } from '../lib/licenseNotice';
 
 export interface PublicConfig {
   public_url: string;
@@ -44,6 +45,8 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactNod
     queryFn: () => api.get<Me>('/api/v1/me'),
     retry: false,
     staleTime: 30_000,
+    refetchInterval: (query) => (query.state.data ? LICENSE_POLL_MS : false),
+    refetchIntervalInBackground: true,
   });
 
   // A 401 is the normal signed-out state, not an error to surface.

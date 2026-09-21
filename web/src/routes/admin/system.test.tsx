@@ -199,6 +199,8 @@ const communityLicense = {
 describe('A14 Database tile — sqlite backend', () => {
   beforeEach(() => {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -231,6 +233,8 @@ describe('A14 Database tile — sqlite backend', () => {
 describe('A14 Database tile — postgres backend', () => {
   beforeEach(() => {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(postgresStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -265,6 +269,8 @@ describe('A14 Database tile — no credentials in the DOM', () => {
       },
     } as SystemStatus;
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(smuggled);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -286,6 +292,8 @@ describe('A14 Database tile — no credentials in the DOM', () => {
 describe('Spend-emphasis feature flag toggle', () => {
   beforeEach(() => {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -338,6 +346,8 @@ describe('Spend-emphasis feature flag toggle', () => {
 describe('Upstream timeouts panel', () => {
   function serveStatus(status: SystemStatus) {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -468,6 +478,8 @@ describe('A14 System page — loading and error states', () => {
 
     // Retry refetches: flip the mock to succeed and the tile appears.
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -482,6 +494,8 @@ describe('A14 System page — loading and error states', () => {
 describe('Model discovery interval panel', () => {
   function serveStatus(status: SystemStatus) {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
@@ -555,6 +569,8 @@ describe('Model discovery interval panel', () => {
 describe('Metering health tile', () => {
   function serveStatus(status: SystemStatus) {
     mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);

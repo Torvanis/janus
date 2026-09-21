@@ -59,9 +59,13 @@ describe('generated changelog (gen-docs.mjs)', () => {
     }
   });
 
-  it('starts the public history with the initial public release', () => {
-    expect(CHANGELOG).toHaveLength(1);
-    const release = CHANGELOG[0];
+  it('ends the public history with the initial public release and leads with the newest', () => {
+    expect(CHANGELOG.length).toBeGreaterThanOrEqual(2);
+    const latest = CHANGELOG[0];
+    expect(latest?.version).toBe('2026.9.2');
+    expect(latest?.date).toBe('2026-09-21');
+    expect(JSON.stringify(latest)).toContain('Settings → License & updates');
+    const release = CHANGELOG[CHANGELOG.length - 1];
     expect(release?.version).toBe('2026.9.1');
     expect(release?.date).toBe('2026-09-20');
     const text = JSON.stringify(release);

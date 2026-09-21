@@ -16,6 +16,33 @@
  */
 
 export const en = {
+  licenseSync: {
+    title: 'Automatic license sync',
+    enable: 'Enable automatic license sync',
+    token: 'License sync token',
+    clear: 'Clear stored sync token',
+    save: 'Save license sync',
+    now: 'Sync now',
+    saved: 'License sync settings saved.',
+    saveError: 'Could not save license sync settings. Check the settings and try again.',
+    synced: 'License sync completed.',
+    syncError: 'License sync could not be confirmed. Check sync health and try again.',
+    intro:
+      'Off by default. Opt in to retrieve renewed monthly or annual license keys from Janus. This does not update gateway software or change signed expiry and grace limits.',
+    unsupported: 'This gateway does not support license sync. Install a renewed key manually below.',
+    unavailable: 'License sync settings are unavailable. No changes have been made.',
+    offline: 'License sync is unavailable in offline mode. Install renewed keys manually.',
+    file: 'File-backed license sync is unsupported. To opt in, deliberately remove JANUS_LICENSE_FILE from the gateway configuration, restart, and install the key in the database. Sync never writes the mounted file.',
+    enabledManaged: 'Enabled setting is environment-managed by JANUS_LICENSE_SYNC.',
+    tokenManaged: 'Token is environment-managed by JANUS_LICENSE_SYNC_TOKEN.',
+    hasToken: 'A token is configured.',
+    noToken: 'No token configured.',
+    tokenHelp: 'Leave blank to preserve the current token. Saving a token does not enable sync.',
+    healthHelp: 'Renewal could not be confirmed. Check the token, connection and subscription in the Janus portal.',
+    canceled: 'Cancellation is scheduled. Renew manually or review the subscription in the Janus portal.',
+    unconfirmed: 'Automatic renewal is not confirmed.',
+  },
+
   common: {
     loading: 'Loading',
     notSet: '-not set-',
@@ -670,6 +697,10 @@ export const en = {
     connect: 'Connect directory',
   },
   licenseBanner: {
+    revoked: 'The license service reported this key revoked. Existing signed rights are unchanged. An administrator should check the license portal and sync for a newer verified replacement, or install a replacement key manually.',
+    subscriptionAttention: 'Subscription renewal needs attention: payment may have failed or renewal may be canceled. An administrator should check billing in the license portal. Existing signed rights are unchanged.',
+    stale: 'Automatic license renewal has not been verified recently. An administrator should check sync and billing before the signed license expires.',
+    syncAttention: 'Automatic license renewal could not be verified. An administrator should check the license sync settings and retry.',
     expiring: 'Your Janus license expires {time}. Renew at the portal to keep creating new items.',
     grace: 'Your Janus license expired {time}. You are in the grace period; creation pauses after it ends.',
     expired:
@@ -1187,8 +1218,10 @@ export const en = {
       removed: 'License removed.',
       portal: 'Open the license portal',
       updatesTitle: 'Updates',
-      updatesDisabled: 'Version check is off. Set JANUS_UPDATE_CHECK=true to ask janusedge.com once a day; only the version, edition and instance id are sent.',
-      updatesOffline: 'Air-gapped (JANUS_OFFLINE): the gateway never contacts janusedge.com. Check janusedge.com/releases from another machine.',
+      updatesDisabled:
+        'Version check is off. Set JANUS_UPDATE_CHECK=true to ask janusedge.com once a day; only the version, edition and instance id are sent.',
+      updatesOffline:
+        'Air-gapped (JANUS_OFFLINE): the gateway never contacts janusedge.com. Check janusedge.com/releases from another machine.',
       updatesPending: 'Not checked yet.',
       updatesError: 'Last check failed: {error}',
       updatesCurrent: 'You are on {version}, the latest release.',

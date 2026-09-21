@@ -25,12 +25,12 @@ func (s *Store) LicenseKey(ctx context.Context) (string, error) {
 
 // PutLicenseKey stores a key that the license manager has already verified.
 func (s *Store) PutLicenseKey(ctx context.Context, key string) error {
-	return s.putSystemSetting(ctx, SettingLicenseKey, key)
+	return s.replaceManagedLicense(ctx, &key)
 }
 
 // DeleteLicenseKey removes the stored key.
 func (s *Store) DeleteLicenseKey(ctx context.Context) error {
-	return s.deleteSystemSetting(ctx, SettingLicenseKey)
+	return s.replaceManagedLicense(ctx, nil)
 }
 
 // InstanceID returns the stable instance identifier, minting one on first call.

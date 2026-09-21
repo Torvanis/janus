@@ -36,15 +36,16 @@ type Server struct {
 	Sessions auth.SessionStore
 	OIDC     *auth.OIDCProvider
 	// Registry serves admin-configured OIDC providers (Business: multi_oidc).
-	Registry   *auth.Registry
-	Cipher     *crypto.Cipher
-	Quota      *quota.Engine
-	RateLimits *quota.RateLimiter
-	Metrics    *telemetry.Metrics
-	Trace      *telemetry.OTLP
-	Alerts     *alerting.Dispatcher
-	Discovery  *discovery.Service
-	License    *license.Manager
+	Registry    *auth.Registry
+	Cipher      *crypto.Cipher
+	Quota       *quota.Engine
+	RateLimits  *quota.RateLimiter
+	Metrics     *telemetry.Metrics
+	Trace       *telemetry.OTLP
+	Alerts      *alerting.Dispatcher
+	Discovery   *discovery.Service
+	License     *license.Manager
+	LicenseSync *license.SyncEngine
 	// Updates is the opt-in version checker; nil when disabled at build.
 	Updates   *updates.Checker
 	Logger    *slog.Logger

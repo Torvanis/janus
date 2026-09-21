@@ -29,6 +29,9 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/system/license", s.handleGetLicense)
 	r.Put("/admin/system/license", s.handlePutLicense)
 	r.Delete("/admin/system/license", s.handleDeleteLicense)
+	r.Get("/admin/system/license/sync", s.handleGetLicenseSync)
+	r.Put("/admin/system/license/sync", s.handlePutLicenseSync)
+	r.Post("/admin/system/license/sync", s.handlePostLicenseSync)
 	s.mountAdminLocalAuthRoutes(r)
 	// Runtime upstream timeouts (connect / TTFB / total): view, override any
 	// hop, or revert to the environment defaults. See admin_system.go.

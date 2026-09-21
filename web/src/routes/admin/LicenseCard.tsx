@@ -6,6 +6,8 @@ import { formatDateTime, formatNumber } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Field, useToast, type Tone } from '../../components/ui';
 import { DetailRow } from '../shared';
 import { t } from '../../lib/i18n';
+import { LICENSE_POLL_MS, renewalAttention, suppressExpiring, useLicenseClock } from '../../lib/licenseNotice';
+import { LicenseSyncControls } from './LicenseSyncControls';
 
 const FEATURE_LABELS: Record<string, string> = {
   scim: 'SCIM provisioning',
@@ -128,7 +130,10 @@ export function LicenseCard(): ReactNode {
   const doc = useQuery({
     queryKey: ['admin', 'license'],
     queryFn: () => api.get<LicenseDocument>('/api/v1/admin/system/license'),
+    refetchInterval: LICENSE_POLL_MS,
+    refetchIntervalInBackground: true,
   });
+  const now = useLicenseClock(doc.data?.renewal_notice?.fresh_until);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['admin', 'license'] });
@@ -177,11 +182,13 @@ export function LicenseCard(): ReactNode {
         {(data) => {
           const lic = data.license;
           const claims = lic.claims;
+          const attention = renewalAttention(data.renewal_notice, now);
           const restricted = lic.status === 'expired' || lic.status === 'invalid';
           return (
             <div className="stack">
+              {attention ? <div className="banner banner-warning" role="status">{attention}</div> : null}
               {restricted ? <div className="banner banner-danger">{t('adminSystem.license.restrictedNotice')}</div> : null}
-              {lic.status === 'expiring' && lic.expires_at ? (
+              {lic.status === 'expiring' && lic.expires_at && !suppressExpiring(lic.status, data.renewal_notice, now) ? (
                 <div className="banner banner-warning">
                   {t('adminSystem.license.expiringNotice', { time: formatDateTime(lic.expires_at) })}
                 </div>
@@ -227,16 +234,17 @@ export function LicenseCard(): ReactNode {
                       </DetailRow>
                       {claims.site ? <DetailRow label={t('adminSystem.license.site')}>{claims.site}</DetailRow> : null}
                       <DetailRow label={t('adminSystem.license.term')}>{termLabel(claims.term)}</DetailRow>
-                      {lic.expires_at ? (
-                        <DetailRow label={t('adminSystem.license.expires')}>{formatDateTime(lic.expires_at)}</DetailRow>
-                      ) : null}
-                      {lic.grace_until && lic.status !== 'valid' ? (
-                        <DetailRow label={t('adminSystem.license.graceUntil')}>{formatDateTime(lic.grace_until)}</DetailRow>
-                      ) : null}
+
                       {claims.maintenance_until ? (
                         <DetailRow label={t('adminSystem.license.maintenanceUntil')}>{claims.maintenance_until}</DetailRow>
                       ) : null}
                     </>
+                  ) : null}
+                  {lic.expires_at ? (
+                    <DetailRow label={t('adminSystem.license.expires')}>{formatDateTime(lic.expires_at)}</DetailRow>
+                  ) : null}
+                  {lic.grace_until ? (
+                    <DetailRow label={t('adminSystem.license.graceUntil')}>{formatDateTime(lic.grace_until)}</DetailRow>
                   ) : null}
                   <DetailRow label={t('adminSystem.license.instanceId')}>
                     <code>{data.instance_id}</code>
@@ -270,6 +278,8 @@ export function LicenseCard(): ReactNode {
                   <UpdateStatus update={data.update} />
                 </div>
               </div>
+
+              <LicenseSyncControls />
 
               <form
                 className="stack"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=${VERSION:-2026.9.1}
-BUILD_DATE=${BUILD_DATE:-2026-09-20}
+VERSION=${VERSION:-2026.9.2}
+BUILD_DATE=${BUILD_DATE:-2026-09-21}
 GO=${GO:-go}
 OUTPUT=${OUTPUT:-bin/janus}
 [[ "$VERSION" =~ ^[0-9]{4}\.([1-9]|1[0-2])\.[1-9][0-9]*$ ]] || { echo "Invalid YEAR.MONTH.RELEASE_NUMBER" >&2; exit 1; }

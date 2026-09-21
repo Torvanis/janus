@@ -82,7 +82,41 @@ export interface Me {
   license?: LicenseSummary;
 }
 
+export interface RenewalNotice {
+  suppress_expiring: boolean;
+  reason: string;
+  fresh_until?: string;
+}
+
+export interface LicenseSync {
+  enabled: boolean;
+  has_token: boolean;
+  enabled_managed?: boolean;
+  token_managed?: boolean;
+  mode: 'manual' | 'online' | 'offline' | 'file';
+  health: 'never' | 'healthy' | 'stale' | 'error' | 'disabled';
+  last_attempt_at?: string;
+  last_success_at?: string;
+  fresh_until?: string;
+  error_code?: string;
+  subscription?: {
+    schema_version: number;
+    status: string;
+    auto_renew: boolean;
+    cancel_at_period_end: boolean;
+    paid_through?: string | null;
+    fresh_until?: string;
+  };
+}
+
+export interface LicenseSyncPut {
+  enabled?: boolean;
+  token?: string;
+  clear_token?: boolean;
+}
+
 export interface LicenseSummary {
+  renewal_notice?: RenewalNotice;
   edition: 'community' | 'business' | 'enterprise';
   status: 'valid' | 'expiring' | 'grace' | 'expired' | 'invalid';
   restricted: boolean;
@@ -127,6 +161,8 @@ export interface LicenseState {
 }
 
 export interface LicenseDocument {
+  renewal_notice?: RenewalNotice;
+  license_sync?: LicenseSync;
   license: LicenseState;
   seats_used: number;
   nodes_live: number;

@@ -136,7 +136,12 @@ func NewManager(file string, store Store, pubs map[string]ed25519.PublicKey, log
 func (m *Manager) State() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.state
+	st := m.state
+	if st.Claims != nil {
+		st.Status = st.Claims.StatusAt(m.now())
+		st.ClockSkew = st.Claims.Issued.After(m.now().Add(SkewTolerance))
+	}
+	return st
 }
 
 // Refresh reloads the key from file (preferred) or the database and recomputes
