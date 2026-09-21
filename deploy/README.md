@@ -26,9 +26,9 @@ intend to delete it. Compose builds the image locally from this source checkout.
 
 Build the Dockerfile, push the resulting image to a registry your cluster can
 access, and replace the `image:` value in `deploy/kubernetes.yaml` with that
-image (preferably pinned by digest) before applying it. The template references
-`ghcr.io/torvanis/janus:2026.9.2`; registry authorization may be required to
-pull it, or build and push your own image from this checkout.
+image (preferably pinned by digest) before applying it. The template references the
+public image `ghcr.io/torvanis/janus:2026.9.2`; alternatively build and push
+your own image from this checkout.
 
 Requires a default StorageClass supporting filesystem volumes and `fsGroup`,
 and permission to create resources in your chosen namespace. This example does
