@@ -892,6 +892,21 @@ JANUS_TRUSTED_PROXIES=10.0.0.0/8`,
         },
       },
       {
+        heading: 'Linux server install',
+        body: [
+          'On a Linux server with systemd, the release installer sets Janus up as a service: sudo python3 install.py --admin-email you@example.com --hostname ai.example.com. It runs as the unprivileged janus user with HTTPS on port 443, redirects port 80 to HTTPS, creates a self-signed certificate on first install, and creates the first administrator before the gateway listens beyond loopback.',
+          'Configuration, including the encryption key, lives in /etc/janus/janus.env; back it up with the database in /var/lib/janus. Apply edits with sudo systemctl restart janus. SQLite is the default and suits a single server for a small team; pass --database-url postgres://… on first install for PostgreSQL.',
+          'Replace the certificate with sudo janus-ctl cert install --cert fullchain.pem --key privkey.pem, which checks that the key matches and that the certificate has not expired, or with sudo janus-ctl cert acme --domain ai.example.com for a Let’s Encrypt certificate that renews automatically (it needs a public DNS name and port 80 reachable from the internet). sudo janus-ctl status shows the service, readiness and certificate expiry; sudo janus-ctl upgrade --version V installs another release after backing up a SQLite database.',
+        ],
+        code: {
+          language: 'bash',
+          code: `curl -fLO https://github.com/Torvanis/janus/releases/latest/download/install.py
+sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
+sudo janus-ctl cert install --cert fullchain.pem --key privkey.pem
+sudo janus-ctl status`,
+        },
+      },
+      {
         heading: 'Health and readiness',
         body: [
           'GET /healthz reports liveness with no dependency checks. GET /readyz returns 503 unless the database and identity provider are both reachable — wire it to your readiness probe so a replica never receives traffic it cannot serve.',

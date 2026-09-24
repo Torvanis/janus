@@ -268,8 +268,8 @@ class ChartTest(unittest.TestCase):
     def test_image_digest_and_tag(self):
         image = deployment(self.render())["spec"]["template"]["spec"]["containers"][0]["image"]
         self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:a4352c0fbde6e506d26be60714926e798ca36e223b124e404efd82a3e0f5a5ca")
-        image = deployment(self.render({"image": {"digest": "", "tag": "2026.9.2"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
-        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.9.2")
+        image = deployment(self.render({"image": {"digest": "", "tag": "2026.9.3"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
+        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.9.3")
 
     def test_lint_variants(self):
         for value in [{}, {"database": {"type": "sqlite"}, "postgresql": {"enabled": False}},
@@ -284,7 +284,7 @@ class ChartTest(unittest.TestCase):
             result = subprocess.run([HELM, "package", str(CHART), "--destination", temp],
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            package = Path(temp) / "janus-0.1.1.tgz"
+            package = Path(temp) / "janus-0.1.2.tgz"
             self.assertTrue(package.exists())
             self.assertEqual(self.render(), self.render(chart=package))
             if ARTIFACTS:

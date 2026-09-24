@@ -1,8 +1,8 @@
 # Janus Edge Helm chart
 
-Chart **0.1.1**, application **2026.9.2**. The chart uses semantic versioning;
+Chart **0.1.2**, application **2026.9.3**. The chart uses semantic versioning;
 the application uses `YEAR.MONTH.RELEASE_NUMBER`. The default public gateway
-image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.9.2`.
+image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.9.3`.
 A nonempty `image.digest` takes precedence over `image.tag`; clear the digest
 explicitly when selecting a different tag.
 

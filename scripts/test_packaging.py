@@ -6,6 +6,7 @@ import io
 import os
 from pathlib import Path
 import platform
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -129,6 +130,61 @@ class PackagingTests(unittest.TestCase):
                 metadata.metadata(tag, changelog, '2026-09-20')
         with self.assertRaises(ValueError):
             metadata.metadata('v2026.9.2', changelog, '2026-09-20')
+
+
+class ServerInstallTests(unittest.TestCase):
+    """Pure helpers of the server install; systemd paths are exercised on real VMs."""
+
+    def test_redirect_target_keeps_path_and_query(self):
+        self.assertEqual(installer.redirect_target('ai.example.com', '/x?a=1', 443, 'fb'), 'https://ai.example.com/x?a=1')
+        self.assertEqual(installer.redirect_target('ai.example.com:80', '/', 8443, 'fb'), 'https://ai.example.com:8443/')
+        self.assertEqual(installer.redirect_target('[2001:db8::1]', '/v1', 443, 'fb'), 'https://[2001:db8::1]/v1')
+
+    def test_redirect_target_rejects_hostile_host_and_path(self):
+        self.assertEqual(installer.redirect_target('evil.com/x@y', '/', 443, 'fb.example'), 'https://fb.example/')
+        self.assertEqual(installer.redirect_target('', '/', 443, 'fb.example'), 'https://fb.example/')
+        self.assertEqual(installer.redirect_target('a.b', '//evil.com/', 443, 'fb'), 'https://a.b/')
+
+    def test_acme_token_pattern(self):
+        self.assertTrue(installer.TOKEN_RE.match('abc_DEF-123'))
+        for bad in ('../etc/passwd', 'a/b', '', 'a.b'):
+            self.assertFalse(installer.TOKEN_RE.match(bad))
+
+    def test_hostname_and_wildcard_matching(self):
+        self.assertTrue(installer.valid_hostname('ai.example.com'))
+        self.assertTrue(installer.valid_hostname('10.0.0.5'))
+        self.assertFalse(installer.valid_hostname('bad_host!'))
+        self.assertTrue(installer.name_matches('ai.example.com', ['*.example.com']))
+        self.assertFalse(installer.name_matches('a.b.example.com', ['*.example.com']))
+        self.assertFalse(installer.name_matches('example.com', ['*.example.com']))
+
+    def test_units_bind_low_ports_without_root(self):
+        units = installer.unit_files(443)
+        service = units['janus.service']
+        self.assertIn('User=janus', service)
+        self.assertIn('AmbientCapabilities=CAP_NET_BIND_SERVICE', service)
+        self.assertIn('EnvironmentFile=/etc/janus/janus.env', service)
+        self.assertIn('--port 80 --https-port 443', units['janus-redirect.service'])
+
+    @unittest.skipUnless(shutil.which('openssl'), 'openssl not installed')
+    def test_cert_pair_check_rejects_mismatched_key(self):
+        def make(name):
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
+                            '-nodes', '-days', '2', '-subj', '/CN=' + name, '-addext', 'subjectAltName=DNS:' + name,
+                            '-keyout', str(self.path / (name + '.key')), '-out', str(self.path / (name + '.pem'))],
+                           check=True, capture_output=True)
+        make('a.example.com')
+        make('b.example.com')
+        info = installer.check_cert_pair(self.path / 'a.example.com.pem', self.path / 'a.example.com.key')
+        self.assertIn('a.example.com', info['names'])
+        self.assertTrue(info['self_signed'])
+        with self.assertRaises(installer.InstallError):
+            installer.check_cert_pair(self.path / 'a.example.com.pem', self.path / 'b.example.com.key')
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name)
 
 
 if __name__ == '__main__':

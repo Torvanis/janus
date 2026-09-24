@@ -27,7 +27,7 @@ intend to delete it. Compose builds the image locally from this source checkout.
 Build the Dockerfile, push the resulting image to a registry your cluster can
 access, and replace the `image:` value in `deploy/kubernetes.yaml` with that
 image (preferably pinned by digest) before applying it. The template references the
-public image `ghcr.io/torvanis/janus:2026.9.2`; alternatively build and push
+public image `ghcr.io/torvanis/janus:2026.9.3`; alternatively build and push
 your own image from this checkout.
 
 Requires a default StorageClass supporting filesystem volumes and `fsGroup`,
@@ -54,19 +54,63 @@ Use a secret-provided `JANUS_DATABASE_URL` for PostgreSQL and remove the SQLite
 volume only after a separately planned data migration. Keep the encryption key
 stable across upgrades, replicas, restores, and database migrations.
 
-## Standalone archives
+## Linux server (systemd)
 
-Python 3.9+ is needed for the installer and local launcher. The gateway binary
-itself has no Python dependency. Prebuilt Linux amd64/arm64 archives, `install.py`,
-and `SHA256SUMS` are attached to each GitHub release; `python3 install.py --version 2026.9.2`
-downloads and verifies them. To build the archives and installer locally instead,
-run `make release` and install from `dist/`:
+Python 3.9+ and openssl are needed for the installer. The gateway binary itself
+has no Python dependency. Prebuilt Linux amd64/arm64 archives, `install.py` and
+`SHA256SUMS` are attached to each GitHub release.
 
 ```sh
-make release
-python3 dist/install.py --archive dist/janus_2026.9.2_linux_amd64.tar.gz --checksums dist/SHA256SUMS
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.3/install.py
+sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
+```
+
+This installs a `janus` system service on any systemd distribution (tested on
+Ubuntu 24.04 and Rocky Linux 9 with SELinux enforcing):
+
+- HTTPS on port 443; port 80 answers with a 301/308 redirect to HTTPS.
+- A self-signed certificate for the hostname and the machine's addresses is
+  created on first install.
+- The first administrator is created before Janus listens beyond loopback, so
+  nobody else can claim the server. Without `--admin-email` the installer asks;
+  `--skip-admin` keeps it loopback-only until you create the administrator in
+  the browser and run `sudo janus-ctl open`.
+- Runs as the unprivileged `janus` user with `CAP_NET_BIND_SERVICE` only.
+- Configuration and the encryption key: `/etc/janus/janus.env` (back it up).
+  Data: `/var/lib/janus` (SQLite by default; `--database-url postgres://...`
+  selects PostgreSQL). SQLite suits a single server for a small team; use
+  PostgreSQL for larger or highly available deployments.
+- firewalld or an active ufw gets ports 80 and 443 opened.
+
+Certificates:
+
+```sh
+sudo janus-ctl cert install --cert fullchain.pem --key privkey.pem   # your own (add --chain if separate)
+sudo janus-ctl cert acme --domain ai.example.com --email you@example.com  # Let's Encrypt, auto-renewed
+sudo janus-ctl cert self-signed                                        # back to self-signed
+```
+
+`cert install` refuses a key that doesn't match the certificate, an expired
+certificate or an encrypted key. `cert acme` needs a public DNS name pointing at
+the server and port 80 reachable from the internet (HTTP-01); a systemd timer
+renews it. Other commands: `sudo janus-ctl status`, `sudo janus-ctl upgrade
+[--version V]` (backs up a SQLite database first and never rotates the key), and
+`sudo janus-ctl uninstall [--purge]` (keeps configuration and data unless
+`--purge`). Offline: `sudo python3 install.py --archive FILE --checksums SHA256SUMS`.
+
+## No-sudo trial
+
+`python3 install.py --user` installs into `~/.local` with no service, for a quick
+look on a laptop. It runs in the foreground on loopback only:
+
+```sh
+python3 install.py --user
 python3 ~/.local/share/janus/run-local.py --binary ~/.local/bin/janus
 ```
+
+To build the archives and installer locally instead, run `make release` and
+install from `dist/` with `--archive dist/janus_2026.9.3_linux_amd64.tar.gz
+--checksums dist/SHA256SUMS`.
 
 Inspect the installer before running it. Checksums detect
 corruption, not compromise of the release publisher. Installation defaults to

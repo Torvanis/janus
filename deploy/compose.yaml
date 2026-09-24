@@ -1,7 +1,7 @@
 name: janus
 services:
   janus:
-    image: janus:2026.9.2
+    image: janus:2026.9.3
     build:
       context: ..
     restart: unless-stopped
