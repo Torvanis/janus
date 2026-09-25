@@ -63,7 +63,7 @@ export function AdminModelsPage(): ReactNode {
       <header className="page-header">
         <div>
           <h1 className="page-title">{t('adminModels.title')}</h1>
-          <p className="page-subtitle">{t('adminModels.subtitle')}</p>
+          <p className="page-subtitle">{t(localOnly ? 'adminModels.subtitleLocalOnly' : 'adminModels.subtitle')}</p>
         </div>
       </header>
 

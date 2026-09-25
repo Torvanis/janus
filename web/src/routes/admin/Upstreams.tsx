@@ -38,6 +38,7 @@ const UPSTREAM_SORTS = {
 };
 
 export function UpstreamsPage(): ReactNode {
+  const localOnly = useLocalOnly();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [search, setSearch] = useUrlState('q', '');
@@ -121,7 +122,7 @@ export function UpstreamsPage(): ReactNode {
       <header className="page-header">
         <div>
           <h1 className="page-title">{t('adminUpstreams.title')}</h1>
-          <p className="page-subtitle">{t('adminUpstreams.subtitle')}</p>
+          <p className="page-subtitle">{t(localOnly ? 'adminUpstreams.subtitleLocalOnly' : 'adminUpstreams.subtitle')}</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
           {t('adminUpstreams.add')}

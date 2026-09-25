@@ -17,6 +17,18 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: '2026.9.4',
+    date: '2026-09-25',
+    categories: [
+      {
+        name: 'Fixed',
+        items: [
+          'Local-only mode (JANUS_LOCAL_ONLY=true) can enable newly discovered models again. The mode hides all pricing, but enabling a model that had never been priced was still refused with "Save a rate card first", leaving no way to enable it. A rate card is now required only when cost tracking is on, and the Models, Upstreams and Administration pages no longer ask local-only administrators to price models.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2026.9.3',
     date: '2026-09-24',
     categories: [

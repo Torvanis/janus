@@ -2123,8 +2123,10 @@ export const en = {
   adminOverview: {
     title: 'Administration',
     subtitle: 'Organisation-wide spend, model curation, and the limits closest to breaching.',
+    subtitleLocalOnly: 'Organisation-wide usage, model curation, and the limits closest to breaching.',
     pendingBanner: '{count} model(s) await review.',
     pendingBannerBody: 'Newly discovered models stay disabled until you price and enable them.',
+    pendingBannerBodyLocalOnly: 'Newly discovered models stay disabled until you enable them.',
     reviewNow: 'Review now',
     acrossAccounts: 'Across {count} accounts',
     // Local-only mode (JANUS_LOCAL_ONLY) replaces the Spend tile with a
@@ -2216,6 +2218,8 @@ export const en = {
     title: 'Upstreams',
     subtitle:
       'Each upstream is a provider endpoint plus an encrypted credential. Janus polls it for models, which stay disabled until you price and enable them.',
+    subtitleLocalOnly:
+      'Each upstream is a provider endpoint plus an encrypted credential. Janus polls it for models, which stay disabled until you enable them.',
     add: 'Add upstream',
     searchLabel: 'Search upstreams',
     emptyTitle: 'No upstreams configured',
@@ -2311,6 +2315,8 @@ export const en = {
     title: 'Models',
     subtitle:
       'Everything discovered across your upstreams. A model must carry a rate card before it can be enabled, so no usage can ever go uncosted.',
+    subtitleLocalOnly:
+      'Everything discovered across your upstreams. Cost tracking is off on this gateway, so models need no pricing: enable one and grant it to make it available.',
     awaitingReview: '{count} model(s) await review.',
     showThem: 'Show them',
     searchLabel: 'Search models',

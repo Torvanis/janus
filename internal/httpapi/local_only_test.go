@@ -238,3 +238,37 @@ func TestLocalOnlyUSDQuotasAreInert(t *testing.T) {
 		t.Fatalf("breached USD quota must be inert in local-only mode, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestLocalOnlyEnablesUnpricedModel: local-only mode hides every rate field,
+// so the rate-card requirement for enabling a model must not apply there —
+// otherwise a discovered model can never be enabled. Outside local-only mode
+// the requirement stands (TestAdminPatchModelEnableRequiresRateCard).
+func TestLocalOnlyEnablesUnpricedModel(t *testing.T) {
+	h := newHarness(t)
+	h.server.Config.LocalOnly = true
+	ctx := context.Background()
+	session, err := h.server.Sessions.Create(ctx, h.user.ID)
+	if err != nil {
+		t.Fatalf("create admin session: %v", err)
+	}
+	unpriced := h.seedUnpricedModel("local-only-model")
+	rec := h.doAsSession(session, http.MethodPatch, "/api/v1/admin/models/"+unpriced.ID, map[string]any{"status": "enabled"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable unpriced model in local-only mode = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err := h.store.ModelByID(ctx, unpriced.ID)
+	if err != nil || reloaded.Status != store.ModelEnabled {
+		t.Fatalf("status after enable = %v (err %v), want enabled", reloaded.Status, err)
+	}
+	if !reloaded.RateEffectiveFrom.IsZero() {
+		t.Fatalf("enabling must not invent a rate card; rate_effective_from = %v", reloaded.RateEffectiveFrom)
+	}
+
+	// The same request without local-only mode is still refused.
+	h.server.Config.LocalOnly = false
+	other := h.seedUnpricedModel("billed-model")
+	rec = h.doAsSession(session, http.MethodPatch, "/api/v1/admin/models/"+other.ID, map[string]any{"status": "enabled"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("enable unpriced model with cost tracking = %d, want 400", rec.Code)
+	}
+}

@@ -53,7 +53,7 @@ export function AdminOverview(): ReactNode {
       <header className="page-header">
         <div>
           <h1 className="page-title">{t('adminOverview.title')}</h1>
-          <p className="page-subtitle">{t('adminOverview.subtitle')}</p>
+          <p className="page-subtitle">{t(localOnly ? 'adminOverview.subtitleLocalOnly' : 'adminOverview.subtitle')}</p>
         </div>
         <div className="row">
           <RangePicker value={range} onChange={setRange} />
@@ -68,7 +68,7 @@ export function AdminOverview(): ReactNode {
                 <div className="row-between" style={{ width: '100%' }}>
                   <span>
                     <strong>{t('adminOverview.pendingBanner', { count: data.model_counts.pending_approval ?? 0 })}</strong>{' '}
-                    {t('adminOverview.pendingBannerBody')}
+                    {t(localOnly ? 'adminOverview.pendingBannerBodyLocalOnly' : 'adminOverview.pendingBannerBody')}
                   </span>
                   <Link className="btn btn-sm" to="/admin/models?status=pending_approval">
                     {t('adminOverview.reviewNow')}

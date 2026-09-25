@@ -695,7 +695,8 @@ func (s *Server) handlePatchModel(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	patch := store.ModelPatch{DisplayName: body.DisplayName, Status: body.Status, Overrides: map[string]*int64{}}
+	patch := store.ModelPatch{DisplayName: body.DisplayName, Status: body.Status, Overrides: map[string]*int64{},
+		AllowUnpriced: s.Config != nil && s.Config.LocalOnly}
 	for _, rate := range []struct {
 		name, field string
 		value       modelPatchValue[float64]

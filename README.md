@@ -23,15 +23,15 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.9.3
+## Release 2026.9.4
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.3`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.4`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.9.3` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.3): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.9.4` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.4): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.1.2](https://github.com/Torvanis/janus/releases/download/v2026.9.3/janus-0.1.2.tgz)
+- [Download Helm chart 0.1.3](https://github.com/Torvanis/janus/releases/download/v2026.9.4/janus-0.1.3.tgz)
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -42,7 +42,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.3/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.4/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -60,11 +60,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.9.3` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.9.4` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.9.3 .
+docker build -t janus:2026.9.4 .
 ```
 
 This starts a **local evaluation** instance;
@@ -83,7 +83,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.9.3
+  janus:2026.9.4
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -152,7 +152,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.9.3
+git checkout v2026.9.4
 make web-deps
 make verify
 make build

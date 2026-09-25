@@ -64,6 +64,11 @@ type ModelPatch struct {
 	Status        *string
 	Overrides     map[string]*int64
 	EffectiveFrom time.Time
+	// AllowUnpriced lets a never-priced model be enabled. Set only in
+	// local-only mode (JANUS_LOCAL_ONLY), where cost tracking is off and the
+	// UI hides every rate field, so requiring a rate card would leave the
+	// administrator no way to enable a model.
+	AllowUnpriced bool
 }
 
 func (s *Store) PatchModel(ctx context.Context, id string, patch ModelPatch) error {
@@ -135,7 +140,7 @@ func (s *Store) updateModelMetadata(ctx context.Context, id string, patch ModelP
 			default:
 				return &ValidationError{Field: "status", Message: "Status must be enabled, disabled, or pending_approval"}
 			}
-			if *patch.Status == ModelEnabled && effective.IsZero() {
+			if *patch.Status == ModelEnabled && effective.IsZero() && !patch.AllowUnpriced {
 				return &ValidationError{Field: "status", Message: "Save a rate card first — $0 is allowed for self-hosted models"}
 			}
 		}

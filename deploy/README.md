@@ -27,7 +27,7 @@ intend to delete it. Compose builds the image locally from this source checkout.
 Build the Dockerfile, push the resulting image to a registry your cluster can
 access, and replace the `image:` value in `deploy/kubernetes.yaml` with that
 image (preferably pinned by digest) before applying it. The template references the
-public image `ghcr.io/torvanis/janus:2026.9.3`; alternatively build and push
+public image `ghcr.io/torvanis/janus:2026.9.4`; alternatively build and push
 your own image from this checkout.
 
 Requires a default StorageClass supporting filesystem volumes and `fsGroup`,
@@ -61,7 +61,7 @@ has no Python dependency. Prebuilt Linux amd64/arm64 archives, `install.py` and
 `SHA256SUMS` are attached to each GitHub release.
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.3/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.4/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -109,7 +109,7 @@ python3 ~/.local/share/janus/run-local.py --binary ~/.local/bin/janus
 ```
 
 To build the archives and installer locally instead, run `make release` and
-install from `dist/` with `--archive dist/janus_2026.9.3_linux_amd64.tar.gz
+install from `dist/` with `--archive dist/janus_2026.9.4_linux_amd64.tar.gz
 --checksums dist/SHA256SUMS`.
 
 Inspect the installer before running it. Checksums detect

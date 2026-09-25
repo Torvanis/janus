@@ -41,7 +41,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_VERSION = "2026.9.3"
+DEFAULT_VERSION = "2026.9.4"
 RELEASES = "https://github.com/Torvanis/janus/releases/download"
 
 # Server layout (FHS). Configuration and data survive upgrade and uninstall.

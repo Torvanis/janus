@@ -2,8 +2,8 @@ apiVersion: v2
 name: janus
 description: Janus Edge AI gateway with optional single-instance PostgreSQL
 type: application
-version: 0.1.2
-appVersion: "2026.9.3"
+version: 0.1.3
+appVersion: "2026.9.4"
 kubeVersion: ">=1.25.0-0"
 home: https://janusedge.com
 sources:
