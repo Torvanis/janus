@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import type { AdminUserRow, Model, QuotaStatus, RateLimitRule, Team } from '../../lib/types';
 import { formatDateTime, formatNumber, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Field, Modal, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useUrlState } from '../../lib/hooks';
 import { FilterSelect, SortHeader } from '../shared';
 import { t } from '../../lib/i18n';
@@ -177,10 +178,10 @@ export function AdminQuotasPage(): ReactNode {
                               <Badge tone="neutral">{t('team.letFinish')}</Badge>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(quota)}>
-                              {t('tables.delete')}
-                            </button>
+                          <td>
+                            <RowActions>
+                              <IconButton icon="delete" label={t('tables.delete')} danger onClick={() => setDeleting(quota)} />
+                            </RowActions>
                           </td>
                         </tr>
                       ))}
@@ -370,21 +371,17 @@ function RateLimitsSection(): ReactNode {
                           </button>
                         </>
                       ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
+                        <RowActions>
+                          <IconButton
+                            icon="edit"
+                            label={t('adminQuotas.edit')}
                             onClick={() => {
                               setEditing(rule);
                               setEditValue(String(rule.requests_per_minute));
                             }}
-                          >
-                            {t('adminQuotas.edit')}
-                          </button>{' '}
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(rule)}>
-                            {t('tables.delete')}
-                          </button>
-                        </>
+                          />
+                          <IconButton icon="delete" label={t('tables.delete')} danger onClick={() => setDeleting(rule)} />
+                        </RowActions>
                       )}
                     </>
                   ),

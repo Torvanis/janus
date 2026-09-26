@@ -367,6 +367,10 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 	up, err := s.Store.CreateUpstream(r.Context(), strings.TrimSpace(body.Name), body.AdapterType, body.BaseURL, encrypted, crypto.Mask(body.APIKey))
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			WriteError(w, r, ErrInvalidRequest("Another upstream is already named "+strings.TrimSpace(body.Name)+". Choose a different name.").WithParam("name"))
+			return
+		}
 		WriteError(w, r, ErrInvalidRequest("That upstream could not be created: "+err.Error()))
 		return
 	}

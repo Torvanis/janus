@@ -129,7 +129,7 @@ it('leads with scope and KPIs, keeping provenance in complete data', () => {
   expect(screen.getByText(/Self scope/)).toBeTruthy();
   const detail = screen.getByText(/Complete data and provenance/).closest('details')!;
   expect(detail.open).toBe(false);
-  expect(detail.contains(screen.getByText('2026-09-10T13:00:00Z'))).toBe(true);
+  expect(detail.querySelector('time[datetime="2026-09-10T13:00:00Z"]')).toBeTruthy();
   expect(
     container.querySelector('.report-result-metrics')!.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
@@ -208,7 +208,7 @@ it('surfaces model and user mix with compact warnings while retaining every deta
   }));
   baseRender(<ReportResultView result={result} runID="mix" />);
   expect(screen.getAllByRole('img').length).toBe(3);
-  expect(screen.getByText(/2 coverage notices/).closest('details')!.open).toBe(false);
+  expect(screen.getByText(/2 notices about data coverage/).closest('details')!.open).toBe(false);
   expect(screen.getByText('Partial source coverage.')).toBeTruthy();
 });
 it('includes supplied executive KPIs and exact table details without erasing recorded money for unknown confidence', () => {
@@ -236,7 +236,12 @@ it('includes supplied executive KPIs and exact table details without erasing rec
   render(<ReportResultView result={result} runID="confidence" />);
   expect(within(screen.getByRole('region', { name: 'Overview' })).getByText('95%')).toBeTruthy();
   expect(screen.getByText(/Recorded amounts do not establish complete pricing coverage/)).toBeTruthy();
-  expect(within(screen.getByRole('table', { name: 'Report data' })).getByText('17.612345 USD')).toBeTruthy();
+  // Exact recorded value stays available on the formatted cell.
+  expect(
+    within(screen.getByRole('table', { name: 'Report data' }))
+      .getByText('$17.61')
+      .getAttribute('title'),
+  ).toBe('Exact value: 17.612345 USD');
   expect(screen.getByText('$17.61', { selector: 'strong' })).toBeTruthy();
 });
 it('keeps executive KPIs to four primary measures with a readable success rate and exact details', () => {
@@ -262,9 +267,13 @@ it('keeps executive KPIs to four primary measures with a readable success rate a
     within(overview)
       .getAllByRole('heading')
       .map((h) => h.textContent),
-  ).toEqual(['Requests', 'Recorded cost', 'Success rate', 'Active users']);
+  ).toEqual(['Requests', 'Recorded cost (USD)', 'Success rate', 'Active users']);
   expect(within(overview).getByText('90.2%').getAttribute('title')).toBe('0.901866345575 ratio');
-  expect(within(screen.getByRole('table', { name: 'Executive' })).getByText('0.901866345575 ratio')).toBeTruthy();
+  expect(
+    within(screen.getByRole('table', { name: 'Executive' }))
+      .getByText('90.2%')
+      .getAttribute('title'),
+  ).toBe('Exact value: 0.901866345575 ratio');
   expect(screen.getByText('163', { selector: '.report-result-complete *' })).toBeTruthy();
 });
 it('keeps chart text unscaled and controls touch-sized in the scoped responsive layout', () => {
@@ -489,8 +498,10 @@ it('uses whole count ticks without fractional requests', () => {
   result.rows = [{ dimensions: { day: '2026-09-02' }, values: { requests: 439 } }];
   const view = render(<ReportResultView result={result} runID="count-axis" />);
   const ticks = Array.from(view.container.querySelectorAll('.report-result-axis span'), (e) => Number(e.textContent));
-  expect(ticks).toHaveLength(3);
+  expect(ticks.length).toBeGreaterThanOrEqual(3);
   expect(ticks.every(Number.isInteger)).toBe(true);
+  // Evenly spaced round steps, e.g. 600 / 400 / 200 / 0.
+  expect(new Set(ticks.slice(1).map((tick, i) => ticks[i]! - tick)).size).toBe(1);
   expect(ticks[0]).toBeGreaterThanOrEqual(439);
 });
 
@@ -504,7 +515,7 @@ it('searches all frozen rows before paging and resets only its own offset', () =
   const table = screen.getByRole('table', { name: 'Report data' });
   expect(within(table).getAllByRole('row')).toHaveLength(2);
   expect(within(table).getByText('model-60')).toBeTruthy();
-  expect(screen.getByText('1 of 61 snapshot rows')).toBeTruthy();
+  expect(screen.getByText('1 of 61 rows')).toBeTruthy();
   const params = new URLSearchParams(screen.getByTestId('location').textContent!);
   expect(params.get('report.r.data.q')).toBe(' MODEL-60 ');
   expect(params.has('report.r.data.page')).toBe(false);
@@ -512,7 +523,7 @@ it('searches all frozen rows before paging and resets only its own offset', () =
   expect(params.get('tab')).toBe('runs');
   fireEvent.click(within(table).getByRole('button', { name: 'Explore model-60' }));
   expect(drill).toHaveBeenCalledWith('model', 'model-60');
-  expect(screen.getByRole('link', { name: 'CSV' }).getAttribute('href')).toBe('/api/v1/reports/runs/r/download?format=csv');
+  expect(screen.getByRole('link', { name: /^CSV/ }).getAttribute('href')).toBe('/api/v1/reports/runs/r/download?format=csv');
   expect(within(screen.getByRole('region', { name: 'Overview' })).getByText('3')).toBeTruthy();
 });
 
@@ -671,7 +682,7 @@ it('does not search withheld columns or hidden snapshot properties', () => {
   for (const value of ['987654', 'secrettext', 'privateproperty']) {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search Report data' }), { target: { value } });
     expect(within(screen.getByRole('table', { name: 'Report data' })).getAllByRole('row')).toHaveLength(1);
-    expect(screen.getByText('0 of 1 snapshot rows')).toBeTruthy();
+    expect(screen.getByText('0 of 1 rows')).toBeTruthy();
   }
 });
 
@@ -715,20 +726,28 @@ it('shows frozen provenance, every warning, supplied totals and all full exports
   expect(screen.getByRole('heading', { name: 'Frozen usage' })).toBeTruthy();
   expect(screen.getByText('Groups overlap; totals are deduplicated.')).toBeTruthy();
   expect(screen.getByText('Partial source coverage.')).toBeTruthy();
-  expect(screen.getByText('2026-09-10T13:00:00Z')).toBeTruthy();
-  expect(screen.getByText('2026-09-10T12:00:00Z')).toBeTruthy();
-  expect(screen.getByText('UTC')).toBeTruthy();
+  // Readable times, with the exact instant kept machine-readable.
+  expect(document.querySelector('time[datetime="2026-09-10T13:00:00Z"]')!.textContent).toMatch(/Sep 10, 2026.*1:00.*UTC/);
+  expect(document.querySelector('time[datetime="2026-09-10T12:00:00Z"]')!.textContent).toMatch(/Sep 10, 2026.*12:00.*UTC/);
+  expect(screen.getByText('Sep 1 – Sep 9, 2026')).toBeTruthy();
   expect(screen.getByText('4 source rows')).toBeTruthy();
   expect(screen.getByText('Version 1')).toBeTruthy();
-  for (const format of ['csv', 'xlsx', 'pdf', 'json']) {
-    expect(screen.getByRole('link', { name: format.toUpperCase() }).getAttribute('href')).toBe(
-      `/api/v1/reports/runs/run%2Fa%20b/download?format=${format}`,
-    );
+  const exportMenu = screen.getByText('Export').closest('details')!;
+  expect(exportMenu.className).toBe('report-result-export');
+  for (const [format, name] of [
+    ['csv', 'CSV'],
+    ['xlsx', 'Excel'],
+    ['pdf', 'PDF'],
+    ['json', 'JSON'],
+  ]) {
+    const link = within(exportMenu).getByRole('link', { name: new RegExp(`^${name ?? ''}`) });
+    expect(link.getAttribute('href')).toBe(`/api/v1/reports/runs/run%2Fa%20b/download?format=${format}`);
+    expect(link.textContent!.length).toBeGreaterThan((name ?? '').length + 10); // each format says what it contains
   }
-  expect(screen.getByText('Export all rows')).toBeTruthy();
-  expect(screen.getByText(/percentage change unavailable/i)).toBeTruthy();
+  expect(screen.getByText(/New this period \(prior 0\)/)).toBeTruthy();
   expect(document.body.textContent).not.toMatch(/Infinity|NaN/);
 });
+
 it('pages and sorts the measured rows without changing frozen totals or export scope', () => {
   const result = fixture();
   result.rows = Array.from({ length: 27 }, (_, i) => ({
@@ -745,7 +764,7 @@ it('pages and sorts the measured rows without changing frozen totals or export s
   expect(within(table).getByText('model-26')).toBeTruthy();
   fireEvent.click(within(table).getByRole('button', { name: 'Sort by Requests' }));
   expect(screen.getByText('Showing 25 of 27 · Rows 1–25')).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'CSV' }).getAttribute('href')).toBe('/api/v1/reports/runs/r/download?format=csv');
+  expect(screen.getByRole('link', { name: /^CSV/ }).getAttribute('href')).toBe('/api/v1/reports/runs/r/download?format=csv');
 });
 it('renders every section with independent pagination and methodology, safe text and zero states', () => {
   const result = fixture();

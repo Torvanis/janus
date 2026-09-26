@@ -17,8 +17,8 @@
 
 export const en = {
   licenseSync: {
-    title: 'Automatic license sync',
-    enable: 'Enable automatic license sync',
+    title: 'Automatic renewal and sync',
+    enable: 'Automatically renew and sync',
     token: 'License sync token',
     clear: 'Clear stored sync token',
     save: 'Save license sync',
@@ -28,16 +28,16 @@ export const en = {
     synced: 'License sync completed.',
     syncError: 'License sync could not be confirmed. Check sync health and try again.',
     intro:
-      'Off by default. Opt in to retrieve renewed monthly or annual license keys from Janus. This does not update gateway software or change signed expiry and grace limits.',
+      'Opt-in. Fetches each renewed license key from janusedge.com. Never updates gateway software or changes signed limits.',
     unsupported: 'This gateway does not support license sync. Install a renewed key manually below.',
     unavailable: 'License sync settings are unavailable. No changes have been made.',
     offline: 'License sync is unavailable in offline mode. Install renewed keys manually.',
     file: 'File-backed license sync is unsupported. To opt in, deliberately remove JANUS_LICENSE_FILE from the gateway configuration, restart, and install the key in the database. Sync never writes the mounted file.',
     enabledManaged: 'Enabled setting is environment-managed by JANUS_LICENSE_SYNC.',
     tokenManaged: 'Token is environment-managed by JANUS_LICENSE_SYNC_TOKEN.',
-    hasToken: 'A token is configured.',
     noToken: 'No token configured.',
-    tokenHelp: 'Leave blank to preserve the current token. Saving a token does not enable sync.',
+    tokenPlaceholder: 'Configured · leave blank to keep',
+    tokenHelp: 'Leave blank to keep it. Saving a token does not turn sync on.',
     healthHelp: 'Renewal could not be confirmed. Check the token, connection and subscription in the Janus portal.',
     canceled: 'Cancellation is scheduled. Renew manually or review the subscription in the Janus portal.',
     unconfirmed: 'Automatic renewal is not confirmed.',
@@ -697,10 +697,14 @@ export const en = {
     connect: 'Connect directory',
   },
   licenseBanner: {
-    revoked: 'The license service reported this key revoked. Existing signed rights are unchanged. An administrator should check the license portal and sync for a newer verified replacement, or install a replacement key manually.',
-    subscriptionAttention: 'Subscription renewal needs attention: payment may have failed or renewal may be canceled. An administrator should check billing in the license portal. Existing signed rights are unchanged.',
-    stale: 'Automatic license renewal has not been verified recently. An administrator should check sync and billing before the signed license expires.',
-    syncAttention: 'Automatic license renewal could not be verified. An administrator should check the license sync settings and retry.',
+    revoked:
+      'The license service reported this key revoked. Existing signed rights are unchanged. An administrator should check the license portal and sync for a newer verified replacement, or install a replacement key manually.',
+    subscriptionAttention:
+      'Subscription renewal needs attention: payment may have failed or renewal may be canceled. An administrator should check billing in the license portal. Existing signed rights are unchanged.',
+    stale:
+      'Automatic license renewal has not been verified recently. An administrator should check sync and billing before the signed license expires.',
+    syncAttention:
+      'Automatic license renewal could not be verified. An administrator should check the license sync settings and retry.',
     expiring: 'Your Janus license expires {time}. Renew at the portal to keep creating new items.',
     grace: 'Your Janus license expired {time}. You are in the grace period; creation pauses after it ends.',
     expired:
@@ -1207,8 +1211,11 @@ export const en = {
       expiringNotice: 'Renew at the portal before {time} to avoid the grace period.',
       graceNotice: 'The subscription lapsed on {time}. Renew at the portal; creation pauses after the grace period.',
       installTitle: 'Install a key',
-      installHelp: 'Paste the key exactly as downloaded from the portal. Keys start with JANUS-LICENSE-1.',
-      keyLabel: 'License key',
+      installHelp: 'Paste the portal activation code, or a JANUS-LICENSE-1 file for air-gapped gateways.',
+      keyLabel: 'Activation code or license key',
+      autoRenew: 'Turn on automatic renewal and sync',
+      autoRenewHelp:
+        'Checks janusedge.com hourly and installs each renewed key by itself. Sends only the license ID, instance ID, version and seat/node counts. Off until you tick it; separate from software update checks.',
       install: 'Install key',
       installed: 'License installed.',
       remove: 'Remove key',
@@ -1230,6 +1237,19 @@ export const en = {
       updatesNotes: 'Release notes',
       updatesChecked: 'Checked {time}',
       getKey: 'Get a free Community key or buy seats at janusedge.com.',
+      heroOk: 'Everything looks good',
+      heroSyncIssue: 'Automatic renewal is not confirmed. See Automatic renewal and sync below.',
+      heroAttention: 'Attention needed',
+      heroUnlicensed: 'Not properly licensed',
+      heroCommunity: 'Community edition. No key is needed for up to 25 seats and one node.',
+      heroValidUntil: 'Licensed through {time}.',
+      heroAutoRenew: 'Renews automatically. Paid through {time}.',
+      heroPerpetual: 'Perpetual license.',
+      heroSeatsOver: '{count} people were active in the last 30 days but this key covers {limit}. Add seats at janusedge.com.',
+      detailsTitle: 'License details',
+      lastSync: 'Last successful sync',
+      lastAttempt: 'Last attempt',
+      never: 'Never',
     },
     deployment: 'Deployment',
     version: 'Version',
@@ -2347,6 +2367,12 @@ export const en = {
     renameSavedToast: 'Display name saved. Users now see “{name}”.',
     renameClearedToast: 'Display name cleared — the upstream name “{name}” is shown again.',
     upstreamNameTitle: 'Upstream name: {name}',
+    sharedNameBadge: '+{count} upstream(s)',
+    sharedNameTitle:
+      'More than one upstream serves {name}. Each copy has its own rate card and grants; requests for the name go to the most recently discovered copy the caller is granted.',
+    sharedNameNotice:
+      '{count} model name(s) are served by more than one upstream. Each copy is priced and granted separately. For one stable name that survives a model moving between upstreams, create a managed model and grant that instead.',
+    sharedNameAction: 'Create a managed model',
     setRateFirst: 'Save a rate card first — $0 is allowed for self-hosted models.',
     bulkEnabled: '{count} model(s) enabled.',
     bulkDisabled: '{count} model(s) disabled.',

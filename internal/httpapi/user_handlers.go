@@ -797,6 +797,14 @@ func (s *Server) handleTeamDashboard(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// The team's usage over the selected range, bucketed like the personal
+	// dashboard, so the team page can show a trend instead of totals alone.
+	bucket, buckets := seriesShape(label)
+	series, err := s.Store.UsageSeries(r.Context(), scope, bucket, buckets)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	// Members see contribution shares; only the lead (or an admin) sees who is who.
 	teamRole, _ := s.Store.TeamRole(r.Context(), teamID, user.ID)
 	canSeeMembers := user.IsAdmin() || teamRole == "leader" || teamRole == "moderator"
@@ -810,7 +818,7 @@ func (s *Server) handleTeamDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"team": team, "teams": teams, "range": label, "totals": totals,
-		"per_model": byModel, "per_member": perMember,
+		"per_model": byModel, "per_member": perMember, "series": series,
 		"can_see_member_detail": canSeeMembers, "member_count": len(members),
 	})
 }

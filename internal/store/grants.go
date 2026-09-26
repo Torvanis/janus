@@ -45,6 +45,9 @@ func (s *Store) ListGrants(ctx context.Context, modelID string) ([]*Grant, error
 	for _, g := range out {
 		g.GranteeName = s.granteeLabel(ctx, g.GranteeType, g.GranteeID)
 		g.ModelName = s.grantedModelLabel(ctx, g.ModelKind, g.ModelID)
+		if g.ModelKind != ModelKindManaged {
+			_ = s.queryRow(ctx, `SELECT u.name FROM model m JOIN upstream u ON u.id = m.upstream_id WHERE m.id = ?`, g.ModelID).Scan(&g.UpstreamName)
+		}
 	}
 	return out, nil
 }

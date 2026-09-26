@@ -12,6 +12,7 @@ import {
 } from '../../lib/types';
 import { formatNumber, formatRelative, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, EmptyState, Field, Modal, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { FilterSelect, SearchInput } from '../shared';
 import { useLicensed, useLocalOnly } from '../../app/session';
@@ -297,16 +298,16 @@ export function ManagedModelsPage(): ReactNode {
                             <td className="num small">{formatNumber(m.grant_count)}</td>
                             <td className="num small muted">{m.context_window ? formatNumber(m.context_window) : '—'}</td>
                             <td className="small muted">{formatRelative(m.updated_at)}</td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(m)}>
-                                {t('adminManagedModels.edit')}
-                              </button>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setToggling(m)}>
-                                {m.status === 'enabled' ? t('adminManagedModels.disable') : t('adminManagedModels.enable')}
-                              </button>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(m)}>
-                                {t('adminManagedModels.delete')}
-                              </button>
+                            <td>
+                              <RowActions>
+                                <IconButton icon="edit" label={t('adminManagedModels.edit')} onClick={() => setEditing(m)} />
+                                <IconButton
+                                  icon={m.status === 'enabled' ? 'disable' : 'enable'}
+                                  label={m.status === 'enabled' ? t('adminManagedModels.disable') : t('adminManagedModels.enable')}
+                                  onClick={() => setToggling(m)}
+                                />
+                                <IconButton icon="delete" label={t('adminManagedModels.delete')} danger onClick={() => setDeleting(m)} />
+                              </RowActions>
                             </td>
                           </tr>
                         ))}

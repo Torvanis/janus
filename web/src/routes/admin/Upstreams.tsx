@@ -7,6 +7,7 @@ import { listAdminModels } from '../../api/client';
 import type { Model, Upstream } from '../../lib/types';
 import { formatDateTime, formatModelRate, formatRelative, titleCase } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { RateCardDialog } from './RateCardDialog';
 import { useDebounced, useUnsavedGuard, useUrlState } from '../../lib/hooks';
 import { t, type MessageKey } from '../../lib/i18n';
@@ -215,21 +216,20 @@ export function UpstreamsPage(): ReactNode {
                             )}
                           </td>
                           <td className="num small">{upstream.model_count}</td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => {
-                                setRefreshing(upstream.id);
-                                refresh.mutate(upstream.id);
-                              }}
-                              disabled={refreshing === upstream.id}
-                            >
-                              {refreshing === upstream.id ? t('adminUpstreams.discovering') : t('adminUpstreams.refreshModels')}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(upstream)}>
-                              {t('tables.delete')}
-                            </button>
+                          <td>
+                            <RowActions>
+                              <IconButton icon="edit" label={t('adminModels.edit')} onClick={() => openEdit(upstream)} />
+                              <IconButton
+                                icon="rotate"
+                                label={refreshing === upstream.id ? t('adminUpstreams.discovering') : t('adminUpstreams.refreshModels')}
+                                onClick={() => {
+                                  setRefreshing(upstream.id);
+                                  refresh.mutate(upstream.id);
+                                }}
+                                disabled={refreshing === upstream.id}
+                              />
+                              <IconButton icon="delete" label={t('tables.delete')} danger onClick={() => setDeleting(upstream)} />
+                            </RowActions>
                           </td>
                         </tr>
                       ))}

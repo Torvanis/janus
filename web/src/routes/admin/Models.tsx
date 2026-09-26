@@ -5,9 +5,11 @@ import { hasRateCard, listAdminModels, patchModel, type ModelRatePatch } from '.
 import { isRenamedModel, publicModelName, type Model } from '../../lib/types';
 import { formatDate, formatModelRate, formatTokenCount, titleCase } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, EmptyState, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useDebounced, useUrlState } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
 import { useLocalOnly } from '../../app/session';
+import { Link } from 'react-router-dom';
 import { FilterSelect, SearchInput } from '../shared';
 import { ModelDrawer } from './ModelDrawer';
 
@@ -55,6 +57,21 @@ export function AdminModelsPage(): ReactNode {
     return !term || model.name.toLowerCase().includes(term) || model.display_name.toLowerCase().includes(term);
   });
 
+  // Names served by more than one upstream (the same vLLM model on two nodes,
+  // or an old and a new endpoint for one deployment). Each copy is its own
+  // catalog entry, so the table marks them and points at managed models as
+  // the stable handle.
+  const sharedNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const model of models.data?.models ?? []) {
+      if (model.status === 'stale') continue;
+      const key = model.name.toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [models.data]);
+  const sharedNameTotal = [...sharedNameCounts.values()].filter((n) => n > 1).length;
+
   const selectedModels = filtered.filter((model) => selected.has(model.id));
   const unpricedSelected = bulkAction === 'enabled' && !localOnly ? selectedModels.filter((model) => !hasRateCard(model)) : [];
 
@@ -66,6 +83,17 @@ export function AdminModelsPage(): ReactNode {
           <p className="page-subtitle">{t(localOnly ? 'adminModels.subtitleLocalOnly' : 'adminModels.subtitle')}</p>
         </div>
       </header>
+
+      {sharedNameTotal > 0 ? (
+        <div className="banner banner-info" role="status" data-testid="shared-name-notice">
+          <div className="row-between" style={{ width: '100%' }}>
+            <span>{t('adminModels.sharedNameNotice', { count: sharedNameTotal })}</span>
+            <Link className="btn btn-sm" to="/admin/managed-models">
+              {t('adminModels.sharedNameAction')}
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       {(models.data?.counts.pending_approval ?? 0) > 0 && status !== 'pending_approval' ? (
         <div className="banner banner-info">
@@ -229,7 +257,20 @@ export function AdminModelsPage(): ReactNode {
                                 <div className="small muted">{model.modalities.map(titleCase).join(', ')}</div>
                               </>
                             </td>
-                            <td className="small muted">{model.upstream_name}</td>
+                            <td className="small muted">
+                              {model.upstream_name}
+                              {(sharedNameCounts.get(model.name.toLowerCase()) ?? 0) > 1 && model.status !== 'stale' ? (
+                                <div>
+                                  <span title={t('adminModels.sharedNameTitle', { name: model.name })}>
+                                    <Badge tone="info">
+                                      {t('adminModels.sharedNameBadge', {
+                                        count: (sharedNameCounts.get(model.name.toLowerCase()) ?? 1) - 1,
+                                      })}
+                                    </Badge>
+                                  </span>
+                                </div>
+                              ) : null}
+                            </td>
                             <td>
                               <StatusBadge status={model.status} />
                             </td>
@@ -242,41 +283,37 @@ export function AdminModelsPage(): ReactNode {
                             <td className="num small">{formatTokenCount(model.context_window)}</td>
                             <td className="num small">{model.grant_count}</td>
                             <td className="small muted">{formatDate(model.discovered_at)}</td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                aria-label={t('adminModels.editFor', { name: model.name })}
-                                onClick={() => setEditing(model)}
-                              >
-                                {t('adminModels.edit')}
-                              </button>
-                              {model.status === 'enabled' ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => patch.mutate({ id: model.id, body: { status: 'disabled' } })}
-                                >
-                                  {t('tables.disable')}
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => {
-                                    // Without cost tracking there is nothing to
-                                    // price: enable directly in local-only mode.
-                                    if (!localOnly && !hasRateCard(model)) {
-                                      setEditing(model);
-                                      toast(t('adminModels.setRateFirst'), 'warning');
-                                      return;
-                                    }
-                                    patch.mutate({ id: model.id, body: { status: 'enabled' } });
-                                  }}
-                                >
-                                  {t('tables.enable')}
-                                </button>
-                              )}
+                            <td>
+                              <RowActions>
+                                <IconButton
+                                  icon="edit"
+                                  label={t('adminModels.editFor', { name: model.name })}
+                                  title={t('adminModels.edit')}
+                                  onClick={() => setEditing(model)}
+                                />
+                                {model.status === 'enabled' ? (
+                                  <IconButton
+                                    icon="disable"
+                                    label={t('tables.disable')}
+                                    onClick={() => patch.mutate({ id: model.id, body: { status: 'disabled' } })}
+                                  />
+                                ) : (
+                                  <IconButton
+                                    icon="enable"
+                                    label={t('tables.enable')}
+                                    onClick={() => {
+                                      // Without cost tracking there is nothing to
+                                      // price: enable directly in local-only mode.
+                                      if (!localOnly && !hasRateCard(model)) {
+                                        setEditing(model);
+                                        toast(t('adminModels.setRateFirst'), 'warning');
+                                        return;
+                                      }
+                                      patch.mutate({ id: model.id, body: { status: 'enabled' } });
+                                    }}
+                                  />
+                                )}
+                              </RowActions>
                             </td>
                           </tr>
                         ))}

@@ -4,9 +4,9 @@ import { api } from '../lib/api';
 import { useUrlState } from '../lib/hooks';
 import { useSession } from '../app/session';
 import { AsyncSection, Badge, Field } from '../components/ui';
-import { RouteTopNav } from '../components/RouteTopNav';
 import { TeamPage } from './Team';
 import './teams.css';
+import './team-dashboard.css';
 
 type Membership = { id: string; name: string; my_role?: string; member_count: number };
 
@@ -34,14 +34,7 @@ export default function PersonalTeams() {
   const requested = id || params.get('team');
   const [search, setSearch] = useUrlState('q', '');
   return (
-    <div className="page stack team-directory">
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">My teams</h1>
-          <p className="page-subtitle">Your team memberships, members, usage, and quotas. This workspace is informational.</p>
-        </div>
-      </header>
-      <AsyncSection query={teams}>
+    <AsyncSection query={teams}>
         {(data) => {
           const selected = requested
             ? data.teams.find((team) => team.id === requested)
@@ -49,101 +42,74 @@ export default function PersonalTeams() {
               ? (data.teams.find((team) => team.id === me?.active_team_id) ??
                 (data.teams.length === 1 ? data.teams[0] : undefined))
               : undefined;
-          if (requested && !selected) return <p role="alert">This team is not one of your memberships.</p>;
+          if (requested && !selected)
+            return (
+              <div className="page">
+                <p role="alert">This team is not one of your memberships.</p>
+              </div>
+            );
           return selected ? (
-            <>
-              <Link className="btn btn-ghost" to="/teams?view=browse">
-                My teams
-              </Link>
-              <PersonalTeamDetail key={selected.id} team={selected} />
-            </>
+            <PersonalTeamDetail key={selected.id} team={selected} />
           ) : (
-            <>
-              <Field label="Search my teams">
-                <input
-                  className="input"
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                  }}
-                />
-              </Field>
-              <section className="card stack" aria-label="My team memberships">
+            <div className="page stack team-directory">
+              <header className="page-header">
+                <div>
+                  <h1 className="page-title">My teams</h1>
+                  <p className="page-subtitle">Your team memberships, members, usage, and quotas. This workspace is informational.</p>
+                </div>
+              </header>
+              {data.teams.length > 6 ? (
+                <Field label="Search my teams">
+                  <input
+                    className="input"
+                    value={search}
+                    onChange={(event) => {
+                      setSearch(event.target.value);
+                    }}
+                  />
+                </Field>
+              ) : null}
+              <section className="team-cards" aria-label="My team memberships">
                 {!data.teams.length && <p>You are not a member of any teams.</p>}
                 {data.teams
                   .filter((team) => team.name.toLowerCase().includes(search.toLowerCase()))
                   .map((team) => (
-                    <div className="row-between" key={team.id}>
-                      <Link to={`/teams/${encodeURIComponent(team.id)}`}>{team.name}</Link>
-                      <span>
-                        {team.member_count} members · <Badge>{team.my_role}</Badge>
+                    <Link className="team-card" key={team.id} to={`/teams/${encodeURIComponent(team.id)}`}>
+                      <span className="team-card-mark" aria-hidden="true">
+                        {team.name
+                          .split(/\s+/)
+                          .map((w) => w[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()}
                       </span>
-                    </div>
+                      <span className="team-card-body">
+                        <span className="team-card-name">{team.name}</span>
+                        <span className="team-card-meta">
+                          {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
+                        </span>
+                      </span>
+                      <Badge>{team.my_role}</Badge>
+                    </Link>
                   ))}
                 {!!data.teams.length && !data.teams.some((team) => team.name.toLowerCase().includes(search.toLowerCase())) && (
                   <p>No memberships match your search.</p>
                 )}
               </section>
-            </>
+            </div>
           );
         }}
-      </AsyncSection>
-    </div>
+    </AsyncSection>
   );
 }
 
+/**
+ * A membership's workspace is the team page itself: one header (name, your
+ * role, lead, range), a totals strip, the activity trend, usage by model and
+ * the member roster side by side. The old Usage / Members tabs, the repeated
+ * team name and the "My teams" back button are gone; the breadcrumb and the
+ * team switcher cover navigation.
+ */
 function PersonalTeamDetail({ team }: { team: Membership }) {
-  const location = useLocation();
-  const section = new URLSearchParams(location.search).get('section') === 'members' ? 'members' : 'usage';
-  const detail = useQuery({
-    queryKey: ['teams', 'personal-detail', team.id],
-    queryFn: () =>
-      api.get<{ members: { user_id: string; email: string; name?: string; role: string }[] }>(
-        `/api/v1/teams/${encodeURIComponent(team.id)}`,
-      ),
-    enabled: section === 'members',
-  });
-  return (
-    <section className="stack">
-      <h2>{team.name}</h2>
-      <p>Your role: {team.my_role}</p>
-      <RouteTopNav
-        label="Team information"
-        active={section}
-        items={[
-          { id: 'usage', label: 'Usage and quotas' },
-          { id: 'members', label: 'Members' },
-        ].map((item) => ({ ...item, to: `/teams/${encodeURIComponent(team.id)}?section=${item.id}` }))}
-      />
-      {section === 'usage' ? (
-        <TeamPage teamId={team.id} />
-      ) : (
-        <AsyncSection query={detail}>
-          {(data) => (
-            <div className="table-wrap">
-              <table className="data" aria-label="Team members">
-                <thead>
-                  <tr>
-                    <th>Person</th>
-                    <th>Role</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.members.map((member) => (
-                    <tr key={member.user_id}>
-                      <td>
-                        {member.name ? `${member.name} · ` : ''}
-                        {member.email}
-                      </td>
-                      <td>{member.role}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </AsyncSection>
-      )}
-    </section>
-  );
+  return <TeamPage teamId={team.id} />;
 }

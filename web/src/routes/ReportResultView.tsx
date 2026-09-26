@@ -27,16 +27,104 @@ function valueText(value: number | null | undefined, unit: string): string {
   const number = Number.isInteger(value)
     ? formatNumber(value)
     : new Intl.NumberFormat(undefined, { maximumSignificantDigits: 15 }).format(value);
-  return `${number}${unit === 'percent' || unit === '%' ? '%' : unit && !['count', 'ratio', 'number'].includes(unit) ? ` ${unit}` : ''}`;
+  // Column headings already name counts and tokens; other units stay explicit.
+  return `${number}${unit === 'percent' || unit === '%' ? '%' : unit && !['count', 'ratio', 'number', 'tokens', 'requests'].includes(unit) ? ` ${unit}` : ''}`;
 }
-function changeText(current: number | null | undefined, previous: number | null | undefined, unit: string): string {
+// Reader heading: producer labels such as "team name (current)" or "disabled cost
+// requests" become "Team" / "Disabled cost requests"; the unit appears once.
+export function columnTitle(column: Column): string {
+  let text = (column.label || column.key.replaceAll('_', ' ')).trim().replace(/ name \(current\)$/, '');
+  if (!text) text = column.key.replace(/_label$/, '').replaceAll('_', ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+export function columnHeading(column: Column): string {
+  const title = columnTitle(column);
+  const unit = column.unit.trim();
+  if (!unit || /^(count|number|requests|ratio|percent|%)$/i.test(unit)) return title;
+  if (/^tokens$/i.test(unit)) return /token/i.test(title) ? title : `${title} (tokens)`;
+  if (title.toLowerCase().includes(unit.toLowerCase())) return title;
+  return `${title} (${/^nano_?usd$/i.test(unit) ? 'USD' : unit})`;
+}
+// Opaque identities are replaced by their display-name companion when present.
+function readerColumns(columns: Column[], rows: Row[]): Column[] {
+  return columns.filter(
+    (column) => column.key.endsWith('_label') || !rows.some((row) => Object.hasOwn(row.dimensions, `${column.key}_label`)),
+  );
+}
+const worseWhenHigher = /cost|error|denial|block|latency|ttfb|unpriced|estimated|unknown|_ms$/i;
+function change(
+  key: string,
+  current: number | null | undefined,
+  previous: number | null | undefined,
+  unit: string,
+): { text: string; tone: 'good' | 'bad' | 'neutral'; arrow: string } {
   if (current == null || previous == null || !Number.isFinite(current) || !Number.isFinite(previous))
-    return 'Prior comparison: Unknown';
+    return { text: 'No prior-period value', tone: 'neutral', arrow: '' };
   const difference = current - previous;
-  const delta = `${difference > 0 ? '+' : ''}${valueText(difference, unit)}`;
-  return previous === 0
-    ? `Prior ${valueText(previous, unit)} · ${delta} · percentage change unavailable (prior is zero)`
-    : `Prior ${valueText(previous, unit)} · ${delta} (${valueText((difference / Math.abs(previous)) * 100, 'percent')})`;
+  const prior = valueText(previous, unit);
+  if (difference === 0) return { text: `No change vs prior (${prior})`, tone: 'neutral', arrow: '' };
+  if (previous === 0) return { text: `New this period (prior ${prior})`, tone: 'neutral', arrow: '▲' };
+  const percent = (difference / Math.abs(previous)) * 100;
+  if (Math.abs(percent) < 0.05) return { text: `No change vs prior (${prior})`, tone: 'neutral', arrow: '' };
+  const rising = difference > 0;
+  const good = worseWhenHigher.test(key) ? !rising : rising;
+  const amount = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(Math.abs(percent));
+  return {
+    text: `${rising ? '+' : '−'}${amount}% vs prior (${prior})`,
+    tone: good ? 'good' : 'bad',
+    arrow: rising ? '▲' : '▼',
+  };
+}
+// A "nice" 1/2/2.5/5 × 10^n step giving about four intervals.
+function niceStep(span: number, whole: boolean): number {
+  const target = (span || 1) / 4;
+  let step = 10 ** Math.floor(Math.log10(target));
+  step *= (whole ? [1, 2, 5, 10] : [1, 2, 2.5, 5, 10]).find((factor) => step * factor >= target) ?? 10;
+  return whole ? Math.max(1, Math.round(step)) : step;
+}
+// Warnings repeated for the prior period are merged so each caveat reads once.
+function readerNotices(result: ReportResult): string[] {
+  const order: string[] = [];
+  const seen = new Map<string, { current: boolean; prior: boolean }>();
+  for (const warning of [...result.warnings, ...(result.comparison_warnings ?? [])]) {
+    const text = warning.replace(/^Previous period: /, '');
+    const state = seen.get(text) ?? { current: false, prior: false };
+    if (text === warning) state.current = true;
+    else state.prior = true;
+    if (!seen.has(text)) order.push(text);
+    seen.set(text, state);
+  }
+  return order.map((text) => {
+    const state = seen.get(text)!;
+    if (state.current && state.prior) return `${text} Applies to this and the prior period.`;
+    return state.prior ? `Prior period: ${text}` : text;
+  });
+}
+function periodLabel(start: string, end: string, timezone: string): string {
+  const zone = timezone || 'UTC';
+  const s = new Date(start);
+  const e = new Date(end);
+  const midnight = (d: Date) =>
+    new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d) ===
+    '00:00';
+  const date = (d: Date, year = true) =>
+    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(year ? { year: 'numeric' } : {}), timeZone: zone });
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return 'Unknown period';
+  if (midnight(s) && midnight(e)) {
+    const last = new Date(e.getTime() - 1);
+    return `${date(s, date(s).slice(-4) !== date(last).slice(-4))} – ${date(last)}`;
+  }
+  const time = (d: Date) =>
+    d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: zone,
+    });
+  return `${time(s)} – ${time(e)}`;
 }
 type Row = ReportResult['rows'][number];
 function cell(row: Row, column: Column): string | number | null {
@@ -83,6 +171,7 @@ function DataPanel({
       ) || !term,
   );
   const dimension = columns.find((column) => rows.some((row) => Object.hasOwn(row.dimensions, column.key)));
+  const shown = readerColumns(columns, rows);
   const sorted = [...filtered];
   const sortColumn = columns.find((column) => column.key === sort?.key);
   if (sort && sortColumn)
@@ -111,7 +200,7 @@ function DataPanel({
           value={search}
           onChange={(e) => update('q', e.target.value)}
         />
-        <label>
+        <label className="page-size">
           Rows per page{' '}
           <select
             className="select"
@@ -126,9 +215,7 @@ function DataPanel({
             ))}
           </select>
         </label>
-        <span>
-          {filtered.length} of {rows.length} snapshot rows
-        </span>
+        <span>{filtered.length === rows.length ? `${rows.length} rows` : `${filtered.length} of ${rows.length} rows`}</span>
         {(search || sortValue) && (
           <button
             type="button"
@@ -144,21 +231,21 @@ function DataPanel({
           <caption>{title}</caption>
           <thead>
             <tr>
-              {columns.map((column) => (
+              {shown.map((column) => (
                 <th
                   key={column.key}
                   scope="col"
+                  className={rows.some((row) => Object.hasOwn(row.dimensions, column.key)) ? undefined : 'report-result-numeric'}
                   aria-sort={sort?.key === column.key ? (sort.descending ? 'descending' : 'ascending') : 'none'}
                 >
                   <button
                     type="button"
-                    aria-label={`Sort by ${column.label}`}
+                    aria-label={`Sort by ${columnHeading(column)}`}
                     onClick={() => {
                       update('sort', `${column.key}:${sort?.key === column.key && !sort.descending ? 'desc' : 'asc'}`);
                     }}
                   >
-                    {column.label}
-                    {column.unit && <small> ({column.unit})</small>}
+                    {columnHeading(column)}
                     {sort?.key === column.key ? (sort.descending ? ' ↓' : ' ↑') : ' ↕'}
                   </button>
                 </th>
@@ -169,29 +256,28 @@ function DataPanel({
           <tbody>
             {visible.map((row, i) => (
               <tr key={offset + i}>
-                {columns.map((column) => {
+                {shown.map((column) => {
                   const value = cell(row, column);
-                  return (
-                    <td key={column.key} title={`${value ?? 'Unknown'} ${column.unit}`}>
-                      {typeof value === 'string' ? (
-                        value
-                      ) : (
-                        <>
-                          {valueText(value, column.unit)}
-                          {value !== null && /^(?:nano_?usd|USD|ratio|percent|%)$/i.test(column.unit) && (
-                            <small className="report-result-exact">
-                              {value} {column.unit}
-                            </small>
-                          )}
-                        </>
-                      )}
+                  return typeof value === 'string' ? (
+                    <td key={column.key}>{value}</td>
+                  ) : (
+                    <td
+                      key={column.key}
+                      className="report-result-numeric"
+                      title={value === null ? 'Not recorded' : `Exact value: ${value} ${column.unit}`.trim()}
+                    >
+                      {valueText(value, column.unit)}
                     </td>
                   );
                 })}
                 {onDrillDown && dimension && (
                   <td>
-                    <button type="button" onClick={() => onDrillDown(dimension.key, row.dimensions[dimension.key] ?? '')}>
-                      Explore {row.dimensions[dimension.key] || 'Unknown'}
+                    <button
+                      type="button"
+                      aria-label={`Explore ${row.dimensions[`${dimension.key}_label`] || row.dimensions[dimension.key] || 'Unknown'}`}
+                      onClick={() => onDrillDown(dimension.key, row.dimensions[dimension.key] ?? '')}
+                    >
+                      Explore
                     </button>
                   </td>
                 )}
@@ -323,11 +409,12 @@ function SummaryChart({
   const top = measured.slice(0, 5);
   const rawMinimum = measured.reduce((min, r) => Math.min(min, r.value ?? 0), 0);
   const rawMaximum = measured.reduce((max, r) => Math.max(max, r.value ?? 0), 0) || (rawMinimum === 0 ? 1 : 0);
-  // Whole-count axes need an integral midpoint as well as integral bounds.
-  const wholeCount = temporal && metric.unit === 'count';
-  const minimum = wholeCount ? Math.floor(rawMinimum / 2) * 2 : rawMinimum;
-  const maximum =
-    wholeCount && measured.some((r) => r.value !== null && r.value !== 0) ? Math.ceil(rawMaximum / 2) * 2 : rawMaximum;
+  // Round axis bounds to "nice" ticks (0 / 1,000 / 2,000 …); whole units stay whole.
+  const wholeCount = temporal && /^(count|tokens|requests)$/.test(metric.unit);
+  const step = temporal ? niceStep(rawMaximum - rawMinimum, wholeCount) : 0;
+  const minimum = temporal ? Math.floor(rawMinimum / step) * step : rawMinimum;
+  const maximum = temporal ? Math.max(Math.ceil(rawMaximum / step) * step, minimum + step) : rawMaximum;
+  const ticks = temporal ? Array.from({ length: Math.round((maximum - minimum) / step) + 1 }, (_, i) => maximum - i * step) : [];
   const range = maximum - minimum;
   const yPosition = (value: number) => 15 + ((maximum - value) / range) * 170;
   const baseline = yPosition(0);
@@ -341,7 +428,7 @@ function SummaryChart({
           <select value={metric.key} onChange={(e) => setMetricKey(e.target.value)}>
             {metrics.map((c) => (
               <option key={c.key} value={c.key}>
-                {c.label}
+                {columnHeading(c)}
               </option>
             ))}
           </select>
@@ -356,18 +443,21 @@ function SummaryChart({
         </div>
       </div>
       {temporal ? (
-        <p>{dimension.label} observations · entire reporting period</p>
+        <p>
+          {columnTitle(metric)} per {dimension.key} · {observations.length}{' '}
+          {observations.length === 1 ? dimension.key : `${dimension.key}s`}
+        </p>
       ) : (
         <p>
-          Top {top.length} of {rows.length} rows by {metric.label} · all rows in Complete data.
+          Top {top.length} of {rows.length} by {columnTitle(metric).toLowerCase()} · every row is in Complete data.
         </p>
       )}
       {temporal && view === 'chart' && (
         <div className="report-result-trend">
           <div className="report-result-axis">
-            <span>{valueText(maximum, metric.unit)}</span>
-            <span>{wholeCount && range === 1 ? '' : valueText((maximum + minimum) / 2, metric.unit)}</span>
-            <span>{valueText(minimum, metric.unit)}</span>
+            {ticks.map((tick) => (
+              <span key={tick}>{valueText(tick, metric.unit)}</span>
+            ))}
           </div>
           <svg
             role="img"
@@ -378,6 +468,9 @@ function SummaryChart({
             height="200"
           >
             <line x1="0" x2="100%" y1={baseline} y2={baseline} stroke="currentColor" opacity=".3" />
+            {ticks.map((tick) => (
+              <line key={tick} x1="0" x2="100%" y1={yPosition(tick)} y2={yPosition(tick)} className="report-result-gridline" />
+            ))}
             {observations.map((r, i) => {
               const date = Date.parse(r.date);
               if (!Number.isFinite(date) || axisEnd <= axisStart || date < axisStart || date >= axisEnd) return null;
@@ -407,6 +500,15 @@ function SummaryChart({
             <span>
               {bucketStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
             </span>
+            {dimension.key === 'day' &&
+              Array.from({ length: Math.floor((axisEnd - axisStart) / (7 * 864e5)) }, (_, i) => axisStart + (i + 1) * 7 * 864e5)
+                .map((tick) => ({ tick, at: 2 + ((tick - axisStart) / (axisEnd - axisStart)) * 96 }))
+                .filter(({ at }) => at > 14 && at < 84)
+                .map(({ tick, at }) => (
+                  <span key={tick} aria-hidden="true" className="report-result-date-tick" style={{ left: `${at}%` }}>
+                    {new Date(tick).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                  </span>
+                ))}
             <span>
               {new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: timezone })}
             </span>
@@ -460,8 +562,7 @@ function SummaryChart({
           <summary>Chart notes</summary>
           {temporal && (
             <p>
-              Gaps mean no returned row, not zero. Boundary periods may be partial. Dates use source bucket labels; exact values
-              in Complete data.
+              Gaps mean no returned row, not zero. The first and last buckets may be partial. Exact values are in Complete data.
             </p>
           )}
           {hasUnknown && <p>Unknown measurements are unplotted; zero is a known measurement.</p>}
@@ -470,6 +571,25 @@ function SummaryChart({
       )}
     </section>
   );
+}
+const exportFormats = [
+  { format: 'pdf', name: 'PDF', detail: 'Formatted report with charts, for sharing and printing' },
+  { format: 'xlsx', name: 'Excel', detail: 'Workbook with summary, every section and typed numbers' },
+  { format: 'csv', name: 'CSV', detail: 'Main table only, one header row, for data tools' },
+  { format: 'json', name: 'JSON', detail: 'Complete machine-readable snapshot with identifiers' },
+];
+function readableInstant(instant: string, timezone: string): string {
+  const date = new Date(instant);
+  if (!Number.isFinite(date.getTime())) return instant;
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: timezone || 'UTC',
+    timeZoneName: 'short',
+  });
 }
 export function ReportResultView({
   result,
@@ -491,9 +611,16 @@ export function ReportResultView({
         /budget|scenario|billing|currency|revenue|charge|amount|\b(?:eur|gbp|jpy|dollars?|cents?)\b|[$€£¥]/i.test(text)));
   const safeColumns = (columns: Column[]) => columns.filter((column) => !hidden(`${column.key} ${column.label} ${column.unit}`));
   const columns = safeColumns(result.columns);
-  const warnings = [...new Set([...result.warnings, ...(result.comparison_warnings ?? [])])].map((warning) =>
+  const warnings = [...new Set(readerNotices(result))].map((warning) =>
     hidden(warning) ? 'A report warning was withheld under the current visibility policy.' : warning,
   );
+  const costNote =
+    !localOnly && columns.some((c) => /^(?:nano_?usd|USD)$/i.test(c.unit))
+      ? 'Recorded amounts do not establish complete pricing coverage. Zero recorded cost is not a claim of free usage; unknown measurements are not zero.'
+      : '';
+  // The cost caveat is only shown when no engine notice already covers pricing confidence.
+  const notices =
+    costNote && !warnings.some((w) => /pricing confidence|recorded zero/i.test(w)) ? [costNote, ...warnings] : warnings;
   const sections = result.sections
     .filter((section) => !hidden(`${section.id} ${section.title}`))
     .map((section) => ({
@@ -516,18 +643,21 @@ export function ReportResultView({
       <header className="report-result-header">
         <div>
           <p>
-            Frozen report · <span>Version {result.version}</span>
+            Report snapshot · <span>Version {result.version}</span>
           </p>
           <h2>{hidden(result.definition.name) ? 'Frozen report' : result.definition.name}</h2>
         </div>
-        <nav aria-label="Export all rows">
-          <strong>Export all rows</strong>
-          {['csv', 'xlsx', 'pdf', 'json'].map((format) => (
-            <a key={format} href={`/api/v1/reports/runs/${encodeURIComponent(runID)}/download?format=${format}`}>
-              {format.toUpperCase()}
-            </a>
-          ))}
-        </nav>
+        <details className="report-result-export">
+          <summary>Export</summary>
+          <nav aria-label="Export report">
+            {exportFormats.map((f) => (
+              <a key={f.format} href={`/api/v1/reports/runs/${encodeURIComponent(runID)}/download?format=${f.format}`} download>
+                <strong>{f.name}</strong>
+                <span>{f.detail}</span>
+              </a>
+            ))}
+          </nav>
+        </details>
       </header>
       <p className="report-result-audience">
         {result.definition.scope === 'organization'
@@ -535,50 +665,40 @@ export function ReportResultView({
           : result.definition.scope === 'team'
             ? 'Team scope'
             : 'Self scope'}{' '}
-        ·{' '}
-        {new Date(result.start).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          timeZone: result.definition.timezone,
-        })}{' '}
-        –{' '}
-        {new Date(result.end).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          timeZone: result.definition.timezone,
-        })}{' '}
-        · {result.definition.timezone} (end exclusive)
+        · {periodLabel(result.start, result.end, result.definition.timezone)} · {result.definition.timezone || 'UTC'}
       </p>
       <section aria-label="Overview" className="report-result-metrics">
         {primaryMetrics.map((column: Column) => (
           <div className="report-result-card" key={column.key}>
-            <h3>{column.label}</h3>
+            <h3>{columnHeading(column)}</h3>
             <strong title={`${kpiValues[column.key] ?? 'Unknown'} ${column.unit}`}>
               {valueText(kpiValues[column.key], column.unit)}
             </strong>
-            {result.definition.compare && (
-              <p>
-                {result.comparison_reliable === false
-                  ? 'Comparison unavailable: incomplete coverage'
-                  : changeText(result.totals[column.key], result.previous_totals?.[column.key], column.unit)}
-              </p>
-            )}
+            {result.definition.compare &&
+              (() => {
+                if (result.comparison_reliable === false)
+                  return <p className="report-result-change">Comparison unavailable: incomplete coverage</p>;
+                const c = change(column.key, result.totals[column.key], result.previous_totals?.[column.key], column.unit);
+                return (
+                  <p className="report-result-change" data-tone={c.tone}>
+                    {c.arrow && <span aria-hidden="true">{c.arrow} </span>}
+                    {c.text}
+                  </p>
+                );
+              })()}
           </div>
         ))}
       </section>
-      {!localOnly && columns.some((c) => /^(?:nano_?usd|USD)$/i.test(c.unit)) && (
-        <p className="report-result-cost-note">
-          Recorded amounts do not establish complete pricing coverage. Zero recorded cost is not a claim of free usage; unknown
-          measurements are not zero.
+      {notices.length === 1 && (
+        <p className="report-result-warnings report-result-notice" role="note">
+          {notices[0]}
         </p>
       )}
-      {warnings.length > 0 && (
+      {notices.length > 1 && (
         <details className="report-result-warnings">
-          <summary>{warnings.length} coverage notices · review limitations</summary>
+          <summary>{notices.length} notices about data coverage</summary>
           <ul>
-            {warnings.map((warning, i) => (
+            {notices.map((warning, i) => (
               <li key={i}>{warning}</li>
             ))}
           </ul>
@@ -618,9 +738,9 @@ export function ReportResultView({
         <summary>Complete data and provenance</summary>
         <dl className="report-result-provenance">
           <div>
-            <dt>Period (start inclusive, end exclusive)</dt>
-            <dd>
-              {result.start} — {result.end}
+            <dt>Period</dt>
+            <dd title={`${result.start} — ${result.end} (end exclusive)`}>
+              {periodLabel(result.start, result.end, result.definition.timezone)}
             </dd>
           </div>
           <div>
@@ -630,13 +750,13 @@ export function ReportResultView({
           <div>
             <dt>Generated at</dt>
             <dd>
-              <time dateTime={result.generated_at}>{result.generated_at}</time>
+              <time dateTime={result.generated_at}>{readableInstant(result.generated_at, result.definition.timezone)}</time>
             </dd>
           </div>
           <div>
             <dt>Data cutoff</dt>
             <dd>
-              <time dateTime={result.data_cutoff}>{result.data_cutoff}</time>
+              <time dateTime={result.data_cutoff}>{readableInstant(result.data_cutoff, result.definition.timezone)}</time>
             </dd>
           </div>
           <div>
@@ -692,8 +812,10 @@ export function ReportResultView({
             measurements, not recomputed from displayed groups.
           </p>
           <p>
-            Membership mode: {result.definition.group_mode}. Scope: {result.definition.scope}. Template:{' '}
-            {hidden(result.definition.template) ? 'Restricted' : result.definition.template}.
+            Teams are grouped by{' '}
+            {result.definition.group_mode === 'current' ? 'current membership' : 'membership at the time of each request'}. Scope:{' '}
+            {result.definition.scope}. Template:{' '}
+            {hidden(result.definition.template) ? 'Restricted' : result.definition.template.replaceAll('_', ' ')}.
           </p>
         </section>
       </details>

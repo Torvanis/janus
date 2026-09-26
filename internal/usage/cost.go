@@ -66,6 +66,24 @@ const (
 	ThroughputCalculated = "calculated"
 )
 
+// ProcessedInputTokens is the input the provider actually had to process for a
+// request: everything it read, minus what it served from its prompt cache.
+// Cache reads cost the provider almost no compute, so counting them as
+// processed input makes a cache-heavy request look many times faster than the
+// model really is (a 1,000-token prompt with 900 cached would otherwise report
+// 10x its true prefill speed).
+//
+// The two cache conventions (see TokenCounts.CachedDisjoint) need opposite
+// arithmetic: when cached tokens are a SUBSET of In (OpenAI, Gemini) they are
+// subtracted; when they are DISJOINT (Anthropic, Bedrock) In already excludes
+// them, and cache WRITES are extra input the provider did process.
+func ProcessedInputTokens(t TokenCounts) int64 {
+	if t.CachedDisjoint {
+		return max(0, t.In) + max(0, t.CacheWrite5m) + max(0, t.CacheWrite1h)
+	}
+	return max(0, t.In-max(0, t.Cached))
+}
+
 // TokensPerSecond is tokens / duration, or 0 when either is non-positive so a
 // zero-length window never produces an infinite rate.
 func TokensPerSecond(tokens int64, d time.Duration) float64 {

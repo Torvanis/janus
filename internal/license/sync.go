@@ -1,6 +1,7 @@
 package license
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -122,6 +123,22 @@ type SyncOptions struct {
 	Enabled   *bool
 	Token     string
 	TokenSet  bool
+	// Report identifies this gateway to the portal on each sync so the vendor
+	// can see renewal delivery: instance id, version, and seat/node usage.
+	// Nothing else is sent. Nil sends an empty body.
+	Report func(context.Context) SyncReport
+	// Observe is called once per completed sync attempt (never for skipped
+	// polls) with the outcome code ("" = success) and the installed expiry.
+	Observe func(code string, expires *time.Time)
+}
+
+// SyncReport is the body a gateway sends with a sync request.
+type SyncReport struct {
+	InstanceID string `json:"instance_id,omitempty"`
+	Version    string `json:"version,omitempty"`
+	Site       string `json:"site,omitempty"`
+	SeatsUsed  *int   `json:"seats_used,omitempty"`
+	Nodes      *int   `json:"nodes,omitempty"`
 }
 
 // SyncEngine independently renews signed licenses; application updates are unrelated.
@@ -456,15 +473,25 @@ func (e *SyncEngine) Sync(ctx context.Context, force bool) error {
 		return errors.New("storage")
 	}
 	if !ok {
+		e.observe("configuration_changed")
 		return errors.New("configuration_changed")
 	}
 	if code != "" {
+		e.observe(code)
 		return errors.New(code)
 	}
 	if err = e.manager.Refresh(persist); err != nil {
+		e.observe("local_refresh")
 		return errors.New("local_refresh")
 	}
+	e.observe("")
 	return nil
+}
+
+func (e *SyncEngine) observe(code string) {
+	if e.options.Observe != nil {
+		e.options.Observe(code, e.manager.State().ExpiresAt)
+	}
 }
 
 func (e *SyncEngine) fetch(ctx context.Context, key string, c Claims, r *syncRecord) (string, *Subscription, string) {
@@ -492,7 +519,17 @@ func (e *SyncEngine) fetch(ctx context.Context, key string, c Claims, r *syncRec
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, SyncEndpoint, strings.NewReader("{}"))
+	body := []byte("{}")
+	if e.options.Report != nil {
+		rep := e.options.Report(ctx)
+		if rep.Site == "" {
+			rep.Site = c.Site
+		}
+		if b, err := json.Marshal(rep); err == nil {
+			body = b
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, SyncEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", nil, "request"
 	}

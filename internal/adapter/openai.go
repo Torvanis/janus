@@ -385,8 +385,9 @@ func parseOpenAIUsage(body []byte) (Usage, bool) {
 	case env.Usage.PromptTime > 0 || env.Usage.CompletionTime > 0:
 		// Groq: seconds per phase; derive tokens/s from the counts it sits
 		// next to. A phase the provider timed at zero stays zero rather than
-		// dividing by it.
-		u.TokensInPerSecond = ratePerSecond(u.TokensIn, env.Usage.PromptTime)
+		// dividing by it. Cached prompt tokens are excluded from the input
+		// rate: prompt_time covers only what Groq actually processed.
+		u.TokensInPerSecond = ratePerSecond(max64(0, u.TokensIn-u.TokensCached), env.Usage.PromptTime)
 		u.TokensOutPerSecond = ratePerSecond(u.TokensOut, env.Usage.CompletionTime)
 		u.ThroughputReported = true
 	case env.Timings.PromptPerSecond > 0 || env.Timings.PredictedPerSecond > 0:

@@ -5,8 +5,26 @@ import type { LicenseSync, LicenseSyncPut } from '../../lib/types';
 import { LICENSE_POLL_MS, useLicenseClock } from '../../lib/licenseNotice';
 import { formatDateTime } from '../../lib/format';
 import { t } from '../../lib/i18n';
+import { Badge, type Tone } from '../../components/ui';
 
 const endpoint = '/api/v1/admin/system/license/sync';
+
+const HEALTH = ['never', 'healthy', 'stale', 'error', 'disabled'] as const;
+const SUBSCRIPTION = ['active', 'trialing', 'past_due', 'unpaid', 'canceled', 'incomplete', 'incomplete_expired', 'paused'];
+
+function healthTone(health: string): Tone {
+  switch (health) {
+    case 'healthy':
+      return 'success';
+    case 'stale':
+    case 'never':
+      return 'warning';
+    case 'error':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
 
 export function LicenseSyncControls(): ReactNode {
   const client = useQueryClient();
@@ -64,17 +82,79 @@ export function LicenseSyncControls(): ReactNode {
   const blocked = data?.mode === 'offline' || data?.mode === 'file';
   const busy = save.isPending || sync.isPending;
   const stale = data?.health === 'healthy' && !(Date.parse(data.fresh_until ?? '') > now);
-  const health = stale ? 'stale' : data?.health;
+  const rawHealth = stale ? 'stale' : data?.health;
+  const health = (HEALTH as readonly string[]).includes(rawHealth ?? '') ? (rawHealth as string) : 'unknown';
+  const subscription = data?.subscription;
+  const subscriptionStatus = subscription && SUBSCRIPTION.includes(subscription.status) ? subscription.status : 'unknown';
   return (
-    <section className="stack" aria-labelledby="license-sync-heading">
-      <h3 id="license-sync-heading">{t('licenseSync.title')}</h3>
-      <p className="muted small">{t('licenseSync.intro')}</p>
-      {unsupported ? <p role="status">{t('licenseSync.unsupported')}</p> : null}
-      {!unsupported && unavailable ? <p role="status">{t('licenseSync.unavailable')}</p> : null}
-      {data?.mode === 'offline' ? <p role="status">{t('licenseSync.offline')}</p> : null}
-      {data?.mode === 'file' ? <p role="status">{t('licenseSync.file')}</p> : null}
+    <section className="license-sync" aria-labelledby="license-sync-heading">
+      <h3 id="license-sync-heading" className="license-panel-title">
+        {t('licenseSync.title')}
+      </h3>
+      {!data?.enabled ? <p className="muted small">{t('licenseSync.intro')}</p> : null}
+      {unsupported ? (
+        <p role="status" className="small">
+          {t('licenseSync.unsupported')}
+        </p>
+      ) : null}
+      {!unsupported && unavailable ? (
+        <p role="status" className="small">
+          {t('licenseSync.unavailable')}
+        </p>
+      ) : null}
+      {data?.mode === 'offline' ? (
+        <p role="status" className="small">
+          {t('licenseSync.offline')}
+        </p>
+      ) : null}
+      {data?.mode === 'file' ? (
+        <p role="status" className="small">
+          {t('licenseSync.file')}
+        </p>
+      ) : null}
+
+      {!unavailable ? (
+        <dl className="license-details" role="status">
+          <div className="license-detail">
+            <dt>Health</dt>
+            <dd>
+              <Badge tone={healthTone(health)} dot>
+                {`Sync ${health}`}
+              </Badge>
+            </dd>
+          </div>
+          <div className="license-detail">
+            <dt>{t('adminSystem.license.lastSync')}</dt>
+            <dd>{data?.last_success_at ? formatDateTime(data.last_success_at) : t('adminSystem.license.never')}</dd>
+          </div>
+          {data?.last_attempt_at && data.last_attempt_at !== data.last_success_at ? (
+            <div className="license-detail">
+              <dt>{t('adminSystem.license.lastAttempt')}</dt>
+              <dd>{formatDateTime(data.last_attempt_at)}</dd>
+            </div>
+          ) : null}
+          {subscription && subscriptionStatus !== 'active' ? (
+            <div className="license-detail">
+              <dt>Subscription</dt>
+              <dd>{subscriptionStatus.replace(/_/g, ' ')}</dd>
+            </div>
+          ) : null}
+          {data?.fresh_until ? (
+            <div className="license-detail">
+              <dt>Renewal confirmed until</dt>
+              <dd>{formatDateTime(data.fresh_until)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      {health === 'error' || health === 'stale' ? <p className="small license-sync-warn">{t('licenseSync.healthHelp')}</p> : null}
+      {subscription?.cancel_at_period_end ? <p className="small license-sync-warn">{t('licenseSync.canceled')}</p> : null}
+      {subscription && !subscription.auto_renew ? (
+        <p className="small license-sync-warn">{t('licenseSync.unconfirmed')}</p>
+      ) : null}
+
       <form
-        className="stack"
+        className="license-sync-form"
         onSubmit={(event) => {
           event.preventDefault();
           const body: LicenseSyncPut = {};
@@ -87,56 +167,65 @@ export function LicenseSyncControls(): ReactNode {
           save.mutate(body);
         }}
       >
-        <label>
+        <label className="switch">
           <input
             type="checkbox"
             aria-label={t('licenseSync.enable')}
             checked={enabled ?? data?.enabled ?? false}
             disabled={unavailable || busy || data?.enabled_managed === true}
             onChange={(event) => setEnabled(event.target.checked)}
-          />{' '}
-          {t('licenseSync.enable')}
+          />
+          <span>{t('licenseSync.enable')}</span>
         </label>
         {data?.enabled_managed ? <p className="muted small">{t('licenseSync.enabledManaged')}</p> : null}
-        <label>
-          {t('licenseSync.token')}
+        <div className="field">
+          <div className="license-field-head">
+            <label className="field-label" htmlFor="license-sync-token">
+              {t('licenseSync.token')}
+            </label>
+            <label className="license-check small license-clear">
+              <input
+                type="checkbox"
+                aria-label={t('licenseSync.clear')}
+                checked={clearToken}
+                disabled={unavailable || busy || data?.token_managed === true || !data?.has_token}
+                onChange={(event) => {
+                  setClearToken(event.target.checked);
+                  setToken('');
+                }}
+              />
+              <span>{t('licenseSync.clear')}</span>
+            </label>
+          </div>
           <input
+            id="license-sync-token"
+            className="input"
             aria-label={t('licenseSync.token')}
             type="password"
             autoComplete="new-password"
+            placeholder={data?.has_token ? t('licenseSync.tokenPlaceholder') : ''}
             value={token}
             disabled={unavailable || busy || data?.token_managed === true || clearToken}
             onChange={(event) => setToken(event.target.value)}
           />
-        </label>
-        <p className="muted small">
-          {data?.has_token ? t('licenseSync.hasToken') : t('licenseSync.noToken')} {t('licenseSync.tokenHelp')}
-        </p>
+          {data?.has_token ? null : (
+            <span className="field-hint">
+              {t('licenseSync.noToken')} {t('licenseSync.tokenHelp')}
+            </span>
+          )}
+        </div>
         {data?.token_managed ? <p className="muted small">{t('licenseSync.tokenManaged')}</p> : null}
-        <label>
-          <input
-            type="checkbox"
-            aria-label={t('licenseSync.clear')}
-            checked={clearToken}
-            disabled={unavailable || busy || data?.token_managed === true || !data?.has_token}
-            onChange={(event) => {
-              setClearToken(event.target.checked);
-              setToken('');
-            }}
-          />{' '}
-          {t('licenseSync.clear')}
-        </label>
-        <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
+        <div className="license-actions">
           <button
             type="submit"
-            className="btn"
+            className="btn btn-sm"
             disabled={unavailable || busy || (enabled === undefined && !token && !clearToken)}
           >
             {t('licenseSync.save')}
           </button>
           <button
             type="button"
-            className="btn"
+            className="btn btn-sm"
             disabled={
               unavailable ||
               blocked ||
@@ -156,32 +245,10 @@ export function LicenseSyncControls(): ReactNode {
           </button>
         </div>
       </form>
-      {message ? <p role="status">{message}</p> : null}
-      {!unavailable ? (
-        <div className="stack small" role="status">
-          <p>
-            License sync health: {['never', 'healthy', 'stale', 'error', 'disabled'].includes(health ?? '') ? health : 'unknown'}
-          </p>
-          {health === 'error' || health === 'stale' ? <p>{t('licenseSync.healthHelp')}</p> : null}
-          <p>Last attempt: {data?.last_attempt_at ? formatDateTime(data.last_attempt_at) : 'Never'}</p>
-          <p>Last successful sync: {data?.last_success_at ? formatDateTime(data.last_success_at) : 'Never'}</p>
-          {data?.fresh_until ? <p>Renewal confirmation valid until: {formatDateTime(data.fresh_until)}</p> : null}
-          {data?.subscription ? (
-            <>
-              <p>
-                Subscription:{' '}
-                {['active', 'trialing', 'past_due', 'unpaid', 'canceled', 'incomplete', 'incomplete_expired', 'paused'].includes(
-                  data.subscription.status,
-                )
-                  ? data.subscription.status
-                  : 'unknown'}
-              </p>
-              {data.subscription.cancel_at_period_end ? <p>{t('licenseSync.canceled')}</p> : null}
-              {!data.subscription.auto_renew ? <p>{t('licenseSync.unconfirmed')}</p> : null}
-              {data.subscription.paid_through ? <p>Paid through: {formatDateTime(data.subscription.paid_through)}</p> : null}
-            </>
-          ) : null}
-        </div>
+      {message ? (
+        <p role="status" className="small">
+          {message}
+        </p>
       ) : null}
     </section>
   );

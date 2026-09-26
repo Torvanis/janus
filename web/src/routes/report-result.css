@@ -46,10 +46,6 @@
   flex-wrap: wrap;
   align-items: center;
 }
-.report-result nav strong {
-  flex-basis: 100%;
-  font-size: 0.85rem;
-}
 .report-result a,
 .report-result button,
 .report-result select {
@@ -338,9 +334,84 @@
 .report-result-complete > :not(summary) {
   margin-top: 1rem;
 }
-.report-result-exact {
-  display: block;
-  font-size: 0.75rem;
+.report-result :is(th, td).report-result-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.report-result th.report-result-numeric button {
+  margin-left: auto;
+}
+.report-result-change[data-tone='good'] {
+  color: var(--janus-color-success-text, #15803d);
+  font-weight: 600;
+}
+.report-result-change[data-tone='bad'] {
+  color: var(--janus-color-danger-text, #b91c1c);
+  font-weight: 600;
+}
+.report-result-notice {
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+.report-result-gridline {
+  stroke: currentColor;
+  opacity: 0.08;
+}
+.report-result-date-axis {
+  position: relative;
+  min-height: 1.3em;
+}
+.report-result-date-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.report-result-export {
+  position: relative;
+}
+.report-result-export > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.55rem 0.95rem;
+  border-radius: 0.45rem;
+  background: var(--janus-chart-1);
+  color: #fff;
+  font-weight: 600;
+}
+.report-result-export > summary::-webkit-details-marker {
+  display: none;
+}
+.report-result-export > summary::after {
+  content: ' ▾';
+}
+.report-result-export[open] > nav {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 20;
+  width: min(22rem, 90vw);
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: 0.6rem;
+  background: var(--janus-color-bg-surface-raised);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.18);
+}
+.report-result-export nav a {
+  display: grid;
+  gap: 0.1rem;
+  border: 0;
+  background: transparent;
+  color: var(--janus-color-text-primary);
+}
+.report-result-export nav a:hover {
+  background: var(--janus-color-bg-sunken);
+}
+.report-result-export nav a span {
+  font-size: 0.8rem;
   color: var(--janus-color-text-secondary);
 }
 .report-result button[aria-pressed='true'] {
@@ -366,8 +437,9 @@
   .report-result-panel {
     padding: 0.75rem;
   }
-  .report-result-header nav {
-    width: 100%;
+  .report-result-export[open] > nav {
+    left: 0;
+    right: auto;
   }
   .report-result-chart svg text {
     font-size: 16px;

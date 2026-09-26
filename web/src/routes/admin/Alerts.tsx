@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import type { AlertRule } from '../../lib/types';
 import { titleCase } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Field, Modal, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { t } from '../../lib/i18n';
 import { useLicensed } from '../../app/session';
 import { useUrlState } from '../../lib/hooks';
@@ -140,21 +141,17 @@ export function AlertsPage(): ReactNode {
                           <td className="small muted truncate" style={{ maxWidth: 240 }}>
                             {rule.webhook_url || '—'}
                           </td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => sendTest.mutate(rule.id)}
-                              disabled={sendTest.isPending}
-                            >
-                              {t('adminAlerts.sendTest')}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(rule)}>
-                              {t('adminAlerts.edit')}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(rule)}>
-                              {t('tables.delete')}
-                            </button>
+                          <td>
+                            <RowActions>
+                              <IconButton
+                                icon="send"
+                                label={t('adminAlerts.sendTest')}
+                                onClick={() => sendTest.mutate(rule.id)}
+                                disabled={sendTest.isPending}
+                              />
+                              <IconButton icon="edit" label={t('adminAlerts.edit')} onClick={() => setEditing(rule)} />
+                              <IconButton icon="delete" label={t('tables.delete')} danger onClick={() => setDeleting(rule)} />
+                            </RowActions>
                           </td>
                         </tr>
                       ))}

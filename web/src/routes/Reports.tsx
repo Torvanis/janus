@@ -846,6 +846,15 @@ export default function Reports() {
       void client.invalidateQueries({ queryKey: ['reports', 'runs'] });
     },
   });
+  const runSaved = useMutation({
+    mutationFn: (report: SavedReport) =>
+      api.post<{ run: ReportRun }>(`${ROOT}/runs`, { definition: report.definition, report_id: report.id }),
+    onSuccess: ({ run }) => {
+      client.setQueryData(['reports', 'run', run.id], { run });
+      openRun(run.id);
+      void client.invalidateQueries({ queryKey: ['reports', 'runs'] });
+    },
+  });
   const runAction = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'cancel' | 'retry' }) =>
       api.post<{ run: ReportRun }>(`${ROOT}/runs/${encodeURIComponent(id)}/${action}`, {}),
@@ -1053,6 +1062,7 @@ export default function Reports() {
           <section className="card stack">
             <h2>Saved reports</h2>
             {feedback(removeReport.error)}
+            {feedback(runSaved.error)}
             <p className="secondary">Shared definitions do not share data. Each run checks your access.</p>
             <AsyncSection query={saved}>
               {(s) => (
@@ -1093,31 +1103,60 @@ export default function Reports() {
                       {
                         id: 'actions',
                         label: 'Actions',
-                        render: (r) => (
-                          <div className="row wrap">
-                            <button className="btn" onClick={() => openDefinition(r.definition, r)}>
-                              {r.owner_user_id === me?.id ? 'Edit' : 'Use'} {r.definition.name}
-                            </button>
-                            {r.owner_user_id === me?.id && (
-                              <>
+                        render: (r) => {
+                          const latest = latestRuns.get(r.id);
+                          const owner = r.owner_user_id === me?.id;
+                          return (
+                            <div className="row wrap report-library-actions">
+                              {latest?.status === 'complete' && (
                                 <button
-                                  className="btn"
-                                  onClick={() => {
-                                    setScheduleReport(r.id);
-                                    setTab('Schedules');
-                                  }}
+                                  className="btn btn-primary"
+                                  aria-label={`Open latest ${r.definition.name}`}
+                                  onClick={() => openRun(latest.id)}
                                 >
-                                  Schedule {r.definition.name}
+                                  Open latest
                                 </button>
-                                <ConfirmAction
-                                  consequence={`Delete ${r.definition.name}? This removes the saved definition and may stop its schedules.`}
-                                  busy={removeReport.isPending}
-                                  onConfirm={() => removeReport.mutate(r.id)}
-                                >{`Delete ${r.definition.name}`}</ConfirmAction>
-                              </>
-                            )}
-                          </div>
-                        ),
+                              )}
+                              <button
+                                className={`btn ${latest?.status === 'complete' ? '' : 'btn-primary'}`}
+                                aria-label={`Run ${r.definition.name} now`}
+                                disabled={runSaved.isPending || (!!latest && activeRun(latest))}
+                                onClick={() => runSaved.mutate(r)}
+                              >
+                                {latest && activeRun(latest) ? 'Running…' : 'Run now'}
+                              </button>
+                              <button
+                                className="btn btn-ghost"
+                                aria-label={`${owner ? 'Edit' : 'Use'} ${r.definition.name}`}
+                                onClick={() => openDefinition(r.definition, r)}
+                              >
+                                {owner ? 'Edit' : 'Use'}
+                              </button>
+                              {owner && (
+                                <>
+                                  <button
+                                    className="btn btn-ghost"
+                                    aria-label={`Schedule ${r.definition.name}`}
+                                    onClick={() => {
+                                      setScheduleReport(r.id);
+                                      setTab('Schedules');
+                                    }}
+                                  >
+                                    Schedule
+                                  </button>
+                                  <ConfirmAction
+                                    label={`Delete ${r.definition.name}`}
+                                    consequence={`Delete ${r.definition.name}? This removes the saved definition and may stop its schedules.`}
+                                    busy={removeReport.isPending}
+                                    onConfirm={() => removeReport.mutate(r.id)}
+                                  >
+                                    Delete
+                                  </ConfirmAction>
+                                </>
+                              )}
+                            </div>
+                          );
+                        },
                       },
                     ]}
                   />
@@ -1137,8 +1176,8 @@ export default function Reports() {
                         {templateQuestions[t.template] ??
                           `What does ${t.name.toLowerCase()} reveal for this audience and period?`}
                       </p>
-                      <button className="btn" onClick={() => openDefinition(t)}>
-                        Use {t.name}
+                      <button className="btn" aria-label={`Use ${t.name}`} onClick={() => openDefinition(t)}>
+                        Use template
                       </button>
                     </article>
                   ))}

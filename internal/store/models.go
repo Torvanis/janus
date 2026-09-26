@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -142,6 +143,11 @@ type ResolvedModel struct {
 	FellBack       bool
 	FallbackReason string
 	PrimaryModel   *Model
+	// Alternatives are the other enabled models the requested name also
+	// addresses (the same model name served by more than one upstream), in
+	// preference order. Empty for managed aliases, which resolve in exactly
+	// one hop, and for names only one upstream serves.
+	Alternatives []*Model
 }
 
 // WithFallback returns a copy of the resolution switched to its fallback for
@@ -240,11 +246,11 @@ func (s *Store) ResolveModelForRequest(ctx context.Context, name string) (Resolv
 		return ResolvedModel{}, err
 	}
 
-	model, err := s.ModelByName(ctx, name)
+	candidates, err := s.ModelsByName(ctx, name)
 	if err != nil {
 		return ResolvedModel{}, err
 	}
-	return ResolvedModel{Model: model}, nil
+	return ResolvedModel{Model: candidates[0], Alternatives: candidates[1:]}, nil
 }
 
 // ModelByUpstreamAndName loads one model by its owning upstream and native
@@ -284,28 +290,48 @@ const maxRoutableNameLength = 200
 // Managed-model aliases are NOT resolved here — see ResolveModelForRequest,
 // which layers alias resolution on top of this function.
 func (s *Store) ModelByName(ctx context.Context, name string) (*Model, error) {
+	candidates, err := s.ModelsByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return candidates[0], nil
+}
+
+// ModelsByName returns every enabled, servable model a caller-supplied name
+// addresses, best candidate first. Several upstreams may legitimately serve a
+// model under the same name (the same vLLM model on two nodes, or an old and a
+// new endpoint for one deployment); each is its own catalog entry with its own
+// rate card and grants. The name tiers are tried in the same order as before —
+// display name, upstream/display name, native name, upstream/native name —
+// and the first tier with any match supplies all of its matches. Within a
+// tier, the most recently discovered copy comes first: an upstream that has
+// gone away stops being rediscovered, so its copy drifts to the back while
+// the live one stays current. The proxy then picks the first candidate the
+// caller is actually granted (see Server.chooseGrantedCandidate).
+// ErrNotFound when nothing matches.
+func (s *Store) ModelsByName(ctx context.Context, name string) ([]*Model, error) {
 	models, err := s.ListModels(ctx, ModelFilter{Status: ModelEnabled, Servable: true})
 	if err != nil {
 		return nil, err
 	}
-	for _, m := range models {
-		if m.DisplayName != "" && strings.EqualFold(m.DisplayName, name) {
-			return m, nil
-		}
+	tiers := []func(m *Model) bool{
+		func(m *Model) bool { return m.DisplayName != "" && strings.EqualFold(m.DisplayName, name) },
+		func(m *Model) bool {
+			return m.DisplayName != "" && strings.EqualFold(m.UpstreamName+"/"+m.DisplayName, name)
+		},
+		func(m *Model) bool { return strings.EqualFold(m.Name, name) },
+		func(m *Model) bool { return strings.EqualFold(m.UpstreamName+"/"+m.Name, name) },
 	}
-	for _, m := range models {
-		if m.DisplayName != "" && strings.EqualFold(m.UpstreamName+"/"+m.DisplayName, name) {
-			return m, nil
+	for _, matches := range tiers {
+		var out []*Model
+		for _, m := range models {
+			if matches(m) {
+				out = append(out, m)
+			}
 		}
-	}
-	for _, m := range models {
-		if strings.EqualFold(m.Name, name) {
-			return m, nil
-		}
-	}
-	for _, m := range models {
-		if strings.EqualFold(m.UpstreamName+"/"+m.Name, name) {
-			return m, nil
+		if len(out) > 0 {
+			sort.SliceStable(out, func(i, j int) bool { return out[i].DiscoveredAt.After(out[j].DiscoveredAt) })
+			return out, nil
 		}
 	}
 	return nil, ErrNotFound

@@ -2,9 +2,9 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
-import type { Breakdown, QuotaStatus, Team, Totals } from '../lib/types';
+import type { Breakdown, QuotaStatus, Team, TimePoint, Totals } from '../lib/types';
 import { formatDateTime, formatNumber, formatUSD } from '../lib/format';
-import { BarList, type MetricKey } from '../components/charts';
+import { AreaChart, BarList, breakdownValue, formatMetric, type MetricKey } from '../components/charts';
 import { AsyncSection, Badge, EmptyState, Field, useToast } from '../components/ui';
 import { useUrlState } from '../lib/hooks';
 import { t } from '../lib/i18n';
@@ -19,6 +19,7 @@ interface TeamDashboard {
   totals: Totals;
   per_model: Breakdown[];
   per_member: Breakdown[];
+  series?: TimePoint[];
   can_see_member_detail: boolean;
   member_count: number;
 }
@@ -46,34 +47,36 @@ export function TeamPage({
   const resolvedTeamId = teamId ?? dashboard.data?.team?.id;
   const detail = useQuery({
     queryKey: ['teams', 'detail', resolvedTeamId],
-    queryFn: () =>
-      api.get<{ membership_role: string; actor_role: string; can_manage: boolean; pending_request_count?: number }>(
-        `/api/v1/teams/${resolvedTeamId}`,
-      ),
+    queryFn: () => api.get<TeamDetail>(`/api/v1/teams/${resolvedTeamId}`),
     enabled: Boolean(resolvedTeamId),
     refetchInterval: 30000,
   });
   const manageHref = `${basePath}/${resolvedTeamId}?view=manage`;
   const membership = detail.data?.membership_role;
+  const team = dashboard.data?.team;
 
   return (
     <div className="page team-dashboard">
-      <Link className="small" to={`${basePath}?view=browse`}>
-        {administration ? 'All teams' : 'My teams'}
-      </Link>
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">{dashboard.data?.team?.name ?? t('team.fallbackTitle')}</h1>
-          <p className="page-subtitle">Team usage · activity attributed to this team, including former members.</p>
+      {administration ? (
+        <Link className="small" to={`${basePath}?view=browse`}>
+          All teams
+        </Link>
+      ) : null}
+      <header className="team-hero">
+        <div className="team-hero-id">
+          <h1 className="page-title">{team?.name ?? t('team.fallbackTitle')}</h1>
           <div className="team-dashboard-context">
-            {membership ? <span>Team membership: {membership.charAt(0).toUpperCase() + membership.slice(1)}</span> : null}
+            {membership ? (
+              <span className="team-role-pill">Team membership: {membership.charAt(0).toUpperCase() + membership.slice(1)}</span>
+            ) : null}
             {detail.data?.actor_role === 'admin' ? <Badge tone="neutral">Organization administrator</Badge> : null}
+            {team?.lead_name ? <span className="muted">Led by {team.lead_name}</span> : null}
           </div>
         </div>
         <div className="team-dashboard-actions">
           <RangePicker value={range} onChange={setRange} />
           {administration && detail.data?.can_manage ? (
-            <Link className="btn btn-secondary" to={manageHref}>
+            <Link className="btn btn-secondary btn-sm" to={manageHref}>
               Manage team
             </Link>
           ) : null}
@@ -100,75 +103,90 @@ export function TeamPage({
         {(data) => (
           <>
             {data.teams.length > 1 ? (
-              <div className="segmented" role="group" aria-label={t('team.chooseTeam')}>
-                {data.teams.map((team) => (
+              <nav className="team-switcher" aria-label={t('team.chooseTeam')}>
+                {data.teams.map((option) => (
                   <Link
-                    key={team.id}
-                    to={`${basePath}/${team.id}${qs({ range })}`}
-                    aria-current={team.id === data.team?.id ? 'page' : undefined}
+                    key={option.id}
+                    to={`${basePath}/${option.id}${qs({ range })}`}
+                    aria-current={option.id === data.team?.id ? 'page' : undefined}
                   >
-                    {team.name}
+                    {option.name}
                   </Link>
                 ))}
-              </div>
+              </nav>
             ) : null}
 
-            <div className="grid grid-tiles">
-              <Tile label={t('team.members')} value={formatNumber(data.member_count)} />
-              <Tile label={t('dashboard.requests')} value={formatNumber(data.totals.request_count)} />
-              <Tile
+            <dl className="team-stats" aria-label="Team totals">
+              <Stat label={t('team.members')} value={formatNumber(data.member_count)} />
+              <Stat label={t('dashboard.requests')} value={formatNumber(data.totals.request_count)} />
+              <Stat
                 label={t('tables.tokens')}
                 value={formatNumber(data.totals.tokens_in + data.totals.tokens_out, { compact: true })}
+                sub={`${formatNumber(data.totals.tokens_in, { compact: true })} in · ${formatNumber(data.totals.tokens_out, { compact: true })} out`}
               />
-              {localOnly ? null : <Tile label={t('dashboard.spend')} value={formatUSD(data.totals.cost_nanousd)} />}
-            </div>
+              {localOnly ? null : <Stat label={t('dashboard.spend')} value={formatUSD(data.totals.cost_nanousd)} />}
+              <Stat
+                label="Errors"
+                value={formatNumber(data.totals.error_count)}
+                sub={
+                  data.totals.request_count
+                    ? `${((data.totals.error_count / data.totals.request_count) * 100).toFixed(1)}% of requests`
+                    : undefined
+                }
+              />
+            </dl>
 
-            <div className="team-dashboard-chart-toolbar">
-              <h2>Usage breakdown</h2>
-              <label className="small">
-                Chart metric
-                <select
-                  className="select"
-                  aria-label="Chart metric"
-                  value={chartMetric}
-                  onChange={(event) => setChosenMetric(event.target.value as MetricKey)}
-                >
-                  <option value="requests">Requests</option>
-                  <option value="tokens">Tokens (input + output)</option>
-                  {!localOnly ? <option value="cost">Recorded spend (USD)</option> : null}
-                </select>
-              </label>
-            </div>
-            <div className="grid grid-halves">
-              <section className="card">
-                <div className="card-header">
-                  <h2>{metricLabel} by model</h2>
-                </div>
-                <BarList items={data.per_model} metric={chartMetric} emptyLabel={t('team.noTeamUsage')} />
-              </section>
+            <div className="team-layout">
+              <div className="team-main">
+                <section className="card">
+                  <div className="card-header">
+                    <h2>{metricLabel} over time</h2>
+                    <label className="team-metric">
+                      <span>Chart metric</span>
+                      <select
+                        className="select"
+                        aria-label="Chart metric"
+                        value={chartMetric}
+                        onChange={(event) => setChosenMetric(event.target.value as MetricKey)}
+                      >
+                        <option value="requests">Requests</option>
+                        <option value="tokens">Tokens (input + output)</option>
+                        {!localOnly ? <option value="cost">Recorded spend (USD)</option> : null}
+                      </select>
+                    </label>
+                  </div>
+                  <AreaChart series={data.series ?? []} metric={chartMetric} height={170} label={`Team ${metricLabel.toLowerCase()}`} />
+                </section>
+                <section className="card">
+                  <div className="card-header">
+                    <h2>{metricLabel} by model</h2>
+                  </div>
+                  <BarList items={data.per_model} metric={chartMetric} emptyLabel={t('team.noTeamUsage')} />
+                </section>
+              </div>
 
-              <section className="card">
+              <aside className="card team-roster" aria-label="Team members">
                 <div className="card-header">
-                  <h2>{metricLabel} by member</h2>
+                  <h2>
+                    {metricLabel} by member
+                    <span className="team-roster-count">{formatNumber(data.member_count)}</span>
+                  </h2>
                   {data.can_see_member_detail ? (
                     <Badge tone="primary">Member detail</Badge>
                   ) : (
                     <Badge tone="neutral">{t('team.anonymised')}</Badge>
                   )}
                 </div>
-                {data.per_member.length === 0 ? (
-                  <EmptyState title={t('team.noActivityTitle')} body={t('team.noActivityBody')} />
-                ) : (
-                  <>
-                    <BarList items={data.per_member} metric={chartMetric} emptyLabel={t('team.noMemberActivity')} />
-                    {!data.can_see_member_detail ? (
-                      <p className="small muted" style={{ marginTop: 'var(--janus-space-3)' }}>
-                        {t('team.anonymisedNote')}
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </section>
+                <MemberRoster
+                  members={detail.data?.members ?? []}
+                  usage={data.per_member}
+                  metric={chartMetric}
+                  detailed={data.can_see_member_detail}
+                />
+                {!data.can_see_member_detail && data.per_member.length > 0 ? (
+                  <p className="small muted">{t('team.anonymisedNote')}</p>
+                ) : null}
+              </aside>
             </div>
 
             <TeamQuotaManagement teamId={data.team?.id} readOnly />
@@ -176,6 +194,85 @@ export function TeamPage({
         )}
       </AsyncSection>
     </div>
+  );
+}
+
+interface TeamDetail {
+  membership_role: string;
+  actor_role: string;
+  can_manage: boolean;
+  pending_request_count?: number;
+  members?: Array<{ user_id: string; email: string; name?: string; role: string }>;
+}
+
+function initials(name: string): string {
+  const parts = name.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+/**
+ * One compact row per person: avatar, name, role, and — when the viewer may
+ * see who is who — that person's share of the team's usage in the selected
+ * metric. Members with no activity in the range still appear (at zero), so
+ * the roster doubles as the member list. Without member detail, usage rows
+ * are anonymous and the roster shows only names and roles.
+ */
+function MemberRoster({
+  members,
+  usage,
+  metric,
+  detailed,
+}: {
+  members: NonNullable<TeamDetail['members']>;
+  usage: Breakdown[];
+  metric: MetricKey;
+  detailed: boolean;
+}): ReactNode {
+  const byUser = new Map(usage.map((row) => [row.key, row]));
+  const rows = detailed
+    ? [
+        ...members.map((m) => ({
+          key: m.user_id,
+          name: m.name || m.email,
+          email: m.name ? m.email : '',
+          role: m.role,
+          value: byUser.has(m.user_id) ? breakdownValue(byUser.get(m.user_id)!, metric) : 0,
+        })),
+        // Former members still carry attributed usage in the range.
+        ...usage
+          .filter((row) => row.key && !members.some((m) => m.user_id === row.key))
+          .map((row) => ({ key: row.key, name: row.label, email: '', role: 'former', value: breakdownValue(row, metric) })),
+      ]
+    : members.map((m) => ({ key: m.user_id, name: m.name || m.email, email: m.name ? m.email : '', role: m.role, value: -1 }));
+  rows.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  if (!rows.length) return <p className="small muted">{t('team.noMemberActivity')}</p>;
+  return (
+    <ul className="roster">
+      {rows.map((row) => (
+        <li key={row.key} className="roster-row">
+          <span className="roster-avatar" aria-hidden="true">
+            {initials(row.name)}
+          </span>
+          <span className="roster-id">
+            <span className="roster-name truncate" title={row.email || row.name}>
+              {row.name}
+            </span>
+            {row.role !== 'member' ? <span className="roster-role">{row.role}</span> : null}
+          </span>
+          {row.value > 0 ? (
+            <span className="roster-usage">
+              <span className="roster-bar" aria-hidden="true">
+                <span style={{ width: `${Math.max(3, (row.value / max) * 100)}%` }} />
+              </span>
+              <span className="num small muted">{formatMetric(row.value, metric)}</span>
+            </span>
+          ) : row.value === 0 ? (
+            <span className="roster-idle">No activity</span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -383,11 +480,14 @@ export function TeamQuotaManagement({ teamId, readOnly = false }: { teamId?: str
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }): ReactNode {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }): ReactNode {
   return (
-    <article className="tile">
-      <div className="overline">{label}</div>
-      <div className="tile-value">{value}</div>
-    </article>
+    <div className="team-stat">
+      <dt className="overline">{label}</dt>
+      <dd>
+        <span className="team-stat-value">{value}</span>
+        {sub ? <span className="team-stat-sub">{sub}</span> : null}
+      </dd>
+    </div>
   );
 }

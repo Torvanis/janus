@@ -69,6 +69,17 @@ func TestOpenAIUsageDerivesGroqThroughput(t *testing.T) {
 	}
 }
 
+// Groq's prompt_time covers only the prompt it actually processed, so cached
+// prompt tokens must not be divided by it: 100 prompt tokens with 80 cached
+// over 0.01s is 2,000 tok/s, not 10,000.
+func TestOpenAIUsageGroqThroughputExcludesCachedPrompt(t *testing.T) {
+	body := []byte(`{"usage":{"prompt_tokens":100,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":80},"prompt_time":0.01,"completion_time":0.1}}`)
+	u, _ := parseOpenAIUsage(body)
+	if !u.ThroughputReported || !approx(u.TokensInPerSecond, 2000) {
+		t.Fatalf("input throughput = %v, want 2000 (cached tokens excluded)", u.TokensInPerSecond)
+	}
+}
+
 func TestOpenAIUsageReadsLlamaCppTimings(t *testing.T) {
 	body := []byte(`{"usage":{"prompt_tokens":20,"completion_tokens":30},"timings":{"prompt_n":20,"prompt_per_second":800.5,"predicted_n":30,"predicted_per_second":41.2}}`)
 	u, _ := parseOpenAIUsage(body)

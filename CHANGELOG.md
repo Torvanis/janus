@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026.9.5] — 2026-09-26
+
+### Added
+
+- One-paste activation: install the activation code from the license portal and tick **Automatically renew and sync** in the same step. The gateway installs the key, stores the sync token, and reports any sync problem immediately.
+- License & updates opens with a single verdict: a green check when the gateway is licensed and healthy, a yellow **Attention needed** listing each reason (expiring without confirmed renewal, grace period, over seats or nodes, renewal sync stale or failing, cancellation scheduled, clock skew, unsupported version), and a red **Not properly licensed** when the key is expired or invalid. The page fits on one screen at common desktop sizes.
+
+### Changed
+
+- Reports: a redesigned result view, library actions, and cleaner PDF, CSV and spreadsheet exports.
+- My teams is one compact workspace per team: header, a summary strip (members, requests, tokens, spend, error rate), an activity chart, usage by model and the member roster side by side.
+- Admin tables act from one line per row: row actions are icon buttons whose label appears on hover and keyboard focus, and the actions column stays pinned on narrow windows. People uses tighter rows and a Rows per page choice (25–200).
+- License sync token and key fields use the standard themed inputs.
+
+### Fixed
+
+- The same model name served by more than one upstream no longer breaks grants: a request goes to the most recently discovered copy the caller is granted and is billed at that copy's rate card. The Models and Grants pages label copies by upstream.
+- Input tokens-per-second no longer counts prompt-cache hits as processed input.
+- An upstream can be created with the name of a deleted one (deleted upstreams keep usage history but no longer reserve their name).
+- The container image no longer declares `VOLUME /data`, so PostgreSQL deployments do not get an anonymous volume. SQLite users still mount `/data` as documented.
+- "Rows per page" no longer wraps on narrow tables; Help's topic list and snippet tabs render correctly.
+
 ## [2026.9.4] — 2026-09-25
 
 ### Fixed

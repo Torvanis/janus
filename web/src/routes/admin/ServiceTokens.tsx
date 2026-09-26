@@ -6,6 +6,7 @@ import { api, qs } from '../../lib/api';
 import type { ServiceTokenRow } from '../../lib/types';
 import { formatNumber, formatRelative, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, EmptyState, Field, Modal, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { FilterSelect, SearchInput } from '../shared';
 import { useLocalOnly } from '../../app/session';
@@ -193,7 +194,7 @@ export function ServiceTokensPage(): ReactNode {
               >
                 {(visible) => (
                   <div className="table-wrap">
-                    <table className="data">
+                    <table className="data data-compact">
                       <thead>
                         <tr>
                           <SortableColumn label={t('adminServiceTokens.colName')} field="name" sort={sort} onSort={setSort} />
@@ -256,14 +257,12 @@ export function ServiceTokensPage(): ReactNode {
                       <tbody>
                         {visible.map((token) => (
                           <tr key={token.id}>
-                            <td>
+                            <td className="cell-person">
                               <Link to={`/admin/service-tokens/${token.id}`}>{token.name}</Link>
-                              {token.description ? (
-                                <div className="small muted truncate" style={{ maxWidth: 260 }}>
-                                  {token.description}
-                                </div>
-                              ) : null}
-                              <div className="small muted mono">{token.prefix}…</div>
+                              <span className="cell-sub truncate" style={{ maxWidth: 240 }} title={token.description || undefined}>
+                                {token.description ? `${token.description} · ` : ''}
+                                <span className="mono">{token.prefix}…</span>
+                              </span>
                             </td>
                             <td>
                               {token.status === 'active' ? (
@@ -302,18 +301,17 @@ export function ServiceTokensPage(): ReactNode {
                             <td className="small muted">
                               {token.expires_at ? formatRelative(token.expires_at) : t('adminServiceTokens.noExpiry')}
                             </td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(token)}>
-                                {t('adminServiceTokens.edit')}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => setRevoking(token)}
-                                disabled={token.status === 'revoked'}
-                              >
-                                {t('adminServiceTokens.revoke')}
-                              </button>
+                            <td>
+                              <RowActions>
+                                <IconButton icon="edit" label={t('adminServiceTokens.edit')} onClick={() => setEditing(token)} />
+                                <IconButton
+                                  icon="revoke"
+                                  label={t('adminServiceTokens.revoke')}
+                                  danger
+                                  onClick={() => setRevoking(token)}
+                                  disabled={token.status === 'revoked'}
+                                />
+                              </RowActions>
                             </td>
                           </tr>
                         ))}

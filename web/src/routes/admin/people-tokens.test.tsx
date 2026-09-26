@@ -88,3 +88,32 @@ describe('admin users tokens-out column', () => {
     expect(cell.className).toContain('num');
   });
 });
+
+describe('compact people table', () => {
+  it('drops the Groups column and keeps each row one line of icon actions', async () => {
+    renderUsers();
+    await screen.findByRole('button', { name: /Ada Lovelace/ });
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+    expect(headers).not.toContain('Groups');
+    expect(screen.queryByText('ml-platform')).toBeNull();
+    // Each action is an icon button whose label is its accessible name and tooltip.
+    for (const name of ['Disable', 'Reset password', 'Reset two-factor', 'Delete']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.className).toContain('icon-btn');
+      expect(button.getAttribute('data-tooltip')).toBe(name);
+      expect(button.textContent).toBe('');
+    }
+  });
+
+  it('pages large organizations with a selectable page size', async () => {
+    renderUsers();
+    await screen.findByRole('button', { name: /Ada Lovelace/ });
+    const size = screen.getByRole('combobox', { name: 'Rows per page' });
+    expect((size as HTMLSelectElement).value).toBe('50');
+    const { fireEvent, waitFor } = await import('@testing-library/react');
+    fireEvent.change(size, { target: { value: '200' } });
+    await waitFor(() =>
+      expect(mocked.get.mock.calls.some(([path]) => String(path).includes('limit=200'))).toBe(true),
+    );
+  });
+});

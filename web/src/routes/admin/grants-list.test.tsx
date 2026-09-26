@@ -93,6 +93,28 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('GrantsPage — the same model on two upstreams', () => {
+  it('keeps each copy in its own group and names the upstream', async () => {
+    // Two upstreams serve "llama-3": each copy has its own grants, so they
+    // must not merge into one card that hides which copy a grant covers.
+    const fleet = [
+      grant({ id: 'old', model_name: 'llama-3', model_id: 'm-old', upstream_name: 'vllm-node-a', grantee_name: 'Ada Lovelace' }),
+      grant({ id: 'new', model_name: 'llama-3', model_id: 'm-new', upstream_name: 'vllm-node-b', grantee_id: 'u-2', grantee_name: 'Bob Byte' }),
+      grant({ id: 'solo', model_name: 'solo-model', model_id: 'm-solo', upstream_name: 'openai' }),
+    ];
+    vi.stubGlobal('fetch', mockFetch(fleet));
+    renderPage();
+    expect((await screen.findByTestId('grants-group-count')).textContent).toBe('3 of 3 models');
+    const groups = screen.getAllByTestId('grants-group').map((g) => g.textContent ?? '');
+    const llama = groups.filter((text) => text.includes('llama-3'));
+    expect(llama).toHaveLength(2);
+    expect(llama.some((text) => text.includes('vllm-node-a') && text.includes('Ada Lovelace'))).toBe(true);
+    expect(llama.some((text) => text.includes('vllm-node-b') && text.includes('Bob Byte'))).toBe(true);
+    // A name only one upstream serves carries no upstream label.
+    expect(groups.find((text) => text.includes('solo-model'))).not.toContain('openai');
+  });
+});
+
 describe('GrantsPage — scalable list', () => {
   it('pages model cards twelve at a time and collapses them to a preview', async () => {
     vi.stubGlobal('fetch', mockFetch(bigFleet()));

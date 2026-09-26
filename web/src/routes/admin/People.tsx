@@ -7,6 +7,7 @@ import { formatNumber, formatRelative, formatUSD, statusTone, titleCase } from '
 import { AreaChart, type MetricKey } from '../../components/charts';
 import { ChargedTeam } from '../../components/ChargedTeam';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, EmptyState, Field, Modal, Pagination, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { DetailRow, FilterSelect, SearchInput, SortHeader, TokenSizeFilter, tokenSizeParams } from '../shared';
 import { RetainedPanel } from '../../components/RouteTopNav';
@@ -17,6 +18,7 @@ import { t } from '../../lib/i18n';
 import { CreateLocalUserModal, ResetPasswordModal } from './LocalUserDialogs';
 
 const PAGE_SIZE = 50;
+const PAGE_SIZES = [25, 50, 100, 200];
 
 /** sortable fields on GET /admin/v1/users. */
 type UserSortField = 'email' | 'name' | 'created' | 'last_login';
@@ -44,16 +46,18 @@ function SortableColumn({
   field,
   sort,
   onSort,
+  className,
 }: {
   label: string;
   field: UserSortField;
   sort: string;
   onSort: (next: string) => void;
+  className?: string;
 }): ReactNode {
   const current = parseUserSort(sort);
   const active = current.field === field;
   return (
-    <th scope="col" aria-sort={active ? (current.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th scope="col" className={className} aria-sort={active ? (current.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button type="button" onClick={() => onSort(`${field}_${active && current.dir === 'asc' ? 'desc' : 'asc'}`)}>
         {label}
         <span aria-hidden="true" style={{ opacity: active ? 1 : 0.3 }}>
@@ -101,6 +105,8 @@ function UsersTab(): ReactNode {
   const [teamId] = useUrlState('team_id', '');
   const [sort] = useUrlState('sort', '');
   const [page, setPage] = useUrlState('page', '0');
+  const [sizeParam] = useUrlState('size', String(PAGE_SIZE));
+  const pageSize = PAGE_SIZES.includes(Number(sizeParam)) ? Number(sizeParam) : PAGE_SIZE;
   // Filter/search changes must atomically reset the page offset, otherwise a
   // user standing on page ≥2 who narrows the list lands on an out-of-range
   // offset and gets an empty page.
@@ -135,10 +141,10 @@ function UsersTab(): ReactNode {
   // Each AdminUserRow returned by this endpoint includes tokens_out_30d
   // (30-day aggregated output tokens), rendered in the "Tokens out" column below.
   const users = useQuery({
-    queryKey: ['admin', 'users', debounced, role, active, groupId, teamId, sort, offset],
+    queryKey: ['admin', 'users', debounced, role, active, groupId, teamId, sort, offset, pageSize],
     queryFn: () =>
       api.get<{ users: AdminUserRow[]; total_count: number }>(
-        `/api/v1/admin/users${qs({ search: debounced, role, active, group_id: groupId, team_id: teamId, sort, limit: PAGE_SIZE, offset })}`,
+        `/api/v1/admin/users${qs({ search: debounced, role, active, group_id: groupId, team_id: teamId, sort, limit: pageSize, offset })}`,
       ),
   });
 
@@ -263,14 +269,36 @@ function UsersTab(): ReactNode {
               <EmptyState title={t('adminPeople.noMatchTitle')} body={t('adminPeople.noMatchBody')} />
             ) : (
               <>
+                <div className="table-toolbar">
+                  <span className="small muted">
+                    {t('pagination.range', {
+                      from: data.total_count ? offset + 1 : 0,
+                      to: Math.min(offset + data.users.length, data.total_count),
+                      total: data.total_count,
+                    })}
+                  </span>
+                  <label className="page-size">
+                    Rows per page
+                    <select
+                      className="select"
+                      value={pageSize}
+                      onChange={(event) => batchParams({ size: event.target.value, page: null })}
+                    >
+                      {PAGE_SIZES.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <div className="table-wrap">
-                  <table className="data">
+                  <table className="data data-compact">
                     <thead>
                       <tr>
                         <SortableColumn label={t('adminPeople.colName')} field="name" sort={sort} onSort={setSort} />
                         <SortableColumn label={t('adminPeople.colEmail')} field="email" sort={sort} onSort={setSort} />
                         <th scope="col">{t('adminPeople.role')}</th>
-                        <th scope="col">{t('adminPeople.colGroups')}</th>
                         <SortableColumn label={t('adminPeople.colCreated')} field="created" sort={sort} onSort={setSort} />
                         <SortableColumn label={t('adminPeople.colLastSignIn')} field="last_login" sort={sort} onSort={setSort} />
                         {localOnly ? null : <th scope="col">{t('adminPeople.colSpend30d')}</th>}
@@ -284,22 +312,18 @@ function UsersTab(): ReactNode {
                     <tbody>
                       {data.users.map((user) => (
                         <tr key={user.id}>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: 0, minHeight: 'auto', textAlign: 'left' }}
-                              onClick={() => openDetail(user.id)}
-                            >
+                          <td className="cell-person">
+                            <button type="button" className="person-link" onClick={() => openDetail(user.id)}>
                               {user.name || user.email}
                             </button>
                           </td>
-                          <td className="small muted">{user.email}</td>
+                          <td className="small muted cell-email" title={user.email}>
+                            {user.email}
+                          </td>
                           <td>
                             <select
-                              className="select"
+                              className="select select-inline"
                               value={user.role}
-                              style={{ minHeight: 32, padding: '4px 8px', fontSize: 'var(--janus-text-xs)' }}
                               onChange={(event) => setPendingChange({ user, role: event.target.value })}
                               disabled={user.id === me?.id}
                               aria-label={t('adminPeople.roleFor', { name: user.email })}
@@ -308,9 +332,6 @@ function UsersTab(): ReactNode {
                               <option value="team_lead">{t('adminPeople.roleTeamLead')}</option>
                               <option value="admin">{t('adminPeople.roleAdmin')}</option>
                             </select>
-                          </td>
-                          <td className="small muted truncate" style={{ maxWidth: 200 }}>
-                            {user.groups.length ? user.groups.join(', ') : '—'}
                           </td>
                           <td className="small muted">{formatRelative(user.created_at)}</td>
                           <td className="small muted">{formatRelative(user.last_login_at)}</td>
@@ -325,34 +346,29 @@ function UsersTab(): ReactNode {
                               <Badge tone="danger">{t('adminPeople.disabled')}</Badge>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setPendingChange({ user, is_active: !user.is_active })}
-                              disabled={user.id === me?.id}
-                            >
-                              {user.is_active ? t('adminPeople.disable') : t('adminPeople.enable')}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResetUser(user)}>
-                              {t('adminPeople.resetPassword')}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => resetTotp.mutate(user)}
-                              disabled={user.id === me?.id}
-                            >
-                              {t('adminPeople.resetTotp')}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setPendingDelete(user)}
-                              disabled={user.id === me?.id}
-                            >
-                              {t('tables.delete')}
-                            </button>
+                          <td>
+                            <RowActions>
+                              <IconButton
+                                icon={user.is_active ? 'disable' : 'enable'}
+                                label={user.is_active ? t('adminPeople.disable') : t('adminPeople.enable')}
+                                onClick={() => setPendingChange({ user, is_active: !user.is_active })}
+                                disabled={user.id === me?.id}
+                              />
+                              <IconButton icon="key" label={t('adminPeople.resetPassword')} onClick={() => setResetUser(user)} />
+                              <IconButton
+                                icon="shield"
+                                label={t('adminPeople.resetTotp')}
+                                onClick={() => resetTotp.mutate(user)}
+                                disabled={user.id === me?.id}
+                              />
+                              <IconButton
+                                icon="delete"
+                                label={t('tables.delete')}
+                                danger
+                                onClick={() => setPendingDelete(user)}
+                                disabled={user.id === me?.id}
+                              />
+                            </RowActions>
                           </td>
                         </tr>
                       ))}
@@ -361,7 +377,7 @@ function UsersTab(): ReactNode {
                 </div>
                 <Pagination
                   offset={offset}
-                  limit={PAGE_SIZE}
+                  limit={pageSize}
                   total={data.total_count}
                   onChange={(next) => setPage(String(next))}
                 />

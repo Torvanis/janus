@@ -462,6 +462,8 @@ export interface Grant {
   /** Whether model_id names a real catalog model or a managed alias. */
   model_kind: 'model' | 'managed';
   model_name: string;
+  /** Upstream serving the granted model; absent for managed aliases. */
+  upstream_name?: string;
   grantee_type: 'user' | 'group' | 'all_users' | 'service_token' | 'all_service_tokens' | 'team' | 'all_teams';
   grantee_id: string;
   grantee_name: string;

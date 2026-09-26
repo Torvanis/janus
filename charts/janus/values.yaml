@@ -5,7 +5,7 @@ nameOverride: ""
 fullnameOverride: ""
 image:
   repository: ghcr.io/torvanis/janus
-  tag: "2026.9.4"
+  tag: "2026.9.5"
   digest: sha256:253e7d2dde5e69997c71192e7fd5e6c12433f2356c51206260d033939a881817
   pullPolicy: IfNotPresent
 imagePullSecrets: []

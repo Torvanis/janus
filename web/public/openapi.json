@@ -1395,7 +1395,11 @@
                 "properties": {
                   "key": {
                     "type": "string",
-                    "description": "A JANUS-LICENSE-1 key exactly as downloaded from the janusedge.com portal."
+                    "description": "A JANUS-LICENSE-1 key, or a JANUS-ACTIVATION-1 activation code (license plus sync token), exactly as issued by the janusedge.com portal."
+                  },
+                  "enable_sync": {
+                    "type": "boolean",
+                    "description": "Activation codes only: turn automatic license renewal and sync on (true) or off (false). Omitted keeps the current choice; a code never enables sync by itself."
                   }
                 }
               }

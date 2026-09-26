@@ -167,16 +167,38 @@ export function GrantsPage(): ReactNode {
       !term ||
       grant.model_name.toLowerCase().includes(term) ||
       grantModelLabel(grant).toLowerCase().includes(term) ||
+      (grant.upstream_name ?? '').toLowerCase().includes(term) ||
       grant.grantee_name.toLowerCase().includes(term)
     );
   });
 
   // Group by the stable native model name (a rename must not split a model's
-  // grants) or by grantee; the heading shows the display name when set.
+  // grants) or by grantee; two upstreams serving the same name are two
+  // separate models with separate grants, so they get separate groups. The
+  // heading shows the display name, and the upstream whenever the name is
+  // shared.
+  const sharedNames = useMemo(() => {
+    const seen = new Map<string, Set<string>>();
+    for (const grant of allGrants) {
+      if (grant.model_kind === 'managed') continue;
+      const ids = seen.get(grant.model_name) ?? new Set<string>();
+      ids.add(grant.model_id);
+      seen.set(grant.model_name, ids);
+    }
+    return new Set([...seen.entries()].filter(([, ids]) => ids.size > 1).map(([name]) => name));
+  }, [allGrants]);
   const groups = ((): GrantGroup[] => {
     const map = new Map<string, Grant[]>();
     for (const grant of filtered) {
-      const key = view === 'model' ? grant.model_name : granteeKey(grant);
+      // The native name stays the key (it is also the URL key for the
+      // group's paging state); only a name several upstreams serve gets the
+      // upstream appended, so each copy is its own group.
+      const key =
+        view === 'model'
+          ? sharedNames.has(grant.model_name) && grant.model_kind !== 'managed'
+            ? `${grant.model_name}@${grant.upstream_name ?? grant.model_id}`
+            : grant.model_name
+          : granteeKey(grant);
       map.set(key, [...(map.get(key) ?? []), grant]);
     }
     return [...map.entries()]
@@ -189,7 +211,9 @@ export function GrantsPage(): ReactNode {
         );
         if (view === 'model') {
           const label = grantModelLabel(first);
-          return { key, title: label, subtitle: label !== key ? key : undefined, grants: sorted };
+          const parts = [label !== first.model_name ? first.model_name : '', sharedNames.has(first.model_name) ? first.upstream_name ?? '' : '']
+            .filter(Boolean);
+          return { key, title: label, subtitle: parts.length ? parts.join(' · ') : undefined, grants: sorted };
         }
         return {
           key,
@@ -425,6 +449,7 @@ export function GrantsPage(): ReactNode {
                         columns={[
                           { id: 'model', label: 'Model', value: grantModelLabel, render: grantModelLabel },
                           { id: 'native', label: 'Native model', value: (grant) => grant.model_name, render: (grant) => grant.model_name },
+                          { id: 'upstream', label: 'Upstream', value: (grant) => grant.upstream_name ?? '', render: (grant) => grant.upstream_name ?? '' },
                           { id: 'grantee', label: 'Grantee', value: (grant) => grant.grantee_name, render: (grant) => grant.grantee_name },
                           { id: 'type', label: 'Type', value: (grant) => granteeTypeLabel(grant.grantee_type), render: (grant) => granteeTypeLabel(grant.grantee_type) },
                         ]}
@@ -449,6 +474,9 @@ export function GrantsPage(): ReactNode {
                                 <span>{grantModelLabel(grant)}</span>
                                 {grantModelLabel(grant) !== grant.model_name ? (
                                   <span className="small muted mono">{grant.model_name}</span>
+                                ) : null}
+                                {grant.upstream_name && sharedNames.has(grant.model_name) ? (
+                                  <span className="small muted">{grant.upstream_name}</span>
                                 ) : null}
                                 {grant.model_kind === 'managed' ? <Badge tone="info">{t('adminGrants.alias')}</Badge> : null}
                               </span>

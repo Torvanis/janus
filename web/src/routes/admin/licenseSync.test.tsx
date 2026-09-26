@@ -36,8 +36,8 @@ describe('license sync controls', () => {
     vi.mocked(api.get).mockResolvedValue({ license_sync: disabled });
     vi.mocked(api.put).mockResolvedValue({});
     mount();
-    await screen.findByText('License sync health: disabled');
-    expect(screen.getByLabelText('Enable automatic license sync')).toHaveProperty('checked', false);
+    await screen.findByText('Sync disabled');
+    expect(screen.getByLabelText('Automatically renew and sync')).toHaveProperty('checked', false);
     const input = screen.getByLabelText('License sync token');
     expect(input).toHaveProperty('type', 'password');
     fireEvent.change(input, { target: { value: 'fixture-token-only' } });
@@ -46,15 +46,15 @@ describe('license sync controls', () => {
       expect(api.put).toHaveBeenLastCalledWith('/api/v1/admin/system/license/sync', { token: 'fixture-token-only' }),
     );
     await waitFor(() => expect(input).toHaveProperty('value', ''));
-    fireEvent.click(screen.getByLabelText('Enable automatic license sync'));
+    fireEvent.click(screen.getByLabelText('Automatically renew and sync'));
     fireEvent.click(screen.getByText('Save license sync'));
     await waitFor(() => expect(api.put).toHaveBeenLastCalledWith('/api/v1/admin/system/license/sync', { enabled: true }));
   });
   it.each(['enabled_managed', 'token_managed'] as const)('pins only %s', async (flag) => {
     vi.mocked(api.get).mockResolvedValue({ license_sync: { ...disabled, [flag]: true } });
     mount();
-    await screen.findByText('License sync health: disabled');
-    expect(screen.getByLabelText('Enable automatic license sync')).toHaveProperty('disabled', flag === 'enabled_managed');
+    await screen.findByText('Sync disabled');
+    expect(screen.getByLabelText('Automatically renew and sync')).toHaveProperty('disabled', flag === 'enabled_managed');
     expect(screen.getByLabelText('License sync token')).toHaveProperty('disabled', flag === 'token_managed');
   });
   it('clears explicitly, preserves blank and runs Sync now without token echo', async () => {
@@ -62,11 +62,11 @@ describe('license sync controls', () => {
     vi.mocked(api.post).mockResolvedValue({});
     vi.mocked(api.put).mockResolvedValue({});
     mount();
-    await screen.findByText('License sync health: disabled');
+    await screen.findByText('Sync disabled');
     fireEvent.click(screen.getByText('Sync now'));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/admin/system/license/sync', {}));
     await screen.findByText('License sync completed.');
-    fireEvent.click(screen.getByLabelText('Enable automatic license sync'));
+    fireEvent.click(screen.getByLabelText('Automatically renew and sync'));
     fireEvent.click(screen.getByText('Save license sync'));
     await waitFor(() => expect(api.put).toHaveBeenLastCalledWith('/api/v1/admin/system/license/sync', { enabled: false }));
     await waitFor(() => expect(screen.getByText('Save license sync')).toHaveProperty('disabled', true));
@@ -77,7 +77,7 @@ describe('license sync controls', () => {
   it.each(['offline', 'file'] as const)('blocks network action in %s mode', async (mode) => {
     vi.mocked(api.get).mockResolvedValue({ license_sync: { ...disabled, enabled: true, has_token: true, mode } });
     mount();
-    await screen.findByText('License sync health: disabled');
+    await screen.findByText('Sync disabled');
     expect(screen.getByText('Sync now')).toHaveProperty('disabled', true);
     expect(
       screen.getByText(mode === 'file' ? /File-backed license sync is unsupported/ : /unavailable in offline mode/),
@@ -89,7 +89,7 @@ describe('license sync controls', () => {
     );
     mount();
     await screen.findByText(/does not support license sync/);
-    expect(screen.getByLabelText('Enable automatic license sync')).toHaveProperty('checked', false);
+    expect(screen.getByLabelText('Automatically renew and sync')).toHaveProperty('checked', false);
     expect(screen.queryByText(/fixture-secret/)).toBeNull();
   });
   it('shows cancellation, payment and stale health even without expiry', async () => {
@@ -101,8 +101,8 @@ describe('license sync controls', () => {
       },
     });
     mount();
-    await screen.findByText('License sync health: stale');
-    expect(screen.getByText('Subscription: past_due')).toBeTruthy();
+    await screen.findByText('Sync stale');
+    expect(screen.getByText('Subscription').nextElementSibling?.textContent).toBe('past due');
     expect(screen.getByText(/Cancellation is scheduled/)).toBeTruthy();
   });
 });
@@ -121,7 +121,7 @@ describe('license sync polling', () => {
     });
     expect(vi.mocked(api.get).mock.calls.length).toBeGreaterThan(count);
     expect(screen.getByLabelText('License sync token')).toHaveProperty('value', 'fixture-draft-only');
-    expect(screen.getByLabelText('Enable automatic license sync')).toHaveProperty('checked', false);
+    expect(screen.getByLabelText('Automatically renew and sync')).toHaveProperty('checked', false);
     expect(api.put).not.toHaveBeenCalled();
   });
 });

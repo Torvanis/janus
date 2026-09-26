@@ -56,6 +56,8 @@ describe('complete grant and personal quota collections', () => {
     expect(within(group).getByRole('button', { name: 'Person 30' })).toBeTruthy();
     client.setQueryData(['admin', 'grants'], { grants: grants.slice(0, 30) });
     await waitFor(() => expect(within(group).getAllByRole('button', { name: 'Revoke' })).toHaveLength(10));
+    // The rows re-render before the clamp effect rewrites the URL; wait for
+    // the URL too rather than racing it (this flaked on main).
     await waitFor(() => expect(screen.getByTestId('url').textContent).toContain('grant-rows-model-Model.page=20'));
     await user.click(within(group).getByRole('button', { name: 'Hide Model grants' }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Grantee' }), 'user:u0');

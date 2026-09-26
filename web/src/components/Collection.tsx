@@ -71,7 +71,7 @@ export function Collection<T>({
             onChange={(e) => update('q', e.target.value)}
           />
         )}
-        <label className="row">
+        <label className="page-size">
           Rows per page{' '}
           <select className="select" value={limit} onChange={(e) => update('size', e.target.value)}>
             {[10, 25, 50, 100].map((n) => (

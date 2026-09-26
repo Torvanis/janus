@@ -253,7 +253,7 @@ func TestPDFPartialClockBoundariesKeepInRangeTimeline(t *testing.T) {
 }
 
 func TestPDFTimeChartRejectsAmbiguousAxes(t *testing.T) {
-	for _, kind := range []string{"nonUTC", "partial", "multidimensional"} {
+	for _, kind := range []string{"nonUTC", "multidimensional"} {
 		t.Run(kind, func(t *testing.T) {
 			r := fixture()
 			r.Sections = nil
@@ -262,8 +262,6 @@ func TestPDFTimeChartRejectsAmbiguousAxes(t *testing.T) {
 			switch kind {
 			case "nonUTC":
 				r.Definition.Timezone = "America/Los_Angeles"
-			case "partial":
-				r.Start = r.Start.Add(12 * time.Hour)
 			case "multidimensional":
 				r.Rows[0].Dimensions["model"] = "model-a"
 				r.Rows = append(r.Rows, Row{Dimensions: map[string]string{"day": "2026-02-01", "model": "model-b"}, Values: map[string]*float64{"requests": ptr(7)}})
@@ -319,7 +317,7 @@ func TestPDFFullPeriodCalendarObservations(t *testing.T) {
 	}
 	text := exportText(t, r, "pdf")
 	chart := strings.Split(text, "Complete report data")[0]
-	for _, want := range []string{"entire reporting period", "27 observations", "Feb 1, 2026", "Mar 1, 2026", "Gaps are missing observations"} {
+	for _, want := range []string{"Requests per day", "27 observations", "Feb 1, 2026", "Feb 8", "Gaps are days with no recorded data"} {
 		if !strings.Contains(chart, want) {
 			t.Fatalf("missing chart semantics %q", want)
 		}
@@ -403,4 +401,49 @@ print('PyMuPDF verified %d pages: Unicode, page counts, vector geometry, no clip
 	}
 	t.Log(string(out))
 	t.Log("Rendered", pdfPath)
+}
+
+// Rolling periods start mid-day. The first day's bucket overlaps the period and
+// must be drawn, with the partial boundary disclosed rather than hidden.
+func TestPDFRollingPeriodKeepsFirstDayAndDisclosesPartialBoundary(t *testing.T) {
+	r := fixture()
+	r.Sections = nil
+	r.Start = r.Start.Add(2 * time.Hour)
+	r.End = r.End.Add(2 * time.Hour)
+	r.Columns = []Column{{"day", "Day", ""}, {"requests", "Requests", "count"}, {"cost_usd", "Cost", "USD"}}
+	r.Rows = []Row{{Dimensions: map[string]string{"day": "2026-02-01"}, Values: map[string]*float64{"requests": ptr(3), "cost_usd": ptr(1234.5)}}, {Dimensions: map[string]string{"day": "2026-03-01"}, Values: map[string]*float64{"requests": ptr(7), "cost_usd": ptr(2)}}}
+	text := strings.Split(exportText(t, r, "pdf"), "Complete report data")[0]
+	for _, want := range []string{"Activity over time", "Requests per day", "Cost per day", "partial", "$1,236.50"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(text, "Time chart unavailable") {
+		t.Fatal("mid-day rolling start rejected the timeline")
+	}
+}
+
+func TestPDFReaderPresentation(t *testing.T) {
+	r := fixture()
+	r.Sections = nil
+	r.Columns = []Column{{"model", "model", ""}, {"model_label", "model name (current)", ""}, {"requests", "Requests", "count"}, {"cost_usd", "Recorded cost (USD)", "USD"}}
+	r.Rows = []Row{{Dimensions: map[string]string{"model": "0b6f1c9e-opaque-id", "model_label": "Claude Sonnet"}, Values: map[string]*float64{"requests": ptr(12345), "cost_usd": ptr(3909.08)}}}
+	r.Totals = map[string]*float64{"requests": ptr(12345), "cost_usd": ptr(3909.08)}
+	r.PreviousTotals = map[string]*float64{"requests": ptr(10000), "cost_usd": ptr(4000)}
+	r.Warnings = []string{"Coverage caveat.", "Previous period: Coverage caveat."}
+	r.ComparisonWarnings = []string{"Previous period: Coverage caveat."}
+	text := exportText(t, r, "pdf")
+	for _, want := range []string{"$3,909.08", "12,345", "Claude Sonnet", "Model", "Recorded cost (USD)", "+23.4% vs prior", "About this report", "Applies to this and the prior period"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	for _, bad := range []string{"0b6f1c9e-opaque-id", "(USD) (USD)", "model name (current)", "FROZEN SNAPSHOT", "previous_totals", "Field reference"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("reader PDF shows %q", bad)
+		}
+	}
+	if n := strings.Count(text, "Coverage caveat."); n != 1 {
+		t.Fatalf("caveat printed %d times", n)
+	}
 }

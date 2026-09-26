@@ -582,6 +582,38 @@ it('confirms saved report deletion and refreshes the library', async () => {
   await screen.findByText(/No saved reports yet/);
 });
 
+it('library rows use short visible actions, open the latest result and run a saved report now', async () => {
+  const user = userEvent.setup();
+  const reports = [{ id: 'saved', owner_user_id: 'me', definition, revision: 1, shared: false }];
+  const runs = [
+    { id: 'old', report_id: 'saved', status: 'complete', created_at: '2026-09-01T00:00:00Z', definition },
+    { id: 'new', report_id: 'saved', status: 'complete', created_at: '2026-09-02T00:00:00Z', definition },
+  ];
+  const get = mock.get.getMockImplementation()!;
+  mock.get.mockImplementation(async (path) =>
+    path === '/api/v1/reports'
+      ? ({ reports } as never)
+      : path === '/api/v1/reports/runs'
+        ? ({ runs } as never)
+        : path.startsWith('/api/v1/reports/runs/')
+          ? ({ run: { ...runs[1], id: path.split('/').pop(), result: {} } } as never)
+          : get(path),
+  );
+  mock.post.mockResolvedValue({ run: { id: 'fresh', report_id: 'saved', status: 'queued', created_at: '', definition } });
+  mount();
+  const edit = await screen.findByRole('button', { name: 'Edit Usage overview' });
+  // Visible text is short; the accessible name keeps the report for screen readers.
+  expect(edit.textContent).toBe('Edit');
+  expect(screen.getByRole('button', { name: 'Schedule Usage overview' }).textContent).toBe('Schedule');
+  expect(screen.getByRole('button', { name: 'Delete Usage overview' }).textContent).toBe('Delete');
+  await user.click(await screen.findByRole('button', { name: 'Open latest Usage overview' }));
+  await screen.findByText('Completed result');
+  expect(mock.get).toHaveBeenCalledWith('/api/v1/reports/runs/new');
+  await user.click(screen.getByRole('button', { name: 'Back to reports' }));
+  await user.click(await screen.findByRole('button', { name: 'Run Usage overview now' }));
+  await waitFor(() => expect(mock.post).toHaveBeenCalledWith('/api/v1/reports/runs', { definition, report_id: 'saved' }));
+});
+
 it('creates a non-enforcing personal budget using exact nanodollars and ISO dates', async () => {
   const user = userEvent.setup();
   mock.post.mockResolvedValue({ budget: { id: 'b1' } });

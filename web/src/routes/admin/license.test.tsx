@@ -134,10 +134,37 @@ describe('LicenseCard', () => {
     expect(screen.getByRole('button', { name: 'Remove key' })).toBeTruthy();
 
     const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText('JANUS-LICENSE-1....'), 'JANUS-LICENSE-1.abc.def');
+    await user.type(screen.getByPlaceholderText('JANUS-ACTIVATION-1.... or JANUS-LICENSE-1....'), 'JANUS-LICENSE-1.abc.def');
     await user.click(screen.getByRole('button', { name: 'Install key' }));
     await waitFor(() =>
       expect(mocked.put).toHaveBeenCalledWith('/api/v1/admin/system/license', { key: 'JANUS-LICENSE-1.abc.def' }),
+    );
+  });
+
+  it('shows the unchecked auto-renew box only for activation codes and sends it only when ticked', async () => {
+    mocked.get.mockResolvedValue(doc());
+    mocked.put.mockResolvedValue({ license: doc().license });
+    renderCard();
+    await screen.findByRole('button', { name: 'Install key' });
+    const user = userEvent.setup();
+    const box = screen.getByPlaceholderText('JANUS-ACTIVATION-1.... or JANUS-LICENSE-1....');
+    expect(screen.queryByRole('checkbox', { name: 'Turn on automatic renewal and sync' })).toBeNull();
+    await user.type(box, 'JANUS-ACTIVATION-1.abc');
+    const renew = screen.getByRole('checkbox', { name: 'Turn on automatic renewal and sync' });
+    expect(renew).toHaveProperty('checked', false);
+    await user.click(screen.getByRole('button', { name: 'Install key' }));
+    await waitFor(() =>
+      expect(mocked.put).toHaveBeenLastCalledWith('/api/v1/admin/system/license', { key: 'JANUS-ACTIVATION-1.abc' }),
+    );
+    await user.type(box, 'JANUS-ACTIVATION-1.xyz');
+    const again = screen.getByRole('checkbox', { name: 'Turn on automatic renewal and sync' });
+    await user.click(again);
+    await user.click(screen.getByRole('button', { name: 'Install key' }));
+    await waitFor(() =>
+      expect(mocked.put).toHaveBeenLastCalledWith('/api/v1/admin/system/license', {
+        key: 'JANUS-ACTIVATION-1.xyz',
+        enable_sync: true,
+      }),
     );
   });
 
@@ -204,13 +231,25 @@ function renderBanner() {
 }
 
 describe('LicenseBanner', () => {
-  it.each(['revoked', 'subscription_attention', 'stale', 'network'])('shows %s attention even for a valid signed key', (reason) => {
-    sessionMe = { role: 'admin', license: { edition: 'business', status: 'valid', restricted: false, features: [], renewal_notice: { suppress_expiring: false, reason } } };
-    renderBanner();
-    expect(screen.getByRole('status').textContent).toMatch(/administrator/);
-    expect(screen.getByRole('link', { name: 'Manage license' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
-  });
+  it.each(['revoked', 'subscription_attention', 'stale', 'network'])(
+    'shows %s attention even for a valid signed key',
+    (reason) => {
+      sessionMe = {
+        role: 'admin',
+        license: {
+          edition: 'business',
+          status: 'valid',
+          restricted: false,
+          features: [],
+          renewal_notice: { suppress_expiring: false, reason },
+        },
+      };
+      renderBanner();
+      expect(screen.getByRole('status').textContent).toMatch(/administrator/);
+      expect(screen.getByRole('link', { name: 'Manage license' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    },
+  );
 
   afterEach(() => {
     cleanup();
@@ -284,7 +323,10 @@ describe('LicenseCard update check', () => {
     d.update = { ...d.update, unsupported: true, min_supported: '1.3.5' };
     mocked.get.mockResolvedValue(d);
     renderCard();
-    await screen.findByText(/1.3.0 is below the minimum supported release 1.3.5/);
+    // Shown in the Updates panel and raised as an attention reason in the verdict.
+    const unsupported = await screen.findAllByText(/1.3.0 is below the minimum supported release 1.3.5/);
+    expect(unsupported).toHaveLength(2);
+    expect(screen.getByText('Attention needed')).toBeTruthy();
   });
 
   it('reports a failed check without alarm', async () => {

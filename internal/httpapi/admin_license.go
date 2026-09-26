@@ -120,14 +120,30 @@ func (s *Server) handlePutLicense(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Key string `json:"key"`
+		// EnableSync applies only to an activation code. Omitted keeps the
+		// current automatic-sync choice; the token alone never opts in.
+		EnableSync *bool `json:"enable_sync"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		WriteError(w, r, err)
 		return
 	}
 	key := strings.TrimSpace(body.Key)
+	var activation *license.Activation
+	if strings.HasPrefix(key, license.ActivationPrefix) {
+		a, err := license.ParseActivation(key)
+		if err != nil {
+			WriteError(w, r, ErrInvalidRequest(err.Error()+"."))
+			return
+		}
+		if s.LicenseSync == nil {
+			WriteError(w, r, ErrInvalidRequest("License sync is unavailable on this server; install the plain license file instead."))
+			return
+		}
+		activation, key = &a, a.License
+	}
 	if !strings.HasPrefix(key, license.Prefix) {
-		WriteError(w, r, ErrInvalidRequest("That is not a Janus license key. Keys start with "+license.Prefix+"."))
+		WriteError(w, r, ErrInvalidRequest("That is not a Janus license key or activation code. Keys start with "+license.Prefix+"; activation codes with "+license.ActivationPrefix+"."))
 		return
 	}
 	prev := s.licenseState()
@@ -144,8 +160,20 @@ func (s *Server) handlePutLicense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "license.install", "license", licenseID(st), map[string]any{"edition": prev.Edition, "status": prev.Status},
-		map[string]any{"edition": st.Edition, "status": st.Status, "seats": st.Seats, "source": st.Source})
-	WriteJSON(w, http.StatusOK, map[string]any{"license": st})
+		map[string]any{"edition": st.Edition, "status": st.Status, "seats": st.Seats, "source": st.Source, "activation": activation != nil})
+	out := map[string]any{"license": st}
+	if activation != nil {
+		// The license is installed either way; a sync configuration problem
+		// (environment-managed token, file-backed key) is reported, not fatal.
+		if err := s.LicenseSync.ConfigurePatch(r.Context(), body.EnableSync, activation.SyncToken, false); err != nil {
+			out["sync_error"] = "The license is installed, but automatic sync was not configured: " + err.Error()
+		} else {
+			s.audit(r, "license.sync.configure", "license", licenseID(st), nil, map[string]any{"enabled": body.EnableSync, "token_changed": true, "via": "activation_code"})
+		}
+		syncState, _ := s.licenseSyncView(r.Context())
+		out["license_sync"] = syncState
+	}
+	WriteJSON(w, http.StatusOK, out)
 }
 
 // handleDeleteLicense removes the database key (a file key stays).

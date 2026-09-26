@@ -7,7 +7,7 @@
  * charts show tokens (in + out).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -205,5 +205,58 @@ describe('team charts follow the instance-wide emphasis setting', () => {
     // No token totals rendered in the charts.
     expect(screen.queryByText('4,200')).toBeNull();
     expect(screen.queryByText('1,500')).toBeNull();
+  });
+});
+
+describe('team workspace layout', () => {
+  it('shows the roster beside usage with each member’s share, including members with no activity', async () => {
+    mocked.get.mockImplementation(((path: string) => {
+      if (path === '/api/v1/me') return Promise.resolve(meFixture({}));
+      if (path === '/api/v1/config')
+        return Promise.resolve({ public_url: '', version: '1', build: 'x', dev_auth: false, feature_flags: {}, provider_label: '' });
+      if (path === '/api/v1/teams/t1')
+        return Promise.resolve({
+          team,
+          membership_role: 'leader',
+          actor_role: 'leader',
+          can_manage: true,
+          members: [
+            { user_id: 'u2', email: 'robin@example.com', name: 'Robin', role: 'member' },
+            { user_id: 'u3', email: 'quiet@example.com', name: 'Quiet Person', role: 'moderator' },
+          ],
+        });
+      if (path.startsWith('/api/v1/dashboard/team'))
+        return Promise.resolve({
+          ...teamDashboard,
+          series: [
+            { bucket: '2026-09-20T00:00:00Z', totals: totals({ request_count: 3 }) },
+            { bucket: '2026-09-21T00:00:00Z', totals: totals({ request_count: 7 }) },
+          ],
+        });
+      if (path === '/api/v1/lead/teams') return Promise.resolve({ teams: [], metrics: [], windows: [] });
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    }) as typeof api.get);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SessionProvider>
+          <MemoryRouter initialEntries={['/teams/t1']}>
+            <TeamPage teamId="t1" />
+          </MemoryRouter>
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    const roster = await screen.findByRole('complementary', { name: 'Team members' });
+    expect(await within(roster).findByText('Quiet Person')).toBeTruthy();
+    expect(within(roster).getByText('moderator')).toBeTruthy();
+    // Robin's usage is ranked first; the member with no activity still appears.
+    const names = within(roster)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent ?? '');
+    expect(names[0]).toContain('Robin');
+    expect(names[1]).toContain('Quiet Person');
+    // Totals are one strip, including the error rate the old tiles omitted.
+    expect(screen.getByText('Errors')).toBeTruthy();
+    expect(screen.getByRole('img', { name: /trend/i })).toBeTruthy();
   });
 });

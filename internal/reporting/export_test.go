@@ -51,11 +51,23 @@ func TestJSONAndCSVExportFrozenResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := fmtRecords(records)
-	for _, s := range []string{"'\t=HYPERLINK", "warning-one", "warning-two", "section-note", "模型", "USD", "data_cutoff", "timezone", "filters", "previous_totals", "2026-02-01"} {
-		if !strings.Contains(all, s) {
-			t.Errorf("missing %q in %s", s, all)
+	// One rectangular table: a single header row, no comment/section rows.
+	if len(records) != 1+len(r.Rows) {
+		t.Fatalf("CSV must be header + one line per main row, got %d records", len(records))
+	}
+	for i, rec := range records {
+		if len(rec) != len(records[0]) {
+			t.Fatalf("record %d is not rectangular: %v", i, rec)
 		}
+		if strings.HasPrefix(rec[0], "#") {
+			t.Fatalf("comment row in CSV: %v", rec)
+		}
+	}
+	if got := strings.Join(records[0], "|"); got != "User|Requests|Cost (USD)" {
+		t.Fatalf("header %q", got)
+	}
+	if records[1][0] != "'\t=HYPERLINK(\"evil\")" || records[1][1] != "7" || records[1][2] != "" {
+		t.Fatalf("row %v: formula guard, raw number and blank unavailable expected", records[1])
 	}
 	after, _ := json.Marshal(r)
 	if !bytes.Equal(before, after) {
@@ -118,15 +130,19 @@ func TestXLSXRealWorkbookAllData(t *testing.T) {
 	if sheets != 5 {
 		t.Fatalf("sheets %d", sheets)
 	}
-	for _, s := range []string{"Overview", "Data", "Methodology"} {
+	for _, s := range []string{"Summary", "Data", "About", `name="Usage"`, `name="Usage (2)"`} {
 		if !strings.Contains(workbook, s) {
 			t.Fatal("missing sheet", s)
 		}
 	}
-	for _, s := range []string{"模型", "HYPERLINK", "section-note", "data_cutoff", "timezone", "USD", "inlineStr"} {
+	for _, s := range []string{"模型", "HYPERLINK", "section-note", "Data through", "Time zone", "USD", "inlineStr", "<autoFilter", `<pane ySplit="1"`} {
 		if !strings.Contains(texts, s) {
 			t.Fatal("missing", s)
 		}
+	}
+	// Numbers are typed numeric cells, never text.
+	if !strings.Contains(texts, `<v>7</v>`) || strings.Contains(texts, `<t xml:space="preserve">7</t>`) {
+		t.Fatal("numeric value stored as text")
 	}
 	if strings.Count(texts, "warning-one") != 1 || strings.Count(texts, "warning-two") != 1 {
 		t.Fatal("warnings lost or duplicated")
@@ -256,7 +272,7 @@ func TestPDFPaginatedValidXrefAndComplete(t *testing.T) {
 		t.Fatal("not paginated")
 	}
 	text := pdfVisibleText(t, b.Bytes())
-	for _, want := range []string{"person-159", "warning-one", "warning-two", "section-note", "U+6A21", "data_cutoff", "timezone", "USD", "Page 1 of"} {
+	for _, want := range []string{"person-159", "warning-one", "warning-two", "section-note", "U+6A21", "Data through", "Time zone", "USD", "Page 1 of"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing visible %s", want)
 		}
@@ -396,12 +412,13 @@ raw=sys.stdin.buffer.read()
 if sys.argv[1]=='xlsx':
  import openpyxl
  w=openpyxl.load_workbook(io.BytesIO(raw))
- assert w.sheetnames==['Overview','Data','Usage 1','Methodology'],w.sheetnames
+ assert w.sheetnames==['Summary','Data','Usage','About'],w.sheetnames
  assert w['Data']['A2'].value=='\t=HYPERLINK("evil")'
  assert w['Data']['A2'].data_type=='s'
- assert w['Usage 1']['A3'].value=='模型'
- assert w['Data']['B2'].value=='7'
- print('openpyxl: 4 sheets, safe formula text, Unicode and numeric text verified')
+ assert w['Usage']['A2'].value=='模型'
+ assert w['Data']['B2'].value==7 and w['Data']['B2'].data_type=='n'
+ assert w['Data']['A1'].font.b and w['Data'].freeze_panes=='A2' and w['Data'].auto_filter.ref
+ print('openpyxl: 4 sheets, safe formula text, Unicode, typed numbers, styled headers verified')
 else:
  from pypdf import PdfReader
  import pymupdf,json
@@ -472,6 +489,14 @@ func exportText(t *testing.T, r Result, format string) string {
 					out.Write(text)
 					out.WriteByte('\n')
 				}
+				// Sheet tabs are reader-visible text too.
+				if el, ok := token.(xml.StartElement); ok && el.Name.Local == "sheet" {
+					for _, a := range el.Attr {
+						if a.Name.Local == "name" {
+							out.WriteString(a.Value + "\n")
+						}
+					}
+				}
 			}
 			rc.Close()
 		}
@@ -496,16 +521,25 @@ func TestComparisonConfidenceAllExports(t *testing.T) {
 				r.PreviousTotals["cost_usd"] = ptr(987.65)
 				before, _ := json.Marshal(r)
 				text := exportText(t, r, format)
-				for _, want := range []string{"comparison_warnings", "Prior interval is incomplete", "previous_totals", "987.65"} {
+				wants := map[string][]string{
+					"json": {"comparison_warnings", "Prior interval is incomplete", "previous_totals", "987.65"},
+					"xlsx": {"Prior period", "Prior interval is incomplete", "987.65"},
+					"pdf":  {"Prior period", "Prior interval is incomplete", "$987.65"},
+					"csv":  {"User", "Requests"},
+				}[format]
+				for _, want := range wants {
 					if !strings.Contains(text, want) {
 						t.Fatalf("missing %s", want)
 					}
 				}
-				if state != "unknown" && !strings.Contains(text, "comparison_reliable") {
+				if format == "json" && state != "unknown" && !strings.Contains(text, "comparison_reliable") {
 					t.Fatal("comparison confidence missing")
 				}
-				if state == "false" && format != "json" && !strings.Contains(text, "Comparison unavailable") {
+				if state == "false" && (format == "xlsx" || format == "pdf") && !strings.Contains(text, "Comparison unavailable") {
 					t.Fatal("missing readable comparison unavailability")
+				}
+				if format != "json" && strings.Contains(text, "comparison_warnings") {
+					t.Fatal("machine key leaked into reader export")
 				}
 				after, _ := json.Marshal(r)
 				if !bytes.Equal(before, after) {
@@ -533,7 +567,14 @@ func TestLocalOnlyOperationalFrozenExports(t *testing.T) {
 				before, _ := json.Marshal(original)
 				r := RedactCosts(original)
 				text := exportText(t, r, format)
-				for _, want := range []string{"portfolio_modality", "portfolio_model_family", "portfolio_provider", "portfolio_hosting", "portfolio_model", "integrations_client_app", "integrations_service_token", "integrations_endpoint", "entity-modality", "entity-client_app", "entity-service_token", "entity-endpoint", "eligible_users_current", "active_eligible_users", "adoption_ratio_current_census", "quota_windows", "q-tokens", "data_quality", "cost_coverage", "quota_history_coverage", "efficiency_ratios", "comparison_reliable", "comparison_warnings", "Comparison unavailable"} {
+				wants := map[string][]string{
+					"json": {"portfolio_modality", "portfolio_model_family", "portfolio_provider", "portfolio_hosting", "portfolio_model", "integrations_client_app", "integrations_service_token", "integrations_endpoint", "entity-modality", "entity-client_app", "entity-service_token", "entity-endpoint", "eligible_users_current", "active_eligible_users", "adoption_ratio_current_census", "quota_windows", "q-tokens", "data_quality", "cost_coverage", "quota_history_coverage", "efficiency_ratios", "comparison_reliable", "comparison_warnings"},
+					// Reader formats: every section and entity by readable name.
+					"xlsx": {"Portfolio modality", "Portfolio model family", "Portfolio provider", "Portfolio hosting", "Portfolio model", "Integrations client app", "Integrations service token", "Integrations endpoint", "entity-modality", "entity-client_app", "entity-service_token", "entity-endpoint", "Eligible", "Active", "Adoption", "Quota windows", "q-tokens", "Data quality", "Cost coverage", "Quota history coverage", "Efficiency ratios", "Comparison unavailable"},
+					"pdf":  {"Portfolio modality", "Portfolio model family", "Portfolio provider", "Portfolio hosting", "Portfolio model", "Integrations client app", "Integrations service token", "Integrations endpoint", "entity-modality", "entity-client_app", "entity-service_token", "entity-endpoint", "Eligible", "Active", "Adoption", "Quota windows", "q-tokens", "Data quality", "Cost coverage", "Quota history coverage", "Efficiency ratios", "Comparison unavailable"},
+					"csv":  {"User", "Requests"},
+				}[format]
+				for _, want := range wants {
 					if !strings.Contains(text, want) {
 						t.Fatalf("operational information missing: %s", want)
 					}

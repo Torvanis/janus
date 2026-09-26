@@ -3,11 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import type { LicenseDocument, LicenseState, UpdateCheck } from '../../lib/types';
 import { formatDateTime, formatNumber } from '../../lib/format';
-import { AsyncSection, Badge, ConfirmDialog, Field, useToast, type Tone } from '../../components/ui';
-import { DetailRow } from '../shared';
+import { AsyncSection, Badge, ConfirmDialog, useToast, type Tone } from '../../components/ui';
 import { t } from '../../lib/i18n';
-import { LICENSE_POLL_MS, renewalAttention, suppressExpiring, useLicenseClock } from '../../lib/licenseNotice';
+import { LICENSE_POLL_MS, useLicenseClock } from '../../lib/licenseNotice';
+import { licenseVerdict, type LicenseVerdictLevel } from '../../lib/licenseHealth';
 import { LicenseSyncControls } from './LicenseSyncControls';
+
+const ACTIVATION_PREFIX = 'JANUS-ACTIVATION-1';
 
 const FEATURE_LABELS: Record<string, string> = {
   scim: 'SCIM provisioning',
@@ -74,12 +76,39 @@ function termLabel(term: string): string {
   }
 }
 
-/** Outcome of the opt-in version check, one line plus an optional link. */
+/** Big status glyph: green check, amber exclamation, red cross. */
+function VerdictIcon({ level, label }: { level: LicenseVerdictLevel; label: string }): ReactNode {
+  return (
+    <span className={`license-verdict-icon is-${level}`} role="img" aria-label={label}>
+      <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
+        {level === 'ok' ? (
+          <path
+            d="M5 12.5l4.5 4.5L19 7.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ) : level === 'attention' ? (
+          <>
+            <path d="M12 5.5v8.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+            <circle cx="12" cy="18.5" r="1.6" fill="currentColor" />
+          </>
+        ) : (
+          <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+        )}
+      </svg>
+    </span>
+  );
+}
+
+/** Outcome of the opt-in version check, one compact line. */
 function UpdateStatus({ update }: { update: UpdateCheck }): ReactNode {
   if (update.offline) return <p className="muted small">{t('adminSystem.license.updatesOffline')}</p>;
   if (!update.enabled) return <p className="muted small">{t('adminSystem.license.updatesDisabled')}</p>;
   if (!update.checked_at) return <p className="muted small">{t('adminSystem.license.updatesPending')}</p>;
-  let line: ReactNode;
+  let line: string;
   let tone: Tone = 'success';
   if (update.error) {
     line = t('adminSystem.license.updatesError', { error: update.error });
@@ -95,7 +124,7 @@ function UpdateStatus({ update }: { update: UpdateCheck }): ReactNode {
   }
   return (
     <div className="stack small" style={{ gap: 'var(--janus-space-1)' }}>
-      <div className="row" style={{ gap: 'var(--janus-space-2)', alignItems: 'center' }}>
+      <div>
         <Badge tone={tone} dot>
           {line}
         </Badge>
@@ -116,15 +145,29 @@ function UpdateStatus({ update }: { update: UpdateCheck }): ReactNode {
   );
 }
 
+function Detail({ label, children, mono }: { label: string; children: ReactNode; mono?: boolean }): ReactNode {
+  return (
+    <div className="license-detail">
+      <dt>{label}</dt>
+      <dd className={mono ? 'mono' : undefined} title={mono && typeof children === 'string' ? children : undefined}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
 /**
- * Admin → System license card: verified state, seat usage, claims, and the
- * paste-a-key form. Expiry never disrupts work, so the copy talks about what
- * is paused (creation), never what is lost.
+ * Admin → Settings → License & updates. One verdict at the top (check / ! / X)
+ * answers "is this gateway licensed and healthy?"; details, renewal and key
+ * installation sit beneath it in a grid sized to fit one screen. Expiry never
+ * disrupts work, so the copy talks about what is paused, never what is lost.
  */
 export function LicenseCard(): ReactNode {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [key, setKey] = useState('');
+  const [enableSync, setEnableSync] = useState(false);
+  const isActivation = key.trim().startsWith(ACTIVATION_PREFIX);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const doc = useQuery({
@@ -141,10 +184,19 @@ export function LicenseCard(): ReactNode {
   };
 
   const install = useMutation({
-    mutationFn: (value: string) => api.put<{ license: LicenseState }>('/api/v1/admin/system/license', { key: value.trim() }),
-    onSuccess: () => {
-      toast(t('adminSystem.license.installed'));
+    mutationFn: (value: string) => {
+      const trimmed = value.trim();
+      // The sync choice is sent only with an activation code, and only when
+      // ticked, so installing never silently turns an existing setting off.
+      const body: { key: string; enable_sync?: boolean } = { key: trimmed };
+      if (trimmed.startsWith(ACTIVATION_PREFIX) && enableSync) body.enable_sync = true;
+      return api.put<{ license: LicenseState; sync_error?: string }>('/api/v1/admin/system/license', body);
+    },
+    onSuccess: (result) => {
+      if (result?.sync_error) toast(result.sync_error, 'danger');
+      else toast(t('adminSystem.license.installed'));
       setKey('');
+      setEnableSync(false);
       invalidate();
     },
     onError: (error: Error) => toast(error.message, 'danger'),
@@ -161,157 +213,172 @@ export function LicenseCard(): ReactNode {
   });
 
   return (
-    <section className="card" aria-labelledby="license-heading">
-      <div className="card-header" style={{ alignItems: 'flex-start' }}>
-        <div>
-          <h2 id="license-heading">{t('adminSystem.license.title')}</h2>
-        </div>
-        <AsyncSection query={doc}>
-          {(data) => (
-            <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
-              <Badge tone="primary">{editionLabel(data.license.edition)}</Badge>
-              <Badge tone={statusTone(data.license.status)} dot>
-                {statusLabel(data.license.status)}
-              </Badge>
-            </div>
-          )}
-        </AsyncSection>
-      </div>
-
+    <section className="card license-card" aria-labelledby="license-heading">
+      <h2 id="license-heading" className="sr-only">
+        {t('adminSystem.license.title')}
+      </h2>
       <AsyncSection query={doc}>
         {(data) => {
           const lic = data.license;
           const claims = lic.claims;
-          const attention = renewalAttention(data.renewal_notice, now);
-          const restricted = lic.status === 'expired' || lic.status === 'invalid';
+          const verdict = licenseVerdict(data, now);
           return (
-            <div className="stack">
-              {attention ? <div className="banner banner-warning" role="status">{attention}</div> : null}
-              {restricted ? <div className="banner banner-danger">{t('adminSystem.license.restrictedNotice')}</div> : null}
-              {lic.status === 'expiring' && lic.expires_at && !suppressExpiring(lic.status, data.renewal_notice, now) ? (
-                <div className="banner banner-warning">
-                  {t('adminSystem.license.expiringNotice', { time: formatDateTime(lic.expires_at) })}
-                </div>
-              ) : null}
-              {lic.status === 'grace' && lic.expires_at ? (
-                <div className="banner banner-warning">
-                  {t('adminSystem.license.graceNotice', { time: formatDateTime(lic.expires_at) })}
-                </div>
-              ) : null}
-              {lic.error ? <div className="banner banner-danger">{lic.error}</div> : null}
-              {lic.clock_skew ? <div className="banner banner-warning">{t('adminSystem.license.clockSkew')}</div> : null}
-
-              <div className="grid grid-halves">
-                <div className="stack" style={{ gap: 'var(--janus-space-1)' }}>
-                  <DetailRow label={t('adminSystem.license.seats')}>
-                    {t('adminSystem.license.seatsUsage', {
-                      count: formatNumber(data.seats_used),
-                      limit: lic.seats > 0 ? formatNumber(lic.seats) : t('adminSystem.license.unlimited'),
-                    })}
-                  </DetailRow>
-                  <DetailRow label={t('adminSystem.license.nodes')}>
-                    {t('adminSystem.license.nodesUsage', {
-                      count: formatNumber(data.nodes_live),
-                      limit: lic.nodes > 0 ? formatNumber(lic.nodes) : t('adminSystem.license.unlimited'),
-                    })}
-                  </DetailRow>
-                  {lic.nodes > 0 && data.nodes_live > lic.nodes ? (
-                    <div className="banner banner-warning">
-                      {t('adminSystem.license.nodesOver', {
-                        count: formatNumber(data.nodes_live),
-                        limit: formatNumber(lic.nodes),
-                      })}
-                    </div>
+            <div className="license-layout">
+              <div className={`license-hero is-${verdict.level}`} role="status">
+                <VerdictIcon level={verdict.level} label={verdict.headline} />
+                <div className="license-hero-body">
+                  <div className="license-hero-title">
+                    <span>{verdict.headline}</span>
+                    <Badge tone="primary">{editionLabel(lic.edition)}</Badge>
+                    {verdict.autoRenewing || lic.status === 'valid' ? null : (
+                      <Badge tone={statusTone(lic.status)} dot>
+                        {statusLabel(lic.status)}
+                      </Badge>
+                    )}
+                  </div>
+                  {verdict.reasons.length > 0 ? (
+                    <ul className="license-hero-reasons">
+                      {verdict.reasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  ) : verdict.summary ? (
+                    <p className="license-hero-summary">{verdict.summary}</p>
                   ) : null}
-                  {claims ? (
-                    <>
-                      <DetailRow label={t('adminSystem.license.licensedTo')}>
-                        {claims.org}
-                        {claims.issued_to ? <span className="muted small"> · {claims.issued_to}</span> : null}
-                      </DetailRow>
-                      <DetailRow label={t('adminSystem.license.licenseId')}>
-                        <code>{claims.license_id}</code>
-                      </DetailRow>
-                      {claims.site ? <DetailRow label={t('adminSystem.license.site')}>{claims.site}</DetailRow> : null}
-                      <DetailRow label={t('adminSystem.license.term')}>{termLabel(claims.term)}</DetailRow>
-
-                      {claims.maintenance_until ? (
-                        <DetailRow label={t('adminSystem.license.maintenanceUntil')}>{claims.maintenance_until}</DetailRow>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {lic.expires_at ? (
-                    <DetailRow label={t('adminSystem.license.expires')}>{formatDateTime(lic.expires_at)}</DetailRow>
-                  ) : null}
-                  {lic.grace_until ? (
-                    <DetailRow label={t('adminSystem.license.graceUntil')}>{formatDateTime(lic.grace_until)}</DetailRow>
-                  ) : null}
-                  <DetailRow label={t('adminSystem.license.instanceId')}>
-                    <code>{data.instance_id}</code>
-                  </DetailRow>
-                  <DetailRow label={t('adminSystem.license.source')}>
-                    {lic.source === 'file'
-                      ? t('adminSystem.license.sourceFile', { name: data.file ?? '' })
-                      : lic.source === 'database'
-                        ? t('adminSystem.license.sourceDatabase')
-                        : t('adminSystem.license.sourceNone')}
-                  </DetailRow>
-                </div>
-
-                <div className="stack" style={{ gap: 'var(--janus-space-1)' }}>
-                  <div style={{ fontWeight: 500 }}>{t('adminSystem.license.features')}</div>
                   {lic.features.length === 0 ? (
                     <p className="muted small">{t('adminSystem.license.noFeatures')}</p>
                   ) : (
-                    <ul className="list-plain small">
+                    <ul className="license-features" aria-label={t('adminSystem.license.features')}>
                       {lic.features.map((f) => (
                         <li key={f}>{FEATURE_LABELS[f] ?? f}</li>
                       ))}
                     </ul>
                   )}
-                  <a className="small" href={data.portal_url} target="_blank" rel="noreferrer">
-                    {t('adminSystem.license.portal')}
-                  </a>
-                  <div style={{ fontWeight: 500, marginTop: 'var(--janus-space-3)' }}>
-                    {t('adminSystem.license.updatesTitle')}
-                  </div>
+                </div>
+                <a
+                  className={`btn ${verdict.level === 'ok' ? 'btn-ghost' : 'btn-primary'} btn-sm license-hero-link`}
+                  href={data.portal_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('adminSystem.license.portal')} ↗
+                </a>
+              </div>
+
+              <div className="license-grid">
+                <div className="license-panel">
+                  <h3 className="license-panel-title">{t('adminSystem.license.detailsTitle')}</h3>
+                  <dl className="license-details">
+                    <Detail label={t('adminSystem.license.seats')}>
+                      {t('adminSystem.license.seatsUsage', {
+                        count: formatNumber(data.seats_used),
+                        limit: lic.seats > 0 ? formatNumber(lic.seats) : t('adminSystem.license.unlimited'),
+                      })}
+                    </Detail>
+                    <Detail label={t('adminSystem.license.nodes')}>
+                      {t('adminSystem.license.nodesUsage', {
+                        count: formatNumber(data.nodes_live),
+                        limit: lic.nodes > 0 ? formatNumber(lic.nodes) : t('adminSystem.license.unlimited'),
+                      })}
+                    </Detail>
+                    {claims ? (
+                      <>
+                        <Detail label={t('adminSystem.license.licensedTo')}>
+                          {claims.org}
+                          {claims.issued_to ? <span className="muted"> · {claims.issued_to}</span> : null}
+                        </Detail>
+                        <Detail label={t('adminSystem.license.licenseId')} mono>
+                          {claims.license_id}
+                        </Detail>
+                        {claims.site ? <Detail label={t('adminSystem.license.site')}>{claims.site}</Detail> : null}
+                        <Detail label={t('adminSystem.license.term')}>{termLabel(claims.term)}</Detail>
+                        {claims.maintenance_until ? (
+                          <Detail label={t('adminSystem.license.maintenanceUntil')}>{claims.maintenance_until}</Detail>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {lic.expires_at ? (
+                      <Detail label={t('adminSystem.license.expires')}>
+                        {formatDateTime(lic.expires_at)}
+                        {lic.grace_until ? (
+                          <span className="license-detail-sub">
+                            {t('adminSystem.license.graceUntil')} {formatDateTime(lic.grace_until)}
+                          </span>
+                        ) : null}
+                      </Detail>
+                    ) : null}
+                    <Detail label={t('adminSystem.license.source')}>
+                      {lic.source === 'file'
+                        ? t('adminSystem.license.sourceFile', { name: data.file ?? '' })
+                        : lic.source === 'database'
+                          ? t('adminSystem.license.sourceDatabase')
+                          : t('adminSystem.license.sourceNone')}
+                    </Detail>
+                    <Detail label={t('adminSystem.license.instanceId')} mono>
+                      {data.instance_id}
+                    </Detail>
+                  </dl>
+                </div>
+
+                <div className="license-panel">
+                  <LicenseSyncControls />
+                </div>
+
+                <div className="license-panel">
+                  <form
+                    className="license-install"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (key.trim()) install.mutate(key);
+                    }}
+                  >
+                    <h3 className="license-panel-title">{t('adminSystem.license.installTitle')}</h3>
+                    {data.file && lic.source === 'file' ? (
+                      <p className="muted small">{t('adminSystem.license.fileWins')}</p>
+                    ) : null}
+                    <p className="field-hint">{t('adminSystem.license.installHelp')}</p>
+                    <textarea
+                      className="textarea license-key-input"
+                      aria-label={t('adminSystem.license.keyLabel')}
+                      rows={2}
+                      value={key}
+                      onChange={(event) => setKey(event.target.value)}
+                      spellCheck={false}
+                      placeholder="JANUS-ACTIVATION-1.... or JANUS-LICENSE-1...."
+                    />
+                    {isActivation ? (
+                      <label className="license-check">
+                        <input
+                          type="checkbox"
+                          aria-label={t('adminSystem.license.autoRenew')}
+                          checked={enableSync}
+                          onChange={(event) => setEnableSync(event.target.checked)}
+                        />
+                        <span>
+                          {t('adminSystem.license.autoRenew')}
+                          <span className="muted small" style={{ display: 'block' }}>
+                            {t('adminSystem.license.autoRenewHelp')}
+                          </span>
+                        </span>
+                      </label>
+                    ) : null}
+                    <div className="license-actions">
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={!key.trim() || install.isPending}>
+                        {t('adminSystem.license.install')}
+                      </button>
+                      {lic.installed && lic.source === 'database' ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmRemove(true)}>
+                          {t('adminSystem.license.remove')}
+                        </button>
+                      ) : null}
+                      {!lic.installed ? <span className="muted small">{t('adminSystem.license.getKey')}</span> : null}
+                    </div>
+                  </form>
+
+                  <h3 className="license-panel-title license-panel-divider">{t('adminSystem.license.updatesTitle')}</h3>
                   <UpdateStatus update={data.update} />
                 </div>
               </div>
-
-              <LicenseSyncControls />
-
-              <form
-                className="stack"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (key.trim()) install.mutate(key);
-                }}
-              >
-                <h3 style={{ margin: 0 }}>{t('adminSystem.license.installTitle')}</h3>
-                {data.file && lic.source === 'file' ? <p className="muted small">{t('adminSystem.license.fileWins')}</p> : null}
-                <Field label={t('adminSystem.license.keyLabel')} hint={t('adminSystem.license.installHelp')}>
-                  <textarea
-                    rows={4}
-                    value={key}
-                    onChange={(event) => setKey(event.target.value)}
-                    spellCheck={false}
-                    style={{ fontFamily: 'var(--janus-font-mono)', fontSize: '0.8rem' }}
-                    placeholder="JANUS-LICENSE-1...."
-                  />
-                </Field>
-                <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
-                  <button type="submit" className="btn btn-primary" disabled={!key.trim() || install.isPending}>
-                    {t('adminSystem.license.install')}
-                  </button>
-                  {lic.installed && lic.source === 'database' ? (
-                    <button type="button" className="btn" onClick={() => setConfirmRemove(true)}>
-                      {t('adminSystem.license.remove')}
-                    </button>
-                  ) : null}
-                  {!lic.installed ? <span className="muted small">{t('adminSystem.license.getKey')}</span> : null}
-                </div>
-              </form>
 
               <ConfirmDialog
                 open={confirmRemove}

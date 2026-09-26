@@ -282,6 +282,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.rejectProxyEvent(w, r, ErrInternal(), event, started)
 		return
 	}
+	if !resolved.ViaManagedModel() {
+		// The same name may be served by several upstreams, each its own
+		// catalog entry with its own grants and rate card. Route to the copy
+		// this caller is granted rather than refusing because an ungranted
+		// copy happened to sort first.
+		model = chooseGrantedCandidate(model, resolved.Alternatives, granted)
+		resolved.Model = model
+	}
 	accessID := model.ID
 	if resolved.ViaManagedModel() {
 		accessID = resolved.Managed.ID
@@ -758,6 +766,23 @@ func (s *Server) applyUsage(event *store.UsageEvent, extracted adapter.Usage, ra
 	}, rates)
 }
 
+// chooseGrantedCandidate returns the first of preferred+alternatives that the
+// caller holds a grant for, or preferred when none is granted (the caller is
+// then refused on the unchanged grant check that follows). Candidates arrive
+// in preference order from store.ModelsByName, so among several granted copies
+// the most recently discovered one serves.
+func chooseGrantedCandidate(preferred *store.Model, alternatives []*store.Model, granted map[string]string) *store.Model {
+	if _, ok := granted[preferred.ID]; ok || len(alternatives) == 0 {
+		return preferred
+	}
+	for _, m := range alternatives {
+		if _, ok := granted[m.ID]; ok {
+			return m
+		}
+	}
+	return preferred
+}
+
 // applyThroughput fills the event's tokens-per-second figures. Provider-measured
 // throughput is forwarded as-is (ThroughputUpstream). Otherwise the gateway
 // derives it from its own clock (ThroughputCalculated): for a stream, prompt
@@ -783,7 +808,14 @@ func applyThroughput(event *store.UsageEvent, extracted adapter.Usage, upstreamE
 	if event.Streaming && ttfb > 0 && ttfb < upstreamElapsed {
 		inWindow, outWindow = ttfb, upstreamElapsed-ttfb
 	}
-	event.TokensInPerSecond = usage.TokensPerSecond(event.TokensIn, inWindow)
+	// Input speed counts only what the provider processed: cache reads are
+	// excluded (and cache writes included) so a mostly-cached prompt does not
+	// report a prefill rate the model never achieved.
+	event.TokensInPerSecond = usage.TokensPerSecond(usage.ProcessedInputTokens(usage.TokenCounts{
+		In: event.TokensIn, Cached: event.TokensCached,
+		CacheWrite5m: event.TokensCacheWrite5m, CacheWrite1h: event.TokensCacheWrite1h,
+		CachedDisjoint: extracted.CachedDisjoint,
+	}), inWindow)
 	event.TokensOutPerSecond = usage.TokensPerSecond(event.TokensOut, outWindow)
 	event.ThroughputSource = usage.ThroughputCalculated
 }

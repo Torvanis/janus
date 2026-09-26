@@ -50,6 +50,12 @@ interface Star {
    * density change is a drift rather than a jump cut.
    */
   fade: number;
+  /**
+   * Per-star fade speed multiplier. Staggering it means a density change
+   * shimmers in and out across the sky instead of every new star brightening
+   * in lockstep.
+   */
+  fadeRate: number;
   /** Retiring stars fade out and are removed once invisible. */
   retiring: boolean;
 }
@@ -85,17 +91,39 @@ const DEGRADE_FPS = 45;
  * ever spans the viewport.
  */
 const MIN_TRAIL = 18;
-const MAX_TRAIL = 190;
+/**
+ * The largest job draws 1.5x the previous maximum (190px → 285px). The
+ * smallest job is unchanged; everything between is stretched proportionally,
+ * so a job reaches the maximum at the same token count as before and the
+ * relative order of sizes is preserved.
+ */
+const MAX_TRAIL = 285;
+const TRAIL_STRETCH = (MAX_TRAIL - MIN_TRAIL) / (190 - MIN_TRAIL);
 export function trailLengthForTokens(tokensOut: number): number {
   const linear = Math.max(0, tokensOut) / 1000;
-  const eased = Math.sqrt(linear) * 26;
+  const eased = Math.sqrt(linear) * 26 * TRAIL_STRETCH;
   return clamp(MIN_TRAIL + eased, MIN_TRAIL, MAX_TRAIL);
 }
 
-/** Head size follows the same curve on a tighter range. */
+/** Head size follows the same curve on a tighter range, also up to 1.5x (3.2 → 4.8). */
+const MIN_HEAD = 0.9;
+const MAX_HEAD = 4.8;
+const HEAD_STRETCH = (MAX_HEAD - MIN_HEAD) / (3.2 - MIN_HEAD);
 export function headSizeForTokens(tokensOut: number): number {
   const linear = Math.max(0, tokensOut) / 1000;
-  return clamp(0.9 + Math.sqrt(linear) * 0.5, 0.9, 3.2);
+  return clamp(MIN_HEAD + Math.sqrt(linear) * 0.5 * HEAD_STRETCH, MIN_HEAD, MAX_HEAD);
+}
+
+/**
+ * Where a newly added background star appears. Density changes happen IN
+ * PLACE: a star fades up at a random point anywhere in the field and joins
+ * the slow left-to-right drift from there. Entering new stars from the left
+ * edge instead made every density increase — most visibly the jump from the
+ * quiet first paint to real traffic on page load — read as a band of stars
+ * sweeping across the sky.
+ */
+export function arrivingStarPosition(width: number, height: number, random: () => number = Math.random): { x: number; y: number } {
+  return { x: random() * width, y: random() * height };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -209,15 +237,14 @@ export function AmbientCanvas({ signal, reducedMotion }: { signal: AmbientSignal
       return Math.round(clamp(MIN_STARS + scaled * (MAX_STARS - MIN_STARS), MIN_STARS, MAX_STARS) * quality);
     };
 
-    // A brand-new star, either scattered across the field (initial seed) or
-    // entering from the left edge to drift in with everything else.
-    const makeStar = (scattered: boolean): Star => ({
-      x: scattered ? Math.random() * width : -Math.random() * 40,
-      y: Math.random() * height,
+    // A brand-new star anywhere in the field. The initial seed is already
+    // "there"; a star added for a density increase fades up in place.
+    const makeStar = (visible: boolean): Star => ({
+      ...arrivingStarPosition(width, height),
       z: Math.random() * 0.9 + 0.1,
       radius: Math.random() * 1.5 + 1,
-      // A scattered star is already "there"; an arriving one fades up.
-      fade: scattered ? 1 : 0,
+      fade: visible ? 1 : 0,
+      fadeRate: 0.55 + Math.random() * 0.9,
       retiring: false,
     });
 
@@ -230,11 +257,11 @@ export function AmbientCanvas({ signal, reducedMotion }: { signal: AmbientSignal
     /**
      * Move the field toward the target density WITHOUT a visible reset.
      *
-     * Previously this called seedStars(), which replaced every star at once —
-     * the whole sky blinked just to change how many stars were in it. Now new
-     * stars enter from the left and fade up, surplus stars are marked retiring
-     * and fade out as they drift, and the change is applied a few stars at a
-     * time so even a large swing reads as the field thickening or thinning.
+     * Stars are added and removed in place: new stars fade up at random points
+     * across the whole field and surplus stars fade out where they are, each
+     * at its own pace, while the field keeps its slow left-to-right drift.
+     * The change is applied a few stars at a time so even a large swing reads
+     * as the sky thickening or thinning, never as a reset or a sweeping band.
      */
     const adjustDensity = () => {
       const target = targetStarCount();
@@ -246,11 +273,13 @@ export function AmbientCanvas({ signal, reducedMotion }: { signal: AmbientSignal
       if (drift < 0) {
         for (let i = 0; i < Math.min(step, -drift); i += 1) stars.push(makeStar(false));
       } else if (drift > 0) {
-        // Retire the dimmest (most distant) first: the sky thins from the
-        // back, which is far less noticeable than losing foreground stars.
+        // Retire the dimmer (more distant) half at random: the sky thins
+        // from the back, which is far less noticeable than losing foreground
+        // stars, and random choice keeps the thinning spread across the field.
         const ordered = [...live].sort((a, b) => a.z - b.z);
-        for (let i = 0; i < Math.min(step, drift); i += 1) {
-          const star = ordered[i];
+        const pool = ordered.slice(0, Math.max(Math.min(step, drift), Math.ceil(ordered.length / 2)));
+        for (let i = 0; i < Math.min(step, drift) && pool.length > 0; i += 1) {
+          const [star] = pool.splice(Math.floor(Math.random() * pool.length), 1);
           if (star) star.retiring = true;
         }
       }
@@ -283,9 +312,10 @@ export function AmbientCanvas({ signal, reducedMotion }: { signal: AmbientSignal
     const drawStars = (delta: number) => {
       const throughput = signalRef.current.tokensPerMinute;
       const speed = clamp(0.02 + Math.log10(Math.max(1, throughput)) / 60, 0.02, 0.35);
-      // ~1.2s to fade fully in or out: slow enough to read as a drift, fast
-      // enough that the field tracks a traffic change without lagging it.
-      const fadeStep = delta / 1200;
+      // ~2.5s on average to fade fully in or out, each star at its own pace:
+      // slow enough to read as the sky breathing, fast enough that the field
+      // tracks a traffic change without lagging it.
+      const fadeStep = delta / 2500;
       for (const star of stars) {
         star.x += speed * star.z * delta * 0.06;
         if (star.x > width) {
@@ -297,7 +327,8 @@ export function AmbientCanvas({ signal, reducedMotion }: { signal: AmbientSignal
           }
           star.x = 0;
         }
-        star.fade = clamp(star.fade + (star.retiring ? -fadeStep : fadeStep), 0, 1);
+        const step = fadeStep * star.fadeRate;
+        star.fade = clamp(star.fade + (star.retiring ? -step : step), 0, 1);
         if (star.fade <= 0) continue;
         context.globalAlpha = (0.25 + star.z * 0.3) * star.fade;
         context.fillStyle = rgba(star.z > 0.75 ? palette.starBright : palette.starDim, 1);

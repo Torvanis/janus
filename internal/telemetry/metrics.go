@@ -66,6 +66,11 @@ type Metrics struct {
 	PurgeDeletedRows      *prometheus.CounterVec
 	AlertDispatch         *prometheus.CounterVec
 	BuildInfo             *prometheus.GaugeVec
+	// License renewal/sync health, so an operator can alert before a key
+	// lapses: attempts by result, last success time, and signed expiry.
+	LicenseSyncAttempts    *prometheus.CounterVec
+	LicenseSyncLastSuccess prometheus.Gauge
+	LicenseExpiry          prometheus.Gauge
 }
 
 // New registers every instrument on a private registry.
@@ -116,6 +121,9 @@ func New(version, sha string) *Metrics {
 	m.DiscoveryRuns = counter("janus_discovery_runs_total", "Model discovery runs.", "upstream", "result")
 	m.PurgeDeletedRows = counter("janus_purge_deleted_rows_total", "Rows removed by the retention purge job.", "table")
 	m.AlertDispatch = counter("janus_alert_dispatch_total", "Alert deliveries attempted.", "channel", "result")
+	m.LicenseSyncAttempts = counter("janus_license_sync_attempts_total", "Automatic license sync attempts by result (success or an error code).", "result")
+	m.LicenseSyncLastSuccess = gauge("janus_license_sync_last_success_timestamp_seconds", "Unix time of the last successful license sync (0 = never since start).")
+	m.LicenseExpiry = gauge("janus_license_expiry_timestamp_seconds", "Unix time the installed signed license expires, before grace (0 = none or perpetual).")
 	m.BuildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "janus_build_info", Help: "Build metadata."}, []string{"version", "sha"})
 	reg.MustRegister(m.BuildInfo)
 	m.BuildInfo.WithLabelValues(version, sha).Set(1)
@@ -194,4 +202,30 @@ func StatusClass(status int) string {
 	default:
 		return "2xx"
 	}
+}
+
+// ObserveLicenseSync records one completed license sync attempt.
+func (m *Metrics) ObserveLicenseSync(code string, expires *time.Time) {
+	if m == nil {
+		return
+	}
+	result := code
+	if result == "" {
+		result = "success"
+		m.LicenseSyncLastSuccess.SetToCurrentTime()
+	}
+	m.LicenseSyncAttempts.WithLabelValues(result).Inc()
+	m.SetLicenseExpiry(expires)
+}
+
+// SetLicenseExpiry publishes the installed license's signed expiry.
+func (m *Metrics) SetLicenseExpiry(expires *time.Time) {
+	if m == nil {
+		return
+	}
+	if expires == nil {
+		m.LicenseExpiry.Set(0)
+		return
+	}
+	m.LicenseExpiry.Set(float64(expires.Unix()))
 }

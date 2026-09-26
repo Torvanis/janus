@@ -401,14 +401,18 @@ const (
 // Grant links a model — real or managed — to a user, a group, everyone, a
 // service token, or every service token.
 type Grant struct {
-	ID          string    `json:"id"`
-	ModelID     string    `json:"model_id"`
-	ModelKind   string    `json:"model_kind"`
-	ModelName   string    `json:"model_name"`
-	GranteeType string    `json:"grantee_type"`
-	GranteeID   string    `json:"grantee_id"`
-	GranteeName string    `json:"grantee_name"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID        string `json:"id"`
+	ModelID   string `json:"model_id"`
+	ModelKind string `json:"model_kind"`
+	ModelName string `json:"model_name"`
+	// UpstreamName is the upstream serving the granted model, so grants on
+	// same-named models from different upstreams can be told apart. Empty for
+	// managed aliases, which are not tied to one upstream.
+	UpstreamName string    `json:"upstream_name,omitempty"`
+	GranteeType  string    `json:"grantee_type"`
+	GranteeID    string    `json:"grantee_id"`
+	GranteeName  string    `json:"grantee_name"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // ServiceTokenPrefix marks a credential as belonging to a service token rather

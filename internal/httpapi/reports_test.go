@@ -240,7 +240,7 @@ func TestReportingHTTPDownloadGuards(t *testing.T) {
 		t.Fatal(e)
 	}
 	rr := reportingRequest(t, h, h.user, "GET", "/reports/runs/"+v.ID+"/download?format=csv", nil)
-	if rr.Code != 200 || !strings.Contains(rr.Header().Get("Content-Disposition"), v.ID+".csv\"") {
+	if cd := rr.Header().Get("Content-Disposition"); rr.Code != 200 || !strings.Contains(cd, `filename="janus-`+strings.ToLower(strings.ReplaceAll(d.Name, " ", "-"))) || !strings.HasSuffix(cd, `.csv"`) || strings.Contains(cd, v.ID) {
 		t.Fatalf("filename: %d %s", rr.Code, rr.Header().Get("Content-Disposition"))
 	}
 	h.server.Config.LocalOnly = true

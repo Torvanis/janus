@@ -48,14 +48,13 @@ export function HelpPage(): ReactNode {
       </header>
 
       <div className="grid help-layout">
-        <nav className="card" aria-label={t('help.topicsNav')} style={{ padding: 'var(--janus-space-2)' }}>
-          <ul className="stack" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 2 }}>
+        <nav className="card" aria-label={t('help.topicsNav')} style={{ padding: 'var(--janus-space-2)', alignSelf: 'start' }}>
+          <ul className="topic-list">
             {(help.data?.topics ?? []).map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
                   className={`nav-item${topic === item.id ? ' nav-item-active' : ''}`}
-                  style={{ width: '100%', border: 'none', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
                   onClick={() => {
                     setTopic(item.id);
                     setSnippetIndex(0);
@@ -117,7 +116,7 @@ export function HelpPage(): ReactNode {
                       <span className="small muted">{t('help.endpointLabel', { name: me?.endpoint ?? '' })}</span>
                     </div>
                     <div
-                      className="segmented"
+                      className="segmented segmented-wrap"
                       role="tablist"
                       aria-label={t('help.snippetLanguage')}
                       style={{ marginBottom: 'var(--janus-space-3)' }}

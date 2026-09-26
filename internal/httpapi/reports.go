@@ -255,16 +255,11 @@ func (s *Server) reportDownload(w http.ResponseWriter, r *http.Request, v store.
 		reportStoreError(w, e)
 		return
 	}
-	safe := strings.Map(func(c rune) rune {
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' {
-			return c
-		}
-		return '-'
-	}, v.ID)
+	name := reporting.DownloadName(*v.Result, format)
 	w.Header().Set("Content-Type", reporting.ContentType(format))
-	w.Header().Set("Content-Disposition", `attachment; filename="report-`+safe+reporting.Extension(format)+`"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, "report-"+safe, info.ModTime(), f)
+	http.ServeContent(w, r, name, info.ModTime(), f)
 	s.audit(r, "report.download", "report_run", v.ID, nil, map[string]string{"format": format})
 }
 func (s *Server) reportDefinitionView(v store.ReportDefinition) store.ReportDefinition {

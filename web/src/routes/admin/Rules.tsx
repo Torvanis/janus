@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import type { BlockingRule, RuleClause } from '../../lib/types';
 import { formatNumber, formatRelative, titleCase } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { PolicyCaveat, SortHeader } from '../shared';
 import { useUrlState } from '../../lib/hooks';
 import { t, type MessageKey } from '../../lib/i18n';
@@ -159,13 +160,11 @@ export function RulesPage(): ReactNode {
                           <td className="small muted">
                             {rule.last_hit_at ? formatRelative(rule.last_hit_at) : t('adminRules.never')}
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(rule)}>
-                              {t('adminRules.edit')}
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(rule)}>
-                              {t('tables.delete')}
-                            </button>
+                          <td>
+                            <RowActions>
+                              <IconButton icon="edit" label={t('adminRules.edit')} onClick={() => setEditing(rule)} />
+                              <IconButton icon="delete" label={t('tables.delete')} danger onClick={() => setDeleting(rule)} />
+                            </RowActions>
                           </td>
                         </tr>
                       ))}

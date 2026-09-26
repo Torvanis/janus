@@ -2005,3 +2005,568 @@ table.data tbody tr[data-selected='true'] {
   display: grid;
   gap: 2px;
 }
+
+/* --- Row actions (icon buttons) ------------------------------------------- */
+/* One line per row: several text buttons wrapped into a 2x2 grid and doubled
+   every row's height. Labels live in aria-label + a hover/focus tooltip. */
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+td:has(> .row-actions) {
+  text-align: right;
+  width: 1%;
+}
+.icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--janus-radius-md);
+  background: transparent;
+  color: var(--janus-color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--janus-duration-fast) var(--janus-ease-standard),
+    color var(--janus-duration-fast) var(--janus-ease-standard);
+}
+.icon-btn:hover:not(:disabled),
+.icon-btn:focus-visible {
+  background: var(--janus-state-hover);
+  border-color: var(--janus-color-border-default);
+  color: var(--janus-color-text-primary);
+}
+.icon-btn-danger:hover:not(:disabled),
+.icon-btn-danger:focus-visible {
+  background: var(--janus-color-danger-bg);
+  border-color: var(--janus-color-danger-border, transparent);
+  color: var(--janus-color-danger-fg);
+}
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.icon-btn:focus-visible {
+  outline: 2px solid var(--janus-color-primary-bg);
+  outline-offset: 1px;
+}
+.icon-btn[data-tooltip]:hover::after,
+.icon-btn[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  padding: 4px 8px;
+  border-radius: var(--janus-radius-sm);
+  background: var(--janus-color-bg-surface-overlay);
+  border: 1px solid var(--janus-color-border-default);
+  box-shadow: var(--janus-shadow-2);
+  color: var(--janus-color-text-primary);
+  font-size: var(--janus-text-2xs);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Compact directory tables (People and other admin inventories). */
+table.data.data-compact td {
+  padding: 6px 10px;
+  height: auto;
+  white-space: nowrap;
+}
+/* Multi-word headers ("Tokens out (30d)") wrap to two short lines instead of
+   setting the column width; the cells underneath are what size the column. */
+table.data.data-compact th {
+  padding-left: 10px;
+  padding-right: 10px;
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+}
+table.data.data-compact th button {
+  display: inline;
+}
+table.data.data-compact td.cell-person {
+  white-space: normal;
+  min-width: 150px;
+}
+table.data.data-compact td.cell-email {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cell-person .person-link {
+  all: unset;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--janus-color-text-primary);
+}
+.cell-person .person-link:hover,
+.cell-person .person-link:focus-visible {
+  color: var(--janus-color-primary-fg, var(--janus-color-text-primary));
+  text-decoration: underline;
+}
+table.data.data-compact td .cell-sub {
+  display: block;
+  font-size: var(--janus-text-2xs);
+  color: var(--janus-color-text-muted);
+  line-height: 1.3;
+}
+table.data.data-compact .select-inline,
+table.data .select-inline {
+  min-height: 28px;
+  width: auto;
+  max-width: 150px;
+  padding: 2px 24px 2px 8px;
+  font-size: var(--janus-text-xs);
+}
+
+/* Pager control: "Rows per page" is one label, never wrapped. The shared
+   .select is width:100%, which inside a flex label squeezed the label text
+   to one word per line. */
+.page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--janus-space-2);
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-secondary);
+}
+.page-size .select {
+  width: auto;
+  min-width: 68px;
+  min-height: 32px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* In-page vertical topic list (Help). Buttons need their chrome reset:
+   .nav-item was written for links, so on <button> the UA's grey button
+   background and system font leaked through. */
+.topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.topic-list .nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--janus-text-sm);
+  text-align: left;
+  cursor: pointer;
+  min-height: 36px;
+  padding: 7px var(--janus-space-3);
+}
+.topic-list .nav-item:hover {
+  background: var(--janus-state-hover);
+}
+.topic-list .nav-item-active,
+.topic-list .nav-item-active:hover {
+  background: var(--janus-state-selected);
+  color: var(--janus-color-text-primary);
+  box-shadow: inset 2px 0 0 var(--janus-color-primary-bg);
+}
+.topic-list .nav-item-active::before {
+  display: none;
+}
+
+/* Segmented controls with many options wrap instead of clipping the last
+   option under the card edge. */
+.segmented.segmented-wrap {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+/* Table toolbar above server-paginated tables: count on the left, page size right. */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-3);
+  padding: 8px var(--janus-space-4);
+  border-bottom: 1px solid var(--janus-color-border-subtle);
+}
+
+/* The row-actions column is pinned to the right edge of its scroll area, so
+   on a narrow window a wide table scrolls under it instead of pushing the
+   actions out of view. */
+table.data td:has(> .row-actions),
+table.data:has(td > .row-actions) thead th:last-child {
+  position: sticky;
+  right: 0;
+  background: var(--janus-color-bg-surface);
+  box-shadow: -8px 0 8px -8px rgba(0, 0, 0, 0.35);
+}
+table.data:has(td > .row-actions) thead th:last-child {
+  z-index: 2;
+}
+table.data tbody tr:hover td:has(> .row-actions) {
+  background: var(--janus-color-bg-surface-overlay);
+}
+
+/* --- License & updates ---------------------------------------------------- */
+
+.license-card {
+  padding: var(--janus-space-4);
+}
+.license-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-4);
+}
+.license-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--janus-space-4);
+  padding: var(--janus-space-4) var(--janus-space-5);
+  border-radius: var(--janus-radius-lg);
+  border: 1px solid var(--janus-color-border-default);
+  background: var(--janus-color-bg-surface-raised);
+}
+.license-hero.is-ok {
+  border-color: var(--janus-color-success-border);
+  background: linear-gradient(90deg, var(--janus-color-success-bg), transparent 70%);
+}
+.license-hero.is-attention {
+  border-color: var(--janus-color-warning-border);
+  background: linear-gradient(90deg, var(--janus-color-warning-bg), transparent 70%);
+}
+.license-hero.is-unlicensed {
+  border-color: var(--janus-color-danger-border);
+  background: linear-gradient(90deg, var(--janus-color-danger-bg), transparent 70%);
+}
+.license-verdict-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex: none;
+  color: var(--janus-color-text-inverse);
+}
+.license-verdict-icon.is-ok {
+  background: var(--janus-color-success-solid);
+  box-shadow:
+    0 0 0 5px var(--janus-color-success-bg),
+    0 0 22px rgba(52, 211, 153, 0.35);
+}
+.license-verdict-icon.is-attention {
+  background: var(--janus-color-warning-solid);
+  box-shadow:
+    0 0 0 5px var(--janus-color-warning-bg),
+    0 0 22px rgba(251, 191, 36, 0.3);
+}
+.license-verdict-icon.is-unlicensed {
+  background: var(--janus-color-danger-solid);
+  box-shadow:
+    0 0 0 5px var(--janus-color-danger-bg),
+    0 0 22px rgba(248, 113, 113, 0.3);
+}
+.license-hero-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-1);
+}
+.license-hero-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--janus-space-2);
+  font-size: var(--janus-text-lg);
+  font-weight: 600;
+}
+.license-hero-title > span:first-child {
+  margin-right: var(--janus-space-1);
+}
+.license-hero-summary {
+  color: var(--janus-color-text-secondary);
+  font-size: var(--janus-text-sm);
+}
+.license-hero-reasons {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: var(--janus-text-sm);
+  color: var(--janus-color-text-secondary);
+  display: grid;
+  gap: 2px;
+}
+.license-hero.is-attention .license-hero-reasons li::marker {
+  color: var(--janus-color-warning-solid);
+}
+.license-hero.is-unlicensed .license-hero-reasons li::marker {
+  color: var(--janus-color-danger-solid);
+}
+.license-hero-link {
+  white-space: nowrap;
+}
+
+.license-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.1fr) minmax(0, 0.95fr);
+  gap: var(--janus-space-3);
+  align-items: stretch;
+}
+.license-grid > * {
+  min-width: 0;
+}
+.license-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-3);
+  padding: var(--janus-space-4);
+  border-radius: var(--janus-radius-md);
+  border: 1px solid var(--janus-color-border-subtle);
+  background: var(--janus-color-bg-canvas);
+}
+.license-panel-title {
+  margin: 0;
+  font-size: var(--janus-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--janus-color-text-muted);
+}
+.license-panel-divider {
+  margin-top: auto;
+  padding-top: var(--janus-space-3);
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+.license-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 0;
+  font-size: var(--janus-text-xs);
+}
+.license-detail {
+  display: contents;
+}
+.license-detail dt,
+.license-detail dd {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--janus-color-border-subtle);
+}
+.license-detail:last-child dt,
+.license-detail:last-child dd {
+  border-bottom: 0;
+}
+.license-detail dt {
+  padding-right: var(--janus-space-4);
+  color: var(--janus-color-text-muted);
+}
+.license-detail dd {
+  margin: 0;
+  text-align: right;
+  color: var(--janus-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.license-detail dd.mono {
+  font-size: var(--janus-text-2xs);
+}
+.license-hero .license-features {
+  margin-top: var(--janus-space-2);
+}
+.license-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.license-features li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--janus-radius-pill);
+  font-size: var(--janus-text-2xs);
+  color: var(--janus-color-text-secondary);
+  background: var(--janus-color-bg-surface-raised);
+  border: 1px solid var(--janus-color-border-default);
+}
+.license-features li::before {
+  content: '✓';
+  color: var(--janus-color-success-solid);
+  font-weight: 700;
+}
+
+.license-sync {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-3);
+}
+.license-sync-warn {
+  color: var(--janus-color-warning-fg);
+}
+.license-sync-form,
+.license-install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-3);
+}
+.license-sync-form .switch {
+  min-height: 0;
+  font-size: var(--janus-text-sm);
+}
+.license-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--janus-space-2);
+}
+.license-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--janus-space-2);
+  cursor: pointer;
+  font-size: var(--janus-text-sm);
+}
+.license-check input[type='checkbox'] {
+  margin-top: 3px;
+  accent-color: var(--janus-color-primary-bg);
+}
+.license-clear {
+  margin-left: auto;
+  align-items: center;
+  color: var(--janus-color-text-secondary);
+}
+.license-clear input[type='checkbox'] {
+  margin-top: 0;
+}
+.license-key-input {
+  min-height: 56px;
+  font-family: var(--janus-font-mono);
+  font-size: var(--janus-text-xs);
+}
+.input:disabled,
+.textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.license-hero {
+  padding: var(--janus-space-3) var(--janus-space-5);
+}
+@media (max-width: 1180px) {
+  .license-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .license-grid > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 860px) {
+  .license-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .license-hero {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .license-hero-link {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .license-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .license-clear {
+    margin-left: 0;
+  }
+}
+.license-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-2);
+  flex-wrap: wrap;
+}
+.license-field-head .license-clear {
+  margin-left: 0;
+  font-size: var(--janus-text-2xs);
+}
+.license-sync > .muted.small,
+.license-install .field-hint {
+  font-size: var(--janus-text-2xs);
+  line-height: 1.45;
+}
+.license-panel .input {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+.license-verdict-icon {
+  width: 42px;
+  height: 42px;
+}
+.license-install .field-hint {
+  margin: 0;
+}
+.license-hero {
+  padding: 14px var(--janus-space-5);
+}
+.license-grid .license-panel {
+  padding: 14px var(--janus-space-4);
+  gap: 10px;
+}
+.license-sync {
+  gap: 10px;
+}
+.license-detail-sub {
+  display: block;
+  font-size: var(--janus-text-2xs);
+  color: var(--janus-color-text-muted);
+}
+.license-detail dd.mono {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.license-hero .license-features {
+  margin-top: 6px;
+}
+.license-features li {
+  padding: 1px 8px;
+  line-height: 1.5;
+}
+.license-hero-body {
+  gap: 2px;
+}
+.license-panel .license-actions {
+  margin-top: 2px;
+}
+.page:has(> div:not([hidden]) .license-card) {
+  padding-bottom: var(--janus-space-5);
+}
+.license-hero {
+  align-items: start;
+}
+.license-hero-link {
+  align-self: start;
+}
+.license-hero.is-unlicensed .license-features li {
+  opacity: 0.6;
+}
+.license-hero.is-unlicensed .license-features li::before {
+  content: '⏸';
+  color: var(--janus-color-danger-solid);
+  font-weight: 400;
+}
+[data-theme='dark'] .license-panel .input,
+[data-theme='dark'] .license-panel .textarea {
+  border-color: var(--janus-color-border-strong);
+}

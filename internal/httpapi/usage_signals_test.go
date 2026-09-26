@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/torvanis/janus/internal/usage"
 )
@@ -170,5 +171,49 @@ func TestProxyStreamCarriesThroughputTrailers(t *testing.T) {
 	}
 	if v, err := strconv.ParseFloat(trailer.Get(headerCalcTokensOutPerSecond), 64); err != nil || v <= 0 {
 		t.Errorf("trailer %s = %q, want positive", headerCalcTokensOutPerSecond, trailer.Get(headerCalcTokensOutPerSecond))
+	}
+}
+
+// A calculated input rate counts only the prompt the provider processed. With
+// 1,000 prompt tokens of which 900 were cache hits, the reported rate must be
+// the rate for 100 tokens — the old code divided all 1,000 by the same window
+// and over-reported prefill speed 10x on a cache-heavy request.
+func TestProxyCalculatedInputThroughputExcludesCachedTokens(t *testing.T) {
+	h := newHarness(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmpl-1","choices":[{"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],` +
+			`"usage":{"prompt_tokens":1000,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":900}}}`))
+	}))
+	t.Cleanup(up.Close)
+	if err := h.store.UpdateUpstream(context.Background(), h.model.UpstreamID, up.URL, true, "", ""); err != nil {
+		t.Fatalf("repoint upstream: %v", err)
+	}
+	rec := h.do(http.MethodPost, "/v1/chat/completions", map[string]any{
+		"model": "test-model", "messages": []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proxy returned %d: %s", rec.Code, rec.Body.String())
+	}
+	in, err := strconv.ParseFloat(rec.Header().Get(headerCalcTokensInPerSecond), 64)
+	if err != nil {
+		t.Fatalf("%s = %q: %v", headerCalcTokensInPerSecond, rec.Header().Get(headerCalcTokensInPerSecond), err)
+	}
+	out, err := strconv.ParseFloat(rec.Header().Get(headerCalcTokensOutPerSecond), 64)
+	if err != nil || out <= 0 {
+		t.Fatalf("%s = %q", headerCalcTokensOutPerSecond, rec.Header().Get(headerCalcTokensOutPerSecond))
+	}
+	// A buffered response shares one window for both phases, so the ratio
+	// of the two rates is exactly processed-input : output = 100 : 10.
+	if ratio := in / out; ratio < 9.9 || ratio > 10.1 {
+		t.Fatalf("input/output rate ratio = %.2f (in=%.2f out=%.2f), want 10 — cached tokens must not count as processed input", ratio, in, out)
+	}
+	event := h.waitForUsageEvents(1)[0]
+	if event.TokensIn != 1000 || event.TokensCached != 900 {
+		t.Fatalf("event tokens in=%d cached=%d, want 1000/900 (counts stay as reported)", event.TokensIn, event.TokensCached)
+	}
+	if r := event.TokensInPerSecond / event.TokensOutPerSecond; r < 9.9 || r > 10.1 {
+		t.Fatalf("recorded input/output rate ratio = %.2f, want 10", r)
 	}
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Teams from './Teams';
@@ -69,11 +69,12 @@ it.each(['admin', 'user'])('rejects nonmember deep links before detail or usage 
   expect(api.get).not.toHaveBeenCalledWith('/api/v1/teams/other');
   expect(screen.queryByText('Other organization team')).toBeNull();
 });
+// The roster now lives on the team page itself (beside usage), so an old
+// manage/settings/members URL lands on that one informational page.
 it.each(['admin', 'user'])('keeps member usage and roster informational even with old manage URLs for %s', async (role) => {
   mount('/teams/mine?view=manage&section=settings', role);
   await screen.findByRole('heading', { name: 'Usage for mine' });
-  fireEvent.click(screen.getByRole('link', { name: 'Members' }));
-  await screen.findByText('me@example.com');
+  expect(screen.queryByRole('link', { name: 'Members' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Leave team' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Create team' })).toBeNull();

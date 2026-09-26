@@ -830,6 +830,7 @@ var migrations = []migration{
 	localAuthMigration,
 	identityProviderMigration,
 	pendingLoginMigration,
+	upstreamLiveNameMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serialises

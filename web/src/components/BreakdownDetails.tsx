@@ -51,7 +51,7 @@ export function BreakdownDetails({
                 setPage(0);
               }}
             />
-            <label>
+            <label className="page-size">
               Rows per page{' '}
               <select
                 aria-label="Returned summary rows per page"

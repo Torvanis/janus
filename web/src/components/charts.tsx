@@ -90,7 +90,7 @@ function metricValue(point: TimePoint, metric: MetricKey): number {
 }
 
 /** Value of one breakdown row under a metric — shared by BarList and DonutChart. */
-function breakdownValue(row: Breakdown, metric: MetricKey): number {
+export function breakdownValue(row: Breakdown, metric: MetricKey): number {
   switch (metric) {
     case 'requests':
       return row.totals.request_count;
@@ -103,7 +103,7 @@ function breakdownValue(row: Breakdown, metric: MetricKey): number {
   }
 }
 
-function formatMetric(value: number, metric: MetricKey): string {
+export function formatMetric(value: number, metric: MetricKey): string {
   return metric === 'cost' ? formatUSD(value, { compact: true }) : formatNumber(value, { compact: true });
 }
 

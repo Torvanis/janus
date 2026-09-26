@@ -7,8 +7,11 @@ export function ConfirmAction({
   onConfirm,
   busy,
   danger = true,
+  label,
 }: {
   children: string;
+  /** Accessible name when the visible text is abbreviated (e.g. "Delete <report>"). */
+  label?: string;
   consequence: string;
   onConfirm: () => void;
   busy?: boolean;
@@ -17,13 +20,19 @@ export function ConfirmAction({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className={`btn ${danger ? 'btn-danger' : ''}`} disabled={busy} onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={`btn ${danger ? 'btn-danger' : ''}`}
+        disabled={busy}
+        aria-label={label}
+        onClick={() => setOpen(true)}
+      >
         {children}
       </button>
       <ConfirmDialog
         open={open}
         onClose={() => setOpen(false)}
-        title={children}
+        title={label ?? children}
         consequence={consequence}
         danger={danger}
         busy={busy}

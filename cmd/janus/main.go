@@ -174,8 +174,11 @@ func run() error {
 		return err
 	}
 
+	metrics.SetLicenseExpiry(licenseMgr.State().ExpiresAt)
 	licenseSync := license.NewSync(licenseMgr, db, cipher, license.SyncOptions{
 		Offline: cfg.Offline, Enabled: cfg.LicenseSync, Token: cfg.LicenseSyncToken, TokenSet: cfg.LicenseSyncTokenSet,
+		Report:  licenseSyncReport(db, cfg.BuildVersion),
+		Observe: metrics.ObserveLicenseSync,
 	})
 	go licenseSync.Run(ctx)
 
@@ -467,4 +470,21 @@ func preflightLicense(ctx context.Context, cfg *config.Config) error {
 		return nil // reported as "invalid" by the manager after Open
 	}
 	return license.CheckMaintenance(&c, cfg.BuildDate)
+}
+
+// licenseSyncReport tells the portal which gateway is syncing: its stable
+// instance id, version, 30-day active seats and live replicas. Counting
+// failures send the field empty rather than a misleading zero.
+func licenseSyncReport(db *store.Store, version string) func(context.Context) license.SyncReport {
+	return func(ctx context.Context) license.SyncReport {
+		rep := license.SyncReport{Version: version}
+		rep.InstanceID, _ = db.InstanceID(ctx)
+		if n, err := db.ActiveSeatCount(ctx, time.Now().Add(-30*24*time.Hour)); err == nil {
+			rep.SeatsUsed = &n
+		}
+		if n, err := db.LiveInstanceCount(ctx, time.Now()); err == nil && n > 0 {
+			rep.Nodes = &n
+		}
+		return rep
+	}
 }
