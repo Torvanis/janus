@@ -21,6 +21,7 @@ import (
 	"github.com/torvanis/janus/internal/secgw"
 	"github.com/torvanis/janus/internal/secgw/stream"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/subscription"
 	"github.com/torvanis/janus/internal/telemetry"
 	"github.com/torvanis/janus/internal/usage"
 )
@@ -221,10 +222,35 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.rejectProxyEvent(w, r, ErrInvalidRequest("Specify a model in the request body, for example {\"model\": \"gpt-4o-mini\"}.").WithParam("model"), event, started)
 		return
 	}
-	// Resolution covers both real models and managed-model aliases. When an
-	// alias is used, `resolved.Model` is the underlying model that will serve
-	// and be billed; `resolved.Managed` describes the indirection.
-	resolved, err := s.cachedResolveModel(ctx, modelName)
+	// Personal subscriptions (my/<provider>/<model>) take a separate branch
+	// of resolution: the caller's own connected plan, no grants, no catalog
+	// lookup, never another user's connection. Everything after resolution
+	// (Security Gateway, quotas, relay, metering) is shared.
+	var personal *personalRoute
+	var resolved store.ResolvedModel
+	if subscription.IsPersonalModel(modelName) {
+		route, apiErr := s.resolvePersonalRoute(ctx, user, serviceToken, modelName)
+		if apiErr != nil {
+			s.rejectProxyEvent(w, r, apiErr, event, started)
+			return
+		}
+		personal = route
+		resolved.Model = route.model
+		event.SubscriptionID = route.conn.ID
+		// Personal traffic is fully classified for reports without an
+		// admin step: the provider is known and it is externally hosted.
+		// Family is the native model name, the same granularity an admin
+		// would pick for a catalog model.
+		event.ModelProvider = route.provider.ID()
+		event.ModelHosting = "external"
+		event.ModelFamily = route.model.Name
+		err = nil
+	} else {
+		// Resolution covers both real models and managed-model aliases. When an
+		// alias is used, `resolved.Model` is the underlying model that will serve
+		// and be billed; `resolved.Managed` describes the indirection.
+		resolved, err = s.cachedResolveModel(ctx, modelName)
+	}
 	if errors.Is(err, store.ErrManagedModelFallbackExhausted) {
 		// The alias's target is unavailable AND the fallback the admin
 		// configured for exactly this case cannot take over. Name both
@@ -268,21 +294,45 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// recent traffic) are evaluated on every request, outside the resolution
 	// cache, so an alias switches to its fallback as soon as the signal
 	// appears and back as soon as it clears.
-	resolved = s.applyManagedFallback(ctx, resolved)
+	var route *poolRoute
+	switch {
+	case personal != nil:
+		// Personal subscriptions are never pools and have no fallback.
+	case isPool(resolved):
+		// A pool picks its member per request. The per-target runtime
+		// fallback rules don't apply: members are health-checked directly
+		// and the fallback serves only when every member is out.
+		route = s.choosePoolMember(ctx, r, body, event, resolved.Managed)
+		switch {
+		case route != nil:
+			resolved.Model = route.current()
+		case resolved.Fallback != nil:
+			resolved = resolved.WithFallback(store.FallbackTriggerPoolExhausted)
+		default:
+			event.RequestedModelName = resolved.Managed.Name
+			s.rejectProxyEvent(w, r, ErrManagedModelUnavailable(modelName, "every model in its pool is out of service"), event, started)
+			return
+		}
+	default:
+		resolved = s.applyManagedFallback(ctx, resolved)
+	}
 	model := resolved.Model
 
 	// Grants are resolved against whichever principal kind is calling. A
 	// managed alias is granted in its own right: holding a grant on the
 	// underlying model does NOT imply access to an alias pointing at it, and
 	// vice versa, so an admin's alias grants are an independent control.
-	granted, err := s.cachedGrantedIDs(ctx, store.GrantSubject{
-		UserID: event.UserID, GroupIDs: groupIDs, ServiceTokenID: event.ServiceTokenID, TeamID: event.TeamIDs,
-	})
-	if err != nil {
-		s.rejectProxyEvent(w, r, ErrInternal(), event, started)
-		return
+	granted := map[string]string{model.ID: "personal_subscription"}
+	if personal == nil {
+		granted, err = s.cachedGrantedIDs(ctx, store.GrantSubject{
+			UserID: event.UserID, GroupIDs: groupIDs, ServiceTokenID: event.ServiceTokenID, TeamID: event.TeamIDs,
+		})
+		if err != nil {
+			s.rejectProxyEvent(w, r, ErrInternal(), event, started)
+			return
+		}
 	}
-	if !resolved.ViaManagedModel() {
+	if personal == nil && !resolved.ViaManagedModel() {
 		// The same name may be served by several upstreams, each its own
 		// catalog entry with its own grants and rate card. Route to the copy
 		// this caller is granted rather than refusing because an ungranted
@@ -306,26 +356,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(headerFallbackReason, resolved.FallbackReason)
 		event.FallbackReason = resolved.FallbackReason
 	}
-	event.ModelID = model.ID
-	event.UpstreamID = model.UpstreamID
-	// Usage is recorded under the caller-facing catalog name — the admin-set
-	// display name when one exists — so the request log and dashboards match
-	// what users see in /v1/models. model_id stays the stable native key that
-	// grants, quotas, and rate cards join on.
-	//
-	// For a managed alias this deliberately records the UNDERLYING model:
-	// model reporting must always reflect what actually ran. The alias the
-	// caller asked for is preserved separately in requested_model_name so
-	// alias adoption stays visible without contaminating model reports.
-	event.ModelName = model.PublicName()
-	if classification, classificationErr := s.Store.GetReportModelClassification(ctx, model.ID); classificationErr == nil {
-		event.ModelFamily = classification.Family
-		event.ModelProvider = classification.Provider
-		event.ModelHosting = classification.Hosting
-	} else if !errors.Is(classificationErr, store.ErrNotFound) {
-		// Reporting must not make a healthy inference path unavailable. Missing
-		// metadata is explicit in coverage, and an operator gets the real error.
-		s.Logger.ErrorContext(ctx, "reporting classification unavailable", "model_id", model.ID, "error", classificationErr)
+	if personal != nil {
+		// No catalog row, so no admin classification: the provider is
+		// known from the connection and that is all reporting records.
+		event.ModelID, event.UpstreamID, event.ModelName = model.ID, model.UpstreamID, model.PublicName()
+	} else {
+		s.stampServedModel(ctx, event, model)
 	}
 	if resolved.ViaManagedModel() {
 		event.RequestedModelName = resolved.Managed.Name
@@ -418,94 +454,221 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Resolve the upstream and its adapter.
-	upstream, err := s.cachedUpstreamByID(ctx, model.UpstreamID)
-	if err != nil || !upstream.Enabled {
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(model.UpstreamName), event, started)
-		return
-	}
-	providerAdapter, err := adapter.Get(upstream.AdapterType)
-	if err != nil {
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
-		return
-	}
-	apiKey, err := s.Cipher.Decrypt(upstream.EncryptedKey())
-	if err != nil {
-		s.Logger.ErrorContext(ctx, "decrypt upstream credential", "upstream", upstream.Name, "error", err.Error())
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
-		return
-	}
-	// adapterReq is handed to Prepare AND to the response-side hooks
-	// (TransformResponse / NewStreamTransformer), so an adapter that
-	// translated the request knows to translate the response back.
-	adapterReq := &adapter.Request{
-		Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(),
-		// Model is always the native upstream name: adapters that embed the
-		// model in the URL (Bedrock, Vertex) must never see a display name.
-		Body: body, Model: model.Name, Streaming: event.Streaming,
-		// Side-channel calls (e.g. Vertex token minting) must follow the
-		// caller's cancellation and the gateway's CA/proxy configuration.
-		Context: ctx, Client: s.upstreamHTTPClient(ctx),
-	}
-	prepared, err := providerAdapter.Prepare(adapter.Upstream{
-		ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType,
-	}, adapterReq)
-	if err != nil {
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name).WithReason(err.Error()), event, started)
-		return
-	}
-	if r.URL.RawQuery != "" {
-		prepared.URL += "?" + r.URL.RawQuery
-	}
-
-	// 6. Forward. Generative calls are never retried: a retry is a second bill.
+	// 5–6. Resolve the upstream and forward. For a pool this is a loop over
+	// members: a member that fails BEFORE anything reaches the client
+	// (connection refused, 502/503/504/429) hands the request to the next
+	// member. Nothing generated means nothing billed, so this is not the
+	// "second bill" a generative retry would be. Plain models and personal
+	// subscriptions make exactly one attempt, as before.
 	//
-	// Bodies that fit the in-memory buffer are sent from the (possibly
-	// adapter-rewritten) buffer. Larger bodies are relayed unbuffered: the
-	// buffered prefix is replayed and the rest streams from the client, so
-	// uploads of any size reach the provider byte-for-byte. That is only
-	// possible when the adapter forwards bodies verbatim; an adapter that must
-	// rewrite the body (chat translation) cannot act on a partial buffer, so
-	// that combination is refused with an explicit 413 rather than forwarding
-	// a corrupted payload.
-	var outboundBody io.Reader = bytes.NewReader(prepared.Body)
-	outboundLength := int64(len(prepared.Body))
-	if bodyOverflows {
-		if !bytes.Equal(prepared.Body, body) {
-			s.rejectProxyEvent(w, r, ErrPayloadTooLarge(maxInMemoryBody), event, started)
+	// A personal subscription has no upstream row: its "upstream" is the
+	// provider's inference API and its credential is the user's own
+	// (refreshed on demand) access token.
+	var (
+		upstream        *store.Upstream
+		providerAdapter adapter.Adapter
+		adapterReq      *adapter.Request
+		prepared        *adapter.Prepared
+		resp            *http.Response
+		upstreamStart   time.Time
+		apiKey          string
+		reasoning       reasoningFit
+	)
+	if route != nil {
+		defer route.end()
+	}
+	for {
+		if route != nil && route.attempts() > 1 {
+			// Members may have different native names; the body was
+			// rewritten for the first one.
+			if rewritten, ok := rewriteJSONModelField(body, model.Name); ok {
+				body = rewritten
+			}
+		}
+		if personal != nil {
+			upstream = &store.Upstream{
+				ID: model.UpstreamID, Name: personal.provider.DisplayName(), AdapterType: personal.provider.AdapterType(),
+				BaseURL: personal.baseURL(), Enabled: true,
+			}
+			token, apiErr := s.subscriptionAccessToken(ctx, personal)
+			if apiErr != nil {
+				s.rejectProxyEvent(w, r, apiErr, event, started)
+				return
+			}
+			apiKey = token
+		} else {
+			upstream, err = s.cachedUpstreamByID(ctx, model.UpstreamID)
+			if err != nil || !upstream.Enabled {
+				s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(model.UpstreamName), event, started)
+				return
+			}
+		}
+		providerAdapter, err = adapter.Get(upstream.AdapterType)
+		if err != nil {
+			s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
 			return
 		}
-		outboundBody = io.MultiReader(bytes.NewReader(body), bodyRemainder)
-		outboundLength = r.ContentLength // -1 (chunked) when the client did not declare one
-		if outboundLength == 0 {
-			outboundLength = -1
+		if personal == nil {
+			apiKey, err = s.Cipher.Decrypt(upstream.EncryptedKey())
+			if err != nil {
+				s.Logger.ErrorContext(ctx, "decrypt upstream credential", "upstream", upstream.Name, "error", err.Error())
+				s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
+				return
+			}
 		}
-	}
-	upstreamStart := time.Now()
-	outbound, err := http.NewRequestWithContext(ctx, r.Method, prepared.URL, outboundBody)
-	if err != nil {
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
-		return
-	}
-	outbound.Header = prepared.Header
-	outbound.ContentLength = outboundLength
+		// Personal plans: fit the requested reasoning effort to what the
+		// model accepts (catalog or learned facts), so a client's default
+		// "medium" does not fail on a model that takes none or only "high".
+		if personal != nil && !bodyOverflows {
+			facts := connReasoning(personal.conn)
+			var f *subscription.Reasoning
+			if r, ok := facts[model.Name]; ok {
+				f = &r
+			}
+			body, reasoning = fitReasoningBody(body, f)
+		}
+		// adapterReq is handed to Prepare AND to the response-side hooks
+		// (TransformResponse / NewStreamTransformer), so an adapter that
+		// translated the request knows to translate the response back.
+		adapterReq = &adapter.Request{
+			Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(),
+			// Model is always the native upstream name: adapters that embed the
+			// model in the URL (Bedrock, Vertex) must never see a display name.
+			Body: body, Model: model.Name, Streaming: event.Streaming,
+			// Side-channel calls (e.g. Vertex token minting) must follow the
+			// caller's cancellation and the gateway's CA/proxy configuration.
+			Context: ctx, Client: s.upstreamHTTPClient(ctx),
+		}
+		prepared, err = providerAdapter.Prepare(adapter.Upstream{
+			ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType,
+		}, adapterReq)
+		if err != nil {
+			s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name).WithReason(err.Error()), event, started)
+			return
+		}
+		if r.URL.RawQuery != "" {
+			prepared.URL += "?" + r.URL.RawQuery
+		}
 
-	// The upstream may bill an attempt even if the connection fails.
-	if !s.Config.LocalOnly {
-		event.CostStatus = "unknown"
-	}
-	resp, err := s.upstreamHTTPClient(ctx).Do(outbound)
-	if err != nil {
-		s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "unreachable").Inc()
-		trace.Child("upstream.call", telemetry.SpanKindClient, upstreamStart, time.Now(),
-			telemetry.String("upstream", upstream.Name), telemetry.String("error", "unreachable"))
-		s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
-		return
+		// Bodies that fit the in-memory buffer are sent from the (possibly
+		// adapter-rewritten) buffer. Larger bodies are relayed unbuffered: the
+		// buffered prefix is replayed and the rest streams from the client, so
+		// uploads of any size reach the provider byte-for-byte. That is only
+		// possible when the adapter forwards bodies verbatim; an adapter that must
+		// rewrite the body (chat translation) cannot act on a partial buffer, so
+		// that combination is refused with an explicit 413 rather than forwarding
+		// a corrupted payload.
+		var outboundBody io.Reader = bytes.NewReader(prepared.Body)
+		outboundLength := int64(len(prepared.Body))
+		if bodyOverflows {
+			if !bytes.Equal(prepared.Body, body) {
+				s.rejectProxyEvent(w, r, ErrPayloadTooLarge(maxInMemoryBody), event, started)
+				return
+			}
+			outboundBody = io.MultiReader(bytes.NewReader(body), bodyRemainder)
+			outboundLength = r.ContentLength // -1 (chunked) when the client did not declare one
+			if outboundLength == 0 {
+				outboundLength = -1
+			}
+		}
+		upstreamStart = time.Now()
+		outbound, err := http.NewRequestWithContext(ctx, r.Method, prepared.URL, outboundBody)
+		if err != nil {
+			s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
+			return
+		}
+		outbound.Header = prepared.Header
+		outbound.ContentLength = outboundLength
+
+		// The upstream may bill an attempt even if the connection fails.
+		if !s.Config.LocalOnly {
+			event.CostStatus = "unknown"
+		}
+		if route != nil {
+			route.begin(s.poolRegistry())
+		}
+		resp, err = s.upstreamHTTPClient(ctx).Do(outbound)
+		if err != nil {
+			s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "unreachable").Inc()
+			trace.Child("upstream.call", telemetry.SpanKindClient, upstreamStart, time.Now(),
+				telemetry.String("upstream", upstream.Name), telemetry.String("error", "unreachable"))
+			if route != nil && !clientGone(ctx, err) {
+				s.poolFailure(ctx, route, "unreachable: "+err.Error())
+				if !bodyOverflows && route.advance() {
+					model = s.poolRetry(ctx, route, event)
+					continue
+				}
+			}
+			s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(upstream.Name), event, started)
+			return
+		}
+		if route != nil && retryableUpstreamStatus(resp.StatusCode) {
+			if memberFaultStatus(resp.StatusCode) {
+				s.poolFailure(ctx, route, "HTTP "+strconv.Itoa(resp.StatusCode))
+			}
+			if !bodyOverflows && route.advance() {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+				_ = resp.Body.Close()
+				model = s.poolRetry(ctx, route, event)
+				continue
+			}
+		} else if route != nil && resp.StatusCode < 500 {
+			s.poolSuccess(ctx, route)
+		}
+		break
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if route != nil {
+		event.PoolReason = route.reason
+		event.PoolAttempts = route.attempts()
+		w.Header().Set(headerPoolMember, model.PublicName()+"@"+model.UpstreamName)
+		w.Header().Set(headerPoolReason, route.reason)
+	}
+
+	// A personal plan refused the reasoning value Janus sent (a model the
+	// catalog was silent about): learn the model's limits from the refusal
+	// and resend once, fitted. Nothing has been relayed yet, and a 400 is
+	// not billed, so this is not the "retry is a second bill" case.
+	if personal != nil && resp.StatusCode == http.StatusBadRequest && reasoning.sent != "" && !bodyOverflows {
+		learned, refusal := s.learnReasoningRefusal(ctx, personal, reasoning.sent, resp.Body)
+		resp.Body = io.NopCloser(bytes.NewReader(refusal))
+		if learned != nil {
+			refit, fit := fitReasoningBody(body, learned)
+			// body still carries the first fitted value; fit.requested is it.
+			fit.requested = reasoning.requested
+			if fit.sent != reasoning.sent {
+				retryReq := *adapterReq
+				retryReq.Body = refit
+				if again, perr := providerAdapter.Prepare(adapter.Upstream{
+					ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType,
+				}, &retryReq); perr == nil {
+					if r.URL.RawQuery != "" {
+						again.URL += "?" + r.URL.RawQuery
+					}
+					if out, rerr := http.NewRequestWithContext(ctx, r.Method, again.URL, bytes.NewReader(again.Body)); rerr == nil {
+						out.Header = again.Header
+						out.ContentLength = int64(len(again.Body))
+						if second, derr := s.upstreamHTTPClient(ctx).Do(out); derr == nil {
+							_ = resp.Body.Close()
+							resp = second
+							defer func() { _ = second.Body.Close() }()
+							adapterReq, prepared, body, reasoning = &retryReq, again, refit, fit
+						}
+					}
+				}
+			}
+		}
+	}
+	if reasoning.changed() {
+		event.ReasoningAdjustment = reasoning.label()
+		w.Header().Set(headerReasoningAdjusted, reasoning.label())
+	}
 
 	event.TTFBMs = int(time.Since(upstreamStart).Milliseconds())
 	event.HTTPStatus = resp.StatusCode
+	if personal != nil {
+		s.notePersonalResponse(ctx, personal, resp.StatusCode)
+	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "rate_limit").Inc()
 		event.ErrorCode = CodeUpstreamLimit
@@ -525,14 +688,31 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if personal != nil {
+		// The organization pays nothing for a user's own plan.
+		rates, card = usage.Rates{}, cachedRates{}
+	}
 	stampReportingCost(event, rates, card.OK, s.Config.LocalOnly)
+	if personal != nil && !s.Config.LocalOnly {
+		event.CostStatus = "known_free"
+	}
 	streaming := isEventStream(resp.Header) || event.Streaming
+	if b, ok := providerAdapter.(adapter.EventStreamBufferer); ok && b.BuffersEventStream(adapterReq) {
+		// The upstream streams even though the caller asked for one JSON
+		// body: buffer it and let the adapter fold the stream.
+		streaming = false
+		resp.Header.Set("Content-Type", "application/json")
+	}
 	// A request can stream without saying `stream: true` (TTS with
 	// stream_format: sse); the recorded event reflects how the response was
 	// actually relayed, which is what the throughput derivation keys on.
 	event.Streaming = streaming
 
 	var extracted adapter.Usage
+	// outputEstimateBytes is what the byte-count fallback divides by four
+	// when the upstream reported no usage: the generated text for a stream
+	// (see streamTextCounter), the whole body for a buffered response.
+	var outputEstimateBytes int64 = -1
 	if streaming {
 		// The transformer is created before headers are copied: an adapter
 		// whose native stream is not SSE (Bedrock's binary event-stream)
@@ -544,7 +724,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if hasEgressChecks(secgwEff) && resp.StatusCode < 300 {
 			hold = stream.New(secgwHoldBytes(secgwEff), secgwEng.MaxSpan(), secgwStreamScanner(secgwEng, secgwEff))
 		}
-		extracted = s.relayStream(w, r, resp, providerAdapter, transformer, event, hardKill, quotaSubject, rates, hold, &secgwViolations)
+		extracted, outputEstimateBytes = s.relayStream(w, r, resp, providerAdapter, transformer, event, hardKill, quotaSubject, rates, hold, &secgwViolations)
+		if event.ErrorCode == CodeUpstreamInterrupted {
+			s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "stream_interrupted").Inc()
+		}
 	} else {
 		var egress *secgwEgress
 		if hasEgressChecks(secgwEff) && resp.StatusCode < 300 {
@@ -585,7 +768,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// The buffered path already ran applyUsage (it needs the cost
 			// before flushing headers); running it twice would double the
 			// unmetered-gap log line and counter.
-			s.applyUsage(event, extracted, rates)
+			s.applyUsage(event, extracted, rates, outputEstimateBytes)
 		}
 		if event.Streaming {
 			// A stream's headers were flushed long ago; throughput is only
@@ -713,7 +896,24 @@ func (s *Server) buildUpstreamClient(timeouts config.UpstreamTimeouts) *http.Cli
 // estimates) so the admin view can list exactly which models lack real usage
 // extraction. The gap is logged and counted (janus_unmetered_requests_total)
 // because it is a configuration problem, not a billing outcome.
-func (s *Server) applyUsage(event *store.UsageEvent, extracted adapter.Usage, rates usage.Rates) {
+//
+// outputBytes is the byte count the output estimate is based on; a negative
+// value means event.ResponseBytes. Streams pass the generated text they
+// carried, never their raw SSE bytes (see streamTextCounter).
+func (s *Server) applyUsage(event *store.UsageEvent, extracted adapter.Usage, rates usage.Rates, outputBytes int64) {
+	s.applyUsageMetered(event, extracted, rates, outputBytes)
+	if event.SubscriptionID != "" {
+		// A personal subscription is paid by its owner, not the
+		// organization. Some providers (xAI) still report a list-price
+		// cost; it is not the organization's spend and is not recorded.
+		event.CostNano = 0
+		if event.AccountingMode == usage.AccountingUpstreamCost {
+			event.AccountingMode = usage.AccountingUpstream
+		}
+	}
+}
+
+func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Usage, rates usage.Rates, outputBytes int64) {
 	switch {
 	case extracted.CostReported:
 		event.TokensIn, event.TokensOut, event.TokensCached = extracted.TokensIn, extracted.TokensOut, extracted.TokensCached
@@ -730,7 +930,10 @@ func (s *Server) applyUsage(event *store.UsageEvent, extracted adapter.Usage, ra
 		event.AccountingMode = usage.AccountingUpstream
 	case usage.ByteEstimatable(event.Modality):
 		event.TokensIn = usage.EstimateTokensFromBytes(event.RequestBytes)
-		event.TokensOut = usage.EstimateTokensFromBytes(event.ResponseBytes)
+		if outputBytes < 0 {
+			outputBytes = event.ResponseBytes
+		}
+		event.TokensOut = usage.EstimateTokensFromBytes(outputBytes)
 		// Byte estimation cannot see cache writes; they stay zero so the
 		// cost formula degrades to exactly the pre-cache-write arithmetic.
 		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
@@ -914,7 +1117,7 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 		}
 		switch res.Action {
 		case store.SecgwActionBlocked:
-			s.applyUsage(event, extracted, rates)
+			s.applyUsage(event, extracted, rates, -1)
 			event.SecgwAction = store.SecgwActionBlocked
 			event.SecgwViolations = secgw.Recorded(*egress.sink)
 			event.ErrorCode = CodeSecurityBlocked
@@ -943,7 +1146,7 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 	// It must carry the same value the metering pipeline records, so the
 	// usage/cost computation runs here, before the header is flushed.
 	if resp.StatusCode < 300 {
-		s.applyUsage(event, extracted, rates)
+		s.applyUsage(event, extracted, rates, -1)
 		w.Header().Set("X-Janus-Cost-USD", strconv.FormatFloat(usage.USD(event.CostNano), 'f', -1, 64))
 		w.Header().Set("X-Janus-Token-Accounting", event.AccountingMode)
 		// Throughput for a buffered response: the whole upstream exchange is
@@ -978,7 +1181,17 @@ const hardKillRecheckInterval = 250 * time.Millisecond
 // into OpenAI chat.completion.chunk frames — a pass-through for providers
 // that already speak the OpenAI wire format. ResponseBytes counts upstream
 // bytes, the quantity the byte-estimate metering fallback is calibrated on.
-func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.Response, providerAdapter adapter.Adapter, transformer adapter.StreamTransformer, event *store.UsageEvent, hardKill bool, subject quota.Subject, rates usage.Rates, hold *stream.Holdback, violations *[]secgw.Violation) adapter.Usage {
+//
+// The second result is the byte count the no-usage token estimate should use
+// (the generated text, not the SSE framing around it).
+//
+// A stream the UPSTREAM ends early is recorded as a failure: the read fails
+// (connection reset, truncated chunked body) or the body ends with no
+// terminal signal at all (no [DONE], no finish_reason, no usage). The client
+// already has a 200, so the event keeps that status but carries
+// upstream.stream_interrupted, and the client gets the same in-band error
+// frame as every other cut instead of a stream that just stops.
+func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.Response, providerAdapter adapter.Adapter, transformer adapter.StreamTransformer, event *store.UsageEvent, hardKill bool, subject quota.Subject, rates usage.Rates, hold *stream.Holdback, violations *[]secgw.Violation) (adapter.Usage, int64) {
 	s.Metrics.StreamsActive.Inc()
 	defer s.Metrics.StreamsActive.Dec()
 
@@ -1046,12 +1259,23 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 	reader := bufio.NewReaderSize(io.LimitReader(resp.Body, s.Config.MaxResponseBytes+1), 32<<10)
 	var total int64
 	var nextQuotaCheck time.Time
+	var text streamTextCounter
+	// stopped is set when the gateway itself ended the relay (cut, cap,
+	// client gone); only a stream nobody here stopped can be an upstream
+	// truncation.
+	stopped := false
+	sawDone := false
+	var readErr error
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
 			total += int64(len(line))
 			collector.Feed(line)
+			if bytes.Equal(bytes.TrimSpace(line), []byte("data: [DONE]")) {
+				sawDone = true
+			}
 			out, transformErr := transformer.TransformStreamLine(line)
+			text.Feed(out)
 			if transformErr != nil {
 				// The provider's stream can no longer be translated; relaying
 				// its raw frames would hand the client something unreadable.
@@ -1060,17 +1284,19 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 				s.Logger.WarnContext(r.Context(), "translate proxied stream", "error", transformErr.Error(), "adapter", providerAdapter.Type(), "request_id", event.RequestID)
 				event.ErrorCode = CodeUpstreamDown
 				s.writeStreamTranslateError(w, flusher, transformErr, event.RequestID)
+				stopped = true
 				break
 			}
 			if len(out) > 0 {
 				if !write(out) {
 					cutByPolicy = event.SecgwAction == store.SecgwActionStreamCut
+					stopped = true
 					break // client disconnected or policy cut; stop relaying but still meter
 				}
 			}
 			if hardKill && !time.Now().Before(nextQuotaCheck) {
 				nextQuotaCheck = time.Now().Add(hardKillRecheckInterval)
-				if breached := s.streamExceededLimit(r.Context(), event, collector, total, subject, rates); breached != nil {
+				if breached := s.streamExceededLimit(r.Context(), event, collector, text.estimateBase(total), subject, rates); breached != nil {
 					// A hard-kill quota cuts the stream the moment the limit
 					// falls. The cut must be attributable: the recorded event
 					// carries quota_violated + error_code (the troubleshooting
@@ -1081,6 +1307,7 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 					event.ErrorCode = CodeQuotaExceeded
 					s.Logger.InfoContext(r.Context(), "stream cut by hard-kill quota", "request_id", event.RequestID)
 					s.writeStreamQuotaError(w, flusher, breached, event.RequestID)
+					stopped = true
 					break
 				}
 			}
@@ -1092,11 +1319,40 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 				s.Logger.WarnContext(r.Context(), "stream exceeded response cap", "request_id", event.RequestID)
 				event.ErrorCode = CodeResponseTooLarge
 				s.writeStreamCapError(w, flusher, event.RequestID)
+				stopped = true
 				break
 			}
 		}
 		if err != nil {
+			if err != io.EOF {
+				readErr = err
+			}
 			break
+		}
+	}
+	got := collector.Usage()
+	if !stopped && resp.StatusCode < 300 && r.Context().Err() == nil {
+		finished := sawDone || got.FinishReason != "" || got.Reported || got.CostReported
+		if readErr != nil || !finished {
+			cause := "the upstream closed the stream before it finished"
+			if readErr != nil {
+				cause = "the upstream connection failed mid-stream: " + readErr.Error()
+			}
+			s.Logger.WarnContext(r.Context(), "upstream stream interrupted",
+				"request_id", event.RequestID, "upstream_id", event.UpstreamID, "model", event.ModelName,
+				"relayed_bytes", total, "cause", cause)
+			event.ErrorCode = CodeUpstreamInterrupted
+			// Release what the hold window still holds before the error so
+			// the client sees everything the model actually produced.
+			if hold != nil {
+				for _, f := range hold.Flush() {
+					if _, err := w.Write(f); err != nil {
+						break
+					}
+				}
+				hold = nil
+			}
+			s.writeStreamInterruptedError(w, flusher, cause, event.RequestID)
 		}
 	}
 	if hold != nil && !cutByPolicy {
@@ -1111,7 +1367,7 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 		}
 	}
 	event.ResponseBytes = total
-	return collector.Usage()
+	return got, text.estimateBase(total)
 }
 
 // rateLimitExceeded consults the configured requests-per-minute rules for this
@@ -1178,7 +1434,7 @@ func (s *Server) streamExceededLimit(ctx context.Context, event *store.UsageEven
 	// Local-only mode disables cost tracking, so the in-flight delta carries
 	// zero cost — USD quotas are inert and never sever a stream.
 	var pendingCost int64
-	if !s.Config.LocalOnly {
+	if !s.Config.LocalOnly && event.SubscriptionID == "" {
 		if u.CostReported {
 			pendingCost = u.CostNano
 		} else {
@@ -1284,6 +1540,26 @@ func (s *Server) writeStreamCapError(w http.ResponseWriter, flusher http.Flusher
 	}
 }
 
+// writeStreamInterruptedError tells the client, in-band, that the upstream
+// ended the stream early, so a truncated answer is never mistaken for a
+// complete one.
+func (s *Server) writeStreamInterruptedError(w http.ResponseWriter, flusher http.Flusher, cause, requestID string) {
+	apiErr := newError(http.StatusBadGateway, CodeUpstreamInterrupted, "server_error",
+		"This stream is incomplete: "+cause+". The response above is truncated.")
+	apiErr.RequestID = requestID
+	payload, err := json.Marshal(map[string]any{"error": apiErr})
+	if err != nil {
+		s.Logger.Warn("encode stream interrupted error frame", "error", err.Error(), "request_id", requestID)
+		return
+	}
+	if _, err := w.Write(append(append([]byte("data: "), payload...), '\n', '\n')); err != nil {
+		return
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
 // writeStreamTranslateError tells the client, in-band, that the upstream
 // stream could not be rewritten into the OpenAI format and was cut.
 func (s *Server) writeStreamTranslateError(w http.ResponseWriter, flusher http.Flusher, cause error, requestID string) {
@@ -1306,15 +1582,9 @@ func (s *Server) writeStreamTranslateError(w http.ResponseWriter, flusher http.F
 // recordEvent persists metering and applies quota consumption. It runs after the
 // response has been delivered so it never adds to client-visible latency.
 func (s *Server) recordEvent(ctx context.Context, event *store.UsageEvent, subject quota.Subject, model *store.Model, trace *telemetry.TraceContext) {
-	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	s.pending.Add(1)
-	go func() {
-		defer s.pending.Done()
-		defer cancel()
-		writeStart := time.Now()
-		if err := s.Store.InsertUsageEvent(bg, event); err != nil {
-			s.Logger.ErrorContext(bg, "write usage event", "error", err.Error(), "request_id", event.RequestID)
-		}
+	writeStart := time.Now()
+	s.writeUsage(ctx, event, "write usage event", func(bg context.Context) {
+		// In performance mode this span includes the time queued for the batch.
 		trace.Child("db.usage_event.insert", telemetry.SpanKindInternal, writeStart, time.Now())
 		event.RunAfterInsert(bg)
 		// Troubleshooting capture rides on the (uncancelled) context and is
@@ -1332,7 +1602,7 @@ func (s *Server) recordEvent(ctx context.Context, event *store.UsageEvent, subje
 		}); err != nil {
 			s.Logger.ErrorContext(bg, "record quota consumption", "error", err.Error(), "request_id", event.RequestID)
 		}
-	}()
+	})
 }
 
 func (s *Server) observeProxyMetrics(event *store.UsageEvent, upstreamName string, started time.Time) {
@@ -1378,17 +1648,10 @@ func (s *Server) rejectProxyEvent(w http.ResponseWriter, r *http.Request, apiErr
 	// response the client actually received.
 	WriteError(w, r, apiErr)
 
-	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-	s.pending.Add(1)
-	go func() {
-		defer s.pending.Done()
-		defer cancel()
-		if err := s.Store.InsertUsageEvent(bg, event); err != nil {
-			s.Logger.ErrorContext(bg, "write rejected usage event", "error", err.Error())
-		}
+	s.writeUsage(r.Context(), event, "write rejected usage event", func(bg context.Context) {
 		event.RunAfterInsert(bg)
 		s.finishCapture(bg, event)
-	}()
+	})
 }
 
 // handleProxyModels answers GET /v1/models in the OpenAI list shape, filtered
@@ -1428,6 +1691,11 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 				"managed":        false,
 			},
 		})
+	}
+	if personalModels, err := s.personalCatalog(r.Context(), user); err != nil {
+		s.Logger.WarnContext(r.Context(), "list personal subscription models", "error", err.Error())
+	} else {
+		data = append(data, personalModels...)
 	}
 	for _, mm := range catalog.Managed {
 		data = append(data, map[string]any{
@@ -1657,4 +1925,32 @@ func formatLimit(metric string, limit int64) string {
 		return fmt.Sprintf("$%.2f", usage.USD(limit))
 	}
 	return strconv.FormatInt(limit, 10)
+}
+
+// stampServedModel records which real model serves the request.
+//
+// Usage is recorded under the caller-facing catalog name — the admin-set
+// display name when one exists — so the request log and dashboards match
+// what users see in /v1/models. model_id stays the stable native key that
+// grants, quotas, and rate cards join on.
+//
+// For a managed alias this deliberately records the UNDERLYING model:
+// model reporting must always reflect what actually ran. The alias the
+// caller asked for is preserved separately in requested_model_name so
+// alias adoption stays visible without contaminating model reports. A pool
+// retry calls this again for the member that finally serves.
+func (s *Server) stampServedModel(ctx context.Context, event *store.UsageEvent, model *store.Model) {
+	event.ModelID = model.ID
+	event.UpstreamID = model.UpstreamID
+	event.ModelName = model.PublicName()
+	event.ModelFamily, event.ModelProvider, event.ModelHosting = "", "", ""
+	if classification, classificationErr := s.Store.GetReportModelClassification(ctx, model.ID); classificationErr == nil {
+		event.ModelFamily = classification.Family
+		event.ModelProvider = classification.Provider
+		event.ModelHosting = classification.Hosting
+	} else if !errors.Is(classificationErr, store.ErrNotFound) {
+		// Reporting must not make a healthy inference path unavailable. Missing
+		// metadata is explicit in coverage, and an operator gets the real error.
+		s.Logger.ErrorContext(ctx, "reporting classification unavailable", "model_id", model.ID, "error", classificationErr)
+	}
 }

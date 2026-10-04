@@ -58,6 +58,8 @@ func featureLabel(f string) string {
 		return "model fallbacks"
 	case "email_alerts":
 		return "email alerting"
+	case "load_balancing":
+		return "load-balanced model pools"
 	}
 	return strings.ReplaceAll(f, "_", " ")
 }

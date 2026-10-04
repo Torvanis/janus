@@ -25,6 +25,10 @@ const (
 	// JANUS_MAX_RESPONSE_BYTES cap.
 	CodeResponseTooLarge = "policy.response_too_large"
 	CodeUpstreamLimit    = "upstream.rate_limit"
+	// CodeUpstreamInterrupted marks a stream the upstream ended early (connection
+	// lost, or closed with no [DONE], finish_reason or usage). The client already
+	// had a 200, so the code — not the status — is what marks it failed.
+	CodeUpstreamInterrupted = "upstream.stream_interrupted"
 	// CodeServiceTokenScope marks an attempt to use a service token outside
 	// the /v1 proxy surface it is scoped to.
 	CodeServiceTokenScope = "policy.service_token_scope"
@@ -39,11 +43,14 @@ const (
 	// AND configured fallback are both unavailable: the admin set up a safety
 	// net for exactly this case and it has failed too.
 	CodeManagedModelFallbackExhausted = "policy.managed_model_fallback_exhausted"
-	CodeInvalidRequest                = "invalid_request_error"
-	CodeAuthentication                = "authentication_error"
-	CodePermission                    = "permission_error"
-	CodeNotFound                      = "not_found_error"
-	CodeServerError                   = "server_error"
+	// CodeSubscriptionReauth marks a personal provider subscription whose
+	// stored sign-in no longer works: the owner must connect it again.
+	CodeSubscriptionReauth = "policy.subscription_reauth_required"
+	CodeInvalidRequest     = "invalid_request_error"
+	CodeAuthentication     = "authentication_error"
+	CodePermission         = "permission_error"
+	CodeNotFound           = "not_found_error"
+	CodeServerError        = "server_error"
 )
 
 // APIError is the OpenAI-compatible error envelope. It is the only shape any

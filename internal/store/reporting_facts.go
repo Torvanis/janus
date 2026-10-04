@@ -32,7 +32,9 @@ var reportingFactsMigration = migration{
 
 // insertReportingFact must run in the metering transaction. In particular, do
 // not resolve group membership at delayed insertion time.
-func (s *Store) insertReportingFact(ctx context.Context, e *UsageEvent) error {
+const reportingFactColumns = `usage_id, recorded_at, group_ids, groups_known, model_family, provider, hosting, project, cost_center, cost_status, classification_known`
+
+func reportingFactArgs(e *UsageEvent) ([]any, error) {
 	groups := e.GroupIDs
 	known := groups != nil || e.ServiceTokenID != ""
 	if groups == nil || e.ServiceTokenID != "" {
@@ -40,7 +42,7 @@ func (s *Store) insertReportingFact(ctx context.Context, e *UsageEvent) error {
 	}
 	encoded, err := json.Marshal(groups)
 	if err != nil {
-		return fmt.Errorf("encode reporting groups: %w", err)
+		return nil, fmt.Errorf("encode reporting groups: %w", err)
 	}
 	status := e.CostStatus
 	switch status {
@@ -49,18 +51,16 @@ func (s *Store) insertReportingFact(ctx context.Context, e *UsageEvent) error {
 		status = "unknown"
 	}
 	classified := e.ModelFamily != "" && e.ModelProvider != "" && e.ModelHosting != ""
-	if err := s.exec(ctx, `INSERT INTO reporting_usage_snapshot
-  (usage_id, recorded_at, group_ids, groups_known, model_family, provider, hosting, project, cost_center, cost_status, classification_known)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, FormatTime(e.CreatedAt), string(encoded), boolInt(known), e.ModelFamily, e.ModelProvider, e.ModelHosting, e.Project, e.CostCenter, status, boolInt(classified)); err != nil {
-		return fmt.Errorf("insert reporting snapshot: %w", err)
+	return []any{e.ID, FormatTime(e.CreatedAt), string(encoded), boolInt(known), e.ModelFamily, e.ModelProvider, e.ModelHosting, e.Project, e.CostCenter, status, boolInt(classified)}, nil
+}
+
+func (s *Store) insertReportingFact(ctx context.Context, e *UsageEvent) error {
+	args, err := reportingFactArgs(e)
+	if err != nil {
+		return err
 	}
-	// This is the earliest captured event time, not a promise that every
-	// event since then has facts. Readers must still count missing snapshots.
-	if err := s.exec(ctx, `INSERT INTO reporting_coverage (key, started_at) VALUES ('usage_snapshots', ?)
-  ON CONFLICT (key) DO UPDATE SET started_at = excluded.started_at
-  WHERE reporting_coverage.started_at > excluded.started_at`, FormatTime(e.CreatedAt)); err != nil {
-		return fmt.Errorf("record reporting coverage: %w", err)
+	if err := s.exec(ctx, `INSERT INTO reporting_usage_snapshot (`+reportingFactColumns+`) VALUES (`+placeholders(len(args))+`)`, args...); err != nil {
+		return fmt.Errorf("insert reporting snapshot: %w", err)
 	}
 	return nil
 }

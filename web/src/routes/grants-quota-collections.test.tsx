@@ -8,16 +8,51 @@ import { QuotaPage } from './Quota';
 import { ToastProvider } from '../components/ui';
 import { api } from '../lib/api';
 
-function Probe() { return <output data-testid="url">{useLocation().search}</output>; }
+function Probe() {
+  return <output data-testid="url">{useLocation().search}</output>;
+}
 function mount(page: 'grants' | 'quota', query = '') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/${page}?${query}`]}><ToastProvider>
-    {page === 'grants' ? <GrantsPage /> : <QuotaPage />}<Probe />
-  </ToastProvider></MemoryRouter></QueryClientProvider>);
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/${page}?${query}`]}>
+        <ToastProvider>
+          {page === 'grants' ? <GrantsPage /> : <QuotaPage />}
+          <Probe />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
   return client;
 }
-const grants = Array.from({ length: 31 }, (_, i) => ({ id: `g${i}`, model_id: 'm', model_kind: 'model', model_name: 'Model', grantee_type: 'user', grantee_id: `u${i}`, grantee_name: `Person ${String(i).padStart(2, '0')}`, created_at: '' }));
-const quotas = Array.from({ length: 31 }, (_, i) => ({ id: `q${i}`, metric: 'requests', metric_label: `Metric ${String(i).padStart(2, '0')}`, window: 'day', window_label: 'Daily', subject_type: 'user', subject_name: 'Me', model_name: `model-${i}`, breach_behavior: 'hard_kill', limit_value: 100, current_value: i, unit: 'count', percent: i, at_risk: i === 30, breached: false, reset_at: '2026-09-20T00:00:00Z' }));
+const grants = Array.from({ length: 31 }, (_, i) => ({
+  id: `g${i}`,
+  model_id: 'm',
+  model_kind: 'model',
+  model_name: 'Model',
+  grantee_type: 'user',
+  grantee_id: `u${i}`,
+  grantee_name: `Person ${String(i).padStart(2, '0')}`,
+  created_at: '',
+}));
+const quotas = Array.from({ length: 31 }, (_, i) => ({
+  id: `q${i}`,
+  metric: 'requests',
+  metric_label: `Metric ${String(i).padStart(2, '0')}`,
+  window: 'day',
+  window_label: 'Daily',
+  subject_type: 'user',
+  subject_name: 'Me',
+  model_name: `model-${i}`,
+  breach_behavior: 'hard_kill',
+  limit_value: 100,
+  current_value: i,
+  unit: 'count',
+  percent: i,
+  at_risk: i === 30,
+  breached: false,
+  reset_at: '2026-09-20T00:00:00Z',
+}));
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
@@ -68,7 +103,9 @@ describe('complete grant and personal quota collections', () => {
   it('restores group size/page and clamps after the last group disappears', async () => {
     const user = userEvent.setup();
     const fleet = grants.map((g, i) => ({ ...g, model_name: `Model ${String(i).padStart(2, '0')}` }));
-    vi.mocked(api.get).mockImplementation(async (url) => (url === '/api/v1/admin/grants' ? { grants: fleet } : { models: [] }) as never);
+    vi.mocked(api.get).mockImplementation(
+      async (url) => (url === '/api/v1/admin/grants' ? { grants: fleet } : { models: [] }) as never,
+    );
     const client = mount('grants', 'size=25&page=25');
     expect((await screen.findByTestId('grants-group-count')).textContent).toBe('6 of 31 models');
     client.setQueryData(['admin', 'grants'], { grants: fleet.slice(0, 25) });

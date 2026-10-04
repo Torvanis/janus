@@ -17,7 +17,7 @@ import (
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "janus-test.db")
-	s, err := Open(context.Background(), "sqlite://"+path)
+	s, err := OpenMigratedSQLite(context.Background(), path)
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}

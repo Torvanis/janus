@@ -18,6 +18,7 @@ import { pageOffset } from '../../lib/collections';
 import { LookupInput } from '../../components/LookupInput';
 import { userLookup } from '../../lib/lookups';
 import type {
+  AdminSubscriptions,
   ClassifierRole,
   Group,
   ManagedModelRow,
@@ -44,7 +45,7 @@ import type {
 import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { AsyncSection, Badge, Chevron, ConfirmDialog, Drawer, Field, Modal, useToast, type Tone } from '../../components/ui';
 import { t, type MessageKey } from '../../lib/i18n';
-import { useLicensed } from '../../app/session';
+import { useLicensed, useSession } from '../../app/session';
 
 const BASE = '/api/v1/admin/secgw';
 const KEY = ['admin', 'secgw'] as const;
@@ -74,6 +75,7 @@ const SCOPE_LABELS: Record<SecgwScopeType, MessageKey> = {
   service_token: 'adminSecurity.bindings.scopeServiceToken',
   model: 'adminSecurity.bindings.scopeModel',
   managed_model: 'adminSecurity.bindings.scopeManagedModel',
+  personal_subscription: 'adminSecurity.bindings.scopePersonalSubscription',
 };
 
 const ACTION_LABELS: Record<string, MessageKey> = {
@@ -1098,7 +1100,7 @@ function CheckGate({
             <GroupField label={t('adminSecurity.policies.disableRulesLabel')} hint={t('adminSecurity.policies.disableRulesHint')}>
               <ChipPicker
                 danger
-                options={(rules?.secret_rules ?? []).map((r) => ({ id: r.ID, label: r.ID, title: r.Description }))}
+                options={(rules?.secret_rules ?? []).map((r) => ({ id: r.id, label: r.id, title: r.description }))}
                 value={optStrings(check.options, 'disable_rules')}
                 onChange={(next) => onOption('disable_rules', next.length ? next : undefined)}
                 empty={t('adminSecurity.policies.disableRulesEmpty')}
@@ -1552,6 +1554,7 @@ const RUNGS: Array<{ scope: SecgwScopeType; hint: MessageKey }> = [
   { scope: 'org', hint: 'adminSecurity.bindings.rungOrgHint' },
   { scope: 'group', hint: 'adminSecurity.bindings.rungGroupHint' },
   { scope: 'upstream', hint: 'adminSecurity.bindings.rungUpstreamHint' },
+  { scope: 'personal_subscription', hint: 'adminSecurity.bindings.rungPersonalHint' },
   { scope: 'model', hint: 'adminSecurity.bindings.rungModelHint' },
   { scope: 'managed_model', hint: 'adminSecurity.bindings.rungManagedHint' },
   { scope: 'service_token', hint: 'adminSecurity.bindings.rungTokenHint' },
@@ -1586,6 +1589,15 @@ function BindingsTab(): ReactNode {
   });
 
   const policyById = new Map((policies.data?.policies ?? []).map((p) => [p.id, p]));
+  const { me } = useSession();
+  // The personal-subscription rung exists only while the feature is on,
+  // unless a binding already sits there (so it stays visible and removable).
+  const rungs = RUNGS.filter(
+    (r) =>
+      r.scope !== 'personal_subscription' ||
+      me?.personal_subscriptions === true ||
+      (bindings.data?.bindings ?? []).some((b) => b.scope_type === 'personal_subscription'),
+  );
 
   return (
     <div className="stack" style={{ gap: 'var(--janus-space-5)' }}>
@@ -1605,7 +1617,7 @@ function BindingsTab(): ReactNode {
           {(data) => (
             <div className="stack">
               <div className="secgw-ladder" aria-label="Policy precedence">
-                {RUNGS.map(({ scope, hint }) => (
+                {rungs.map(({ scope, hint }) => (
                   <div key={scope} className="secgw-rung">
                     <div className="secgw-rung-label">
                       <span className="overline">{t(SCOPE_LABELS[scope])}</span>
@@ -1732,6 +1744,16 @@ function BindingDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     queryFn: () => api.get<{ managed_models: ManagedModelRow[] }>('/api/v1/admin/managed-models'),
     enabled: scopeType === 'managed_model',
   });
+  const { me } = useSession();
+  const personalOn = me?.personal_subscriptions === true;
+  const subscriptionProviders = useQuery({
+    queryKey: ['admin', 'subscriptions'],
+    queryFn: () => api.get<AdminSubscriptions>('/api/v1/admin/subscriptions'),
+    enabled: scopeType === 'personal_subscription',
+  });
+  const scopeTypes = (Object.keys(SCOPE_LABELS) as SecgwScopeType[]).filter(
+    (type) => type !== 'personal_subscription' || personalOn,
+  );
 
   const options: Array<{ id: string; label: string }> = useMemo(() => {
     switch (scopeType) {
@@ -1747,10 +1769,15 @@ function BindingDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           .map((m) => ({ id: m.id, label: `${m.display_name || m.name} · ${m.upstream_name}` }));
       case 'managed_model':
         return (managed.data?.managed_models ?? []).map((m) => ({ id: m.id, label: m.name }));
+      case 'personal_subscription':
+        return [
+          { id: '*', label: t('adminSecurity.bindings.personalAnyProvider') },
+          ...(subscriptionProviders.data?.providers ?? []).map((p) => ({ id: p.id, label: p.name })),
+        ];
       default:
         return [];
     }
-  }, [scopeType, groups.data, tokens.data, upstreams.data, models.data, managed.data]);
+  }, [scopeType, groups.data, tokens.data, upstreams.data, models.data, managed.data, subscriptionProviders.data]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -1788,7 +1815,7 @@ function BindingDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
             setScopeId('');
           }}
         >
-          {(Object.keys(SCOPE_LABELS) as SecgwScopeType[]).map((type) => (
+          {scopeTypes.map((type) => (
             <option key={type} value={type}>
               {t(SCOPE_LABELS[type])}
             </option>

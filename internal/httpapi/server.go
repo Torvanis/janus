@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/torvanis/janus/internal/balancer"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -66,14 +67,23 @@ type Server struct {
 	secgwResolver *classifierResolver
 
 	tokenCache  sync.Map    // digest -> cachedToken
+	touched     sync.Map    // credential id -> time.Time of the last last_used_at write
 	configCache configCache // hot-path configuration reads (see cache.go)
-	router      http.Handler
+	// perfCache holds the read-time model performance rollups (60s TTL): a
+	// 14-day scan per catalog view is wasteful, and the figures are daily.
+	perfCache configCache
+	router    http.Handler
 
 	// pending tracks post-response background writers (usage events, quota
 	// ledger updates) so shutdown can drain them after the HTTP listener has
 	// finished its own in-flight handlers. Without this a SIGTERM landing
 	// between the response and the async insert silently loses the event.
 	pending sync.WaitGroup
+
+	// Performance is the startup performance-mode decision; batcher is its
+	// usage writer (nil in normal mode). See performance_mode.go.
+	Performance PerformanceMode
+	batcher     *usageBatcher
 
 	// upstreamClient is the pooled client for every upstream call, tagged
 	// with the timeout set it was built for. The proxy compares that tag with
@@ -84,6 +94,11 @@ type Server struct {
 	// the pointer itself is lock-free on the hot path.
 	upstreamClientMu sync.Mutex
 	upstreamClient   atomic.Pointer[upstreamClientState]
+
+	// pools is this replica's load-balancer state (probes, in-flight
+	// counts, breakers); built on first use.
+	poolOnce sync.Once
+	pools    *balancer.Registry
 }
 
 // upstreamClientState pairs a built client with the timeouts baked into its
@@ -125,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 			// TTL (JANUS_CONFIG_CACHE_TTL_SECONDS, default 5s).
 			s.configCache.ttl = s.Config.ConfigCacheTTL
 		}
+		s.perfCache.ttl = modelPerfCacheTTL
 		s.router = s.buildRouter()
 	}
 	return s.router
@@ -198,6 +214,8 @@ func (s *Server) buildRouter() http.Handler {
 
 			pr.Get("/help/{topic}", s.handleHelpTopic)
 
+			s.mountSubscriptionRoutes(pr)
+
 			// delegated team-quota management for team leads. The
 			// handlers authorize per team (lead + lead_can_edit_quotas), so no
 			// admin role gate applies here.
@@ -216,6 +234,7 @@ func (s *Server) buildRouter() http.Handler {
 			ar.Use(RequireAdmin)
 			s.mountAdminRoutes(ar)
 			s.mountSCIMAdminRoutes(ar)
+			s.mountSubscriptionAdminRoutes(ar)
 		})
 	})
 
@@ -333,6 +352,9 @@ func (s *Server) resolveServiceToken(ctx context.Context, presented string) (*st
 		return nil, ErrServiceTokenExpired(svc.ExpiresAt)
 	}
 	s.tokenCache.Store(key, cachedServiceToken{token: svc, cachedAt: time.Now()})
+	if !s.shouldTouch("svc|" + svc.ID) {
+		return svc, nil
+	}
 	go func() {
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -390,6 +412,9 @@ func (s *Server) resolveToken(ctx context.Context, presented string) (*store.Tok
 		return nil, nil, ErrUserDisabled()
 	}
 	s.tokenCache.Store(digest, cachedToken{token: token, user: user, cachedAt: time.Now()})
+	if !s.shouldTouch("tok|" + token.ID) {
+		return token, user, nil
+	}
 	go func() {
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -398,6 +423,21 @@ func (s *Server) resolveToken(ctx context.Context, presented string) (*store.Tok
 		}
 	}()
 	return token, user, nil
+}
+
+// touchInterval bounds last_used_at writes per credential per replica. When a
+// cached credential expires, every in-flight request on the replica misses at
+// once; without this each one queued an UPDATE on the same row.
+const touchInterval = 30 * time.Second
+
+// shouldTouch reports whether this replica should record last use for key now.
+func (s *Server) shouldTouch(key string) bool {
+	now := time.Now()
+	if v, ok := s.touched.Load(key); ok && now.Sub(v.(time.Time)) < touchInterval {
+		return false
+	}
+	prev, loaded := s.touched.Swap(key, now)
+	return !loaded || now.Sub(prev.(time.Time)) >= touchInterval
 }
 
 // Drain blocks until every tracked post-response writer (usage events, quota

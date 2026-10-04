@@ -56,6 +56,11 @@ const (
 	SecgwScopeUpstream     = "upstream"
 	SecgwScopeModel        = "model"
 	SecgwScopeManagedModel = "managed_model"
+	// SecgwScopePersonalSubscription covers traffic sent through a user's
+	// own connected vendor plan (my/<provider>/<model>). scope_id is a
+	// provider id ("xai") or SecgwScopeAnyProvider for every provider.
+	SecgwScopePersonalSubscription = "personal_subscription"
+	SecgwScopeAnyProvider          = "*"
 
 	// SecgwActionChecked records that a policy applied and every check
 	// passed. Without it a clean request is indistinguishable from one no
@@ -109,6 +114,10 @@ func ClassifierRoleForKind(k SecgwCheckKind) string {
 // mandatory floor).
 var SecgwScopeRank = map[string]int{
 	SecgwScopeOrg: 0, SecgwScopeGroup: 1, SecgwScopeUpstream: 2, SecgwScopeModel: 3, SecgwScopeManagedModel: 4, SecgwScopeServiceToken: 5,
+	// Same rank as upstream: it answers the same question ("which
+	// provider serves this") for traffic that has no upstream row, and the
+	// two can never both apply to one request.
+	SecgwScopePersonalSubscription: 2,
 }
 
 // SecgwCheck is one check inside a policy.
@@ -293,7 +302,7 @@ type SecgwBinding struct {
 // Validate checks the scope vocabulary.
 func (b *SecgwBinding) Validate() error {
 	if _, ok := SecgwScopeRank[b.ScopeType]; !ok {
-		return &ValidationError{Field: "scope_type", Message: "scope_type must be org, group, upstream, service_token, model or managed_model"}
+		return &ValidationError{Field: "scope_type", Message: "scope_type must be org, group, upstream, service_token, model, managed_model or personal_subscription"}
 	}
 	b.ScopeID = strings.TrimSpace(b.ScopeID)
 	if b.ScopeType == SecgwScopeOrg {

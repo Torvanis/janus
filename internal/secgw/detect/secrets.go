@@ -36,10 +36,10 @@ type SecretsOptions struct {
 
 // RuleInfo describes one rule for status/UI purposes.
 type RuleInfo struct {
-	ID          string
-	Description string
-	Severity    Severity
-	Enabled     bool
+	ID          string   `json:"id"`
+	Description string   `json:"description"`
+	Severity    Severity `json:"severity"`
+	Enabled     bool     `json:"enabled"`
 }
 
 // secretRule is a compiled rule.

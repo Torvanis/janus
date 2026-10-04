@@ -259,7 +259,11 @@ export function ServiceTokensPage(): ReactNode {
                           <tr key={token.id}>
                             <td className="cell-person">
                               <Link to={`/admin/service-tokens/${token.id}`}>{token.name}</Link>
-                              <span className="cell-sub truncate" style={{ maxWidth: 240 }} title={token.description || undefined}>
+                              <span
+                                className="cell-sub truncate"
+                                style={{ maxWidth: 240 }}
+                                title={token.description || undefined}
+                              >
                                 {token.description ? `${token.description} · ` : ''}
                                 <span className="mono">{token.prefix}…</span>
                               </span>

@@ -18,6 +18,7 @@ import { t } from '../../lib/i18n';
 import { TroubleshootingCard } from './TroubleshootingCard';
 import { LicenseCard } from './LicenseCard';
 import { RetainedPanel } from '../../components/RouteTopNav';
+import { PersonalSubscriptionsCard } from './PersonalSubscriptionsCard';
 
 /**
  * Label/description/consequence copy for each feature flag on the
@@ -139,6 +140,18 @@ export function SystemPage({
                   warn={!data.email.ok}
                 />
                 <MeteringTile metering={data.metering} />
+                {data.performance_mode?.requested && (
+                  <HealthTile
+                    label={t('adminSystem.performanceMode')}
+                    ok
+                    warn={!data.performance_mode.active}
+                    detail={
+                      data.performance_mode.active
+                        ? t('adminSystem.performanceModeOn')
+                        : (data.performance_mode.reason ?? t('adminSystem.performanceModeOff'))
+                    }
+                  />
+                )}
               </div>
 
               <section className="card card-flush">
@@ -267,6 +280,7 @@ export function SystemPage({
               <div id="discovery">
                 <DiscoveryIntervalCard interval={data.discovery.interval} />
               </div>
+              <PersonalSubscriptionsCard />
             </RetainedPanel>
 
             {section === 'all' && <LicenseCard />}

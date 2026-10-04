@@ -323,6 +323,15 @@ type openAIUsageEnvelope struct {
 		PredictedN         int64   `json:"predicted_n"`
 		PredictedPerSecond float64 `json:"predicted_per_second"`
 	} `json:"timings"`
+	// vLLM per-request timings (milliseconds), present when the server runs
+	// with --enable-per-request-metrics. generation_time_ms is the decode
+	// interval only (first to last output token); time_to_first_token_ms is
+	// scheduling to first token (prefill). vLLM's own tokens_per_second is
+	// NOT used: it divides by the whole inference interval, prefill included.
+	Metrics *struct {
+		TimeToFirstTokenMs float64 `json:"time_to_first_token_ms"`
+		GenerationTimeMs   float64 `json:"generation_time_ms"`
+	} `json:"metrics"`
 	// Ollama native timing fields (nanoseconds), also present through its
 	// OpenAI-compatible shim.
 	PromptEvalCount    int64 `json:"prompt_eval_count"`
@@ -394,6 +403,12 @@ func parseOpenAIUsage(body []byte) (Usage, bool) {
 		u.TokensInPerSecond = env.Timings.PromptPerSecond
 		u.TokensOutPerSecond = env.Timings.PredictedPerSecond
 		u.ThroughputReported = true
+	case env.Metrics != nil && env.Metrics.GenerationTimeMs > 0:
+		// vLLM: the first output token is produced by the prefill step, so
+		// the decode interval covers the remaining tokens.
+		u.TokensOutPerSecond = ratePerSecond(max64(0, u.TokensOut-1), env.Metrics.GenerationTimeMs/1000)
+		u.TokensInPerSecond = ratePerSecond(max64(0, u.TokensIn-u.TokensCached), env.Metrics.TimeToFirstTokenMs/1000)
+		u.ThroughputReported = u.TokensOutPerSecond > 0
 	case env.PromptEvalDuration > 0 || env.EvalDuration > 0:
 		u.TokensInPerSecond = ratePerSecond(env.PromptEvalCount, float64(env.PromptEvalDuration)/1e9)
 		u.TokensOutPerSecond = ratePerSecond(env.EvalCount, float64(env.EvalDuration)/1e9)

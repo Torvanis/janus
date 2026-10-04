@@ -136,7 +136,7 @@ func run() error {
 		return err
 	}
 
-	db, err := store.Open(ctx, cfg.DatabaseURL)
+	db, err := store.OpenWithPool(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return err
 	}
@@ -199,6 +199,7 @@ func run() error {
 	quotaEngine := quota.NewEngine(db)
 	quotaEngine.SetNotifier(quotaNotifier(alerts))
 	quotaEngine.SetLocalOnly(cfg.LocalOnly)
+	quotaEngine.SetRuleCacheTTL(cfg.ConfigCacheTTL)
 
 	discoverySvc := discovery.New(db, cipher, httpClient, metrics, alerts, logger, cfg.DiscoveryInterval)
 
@@ -294,6 +295,15 @@ func run() error {
 	if cfg.TroubleshootDir != "" {
 		logger.Info("troubleshooting disk backend available", "dir", cfg.TroubleshootDir)
 	}
+	perf := httpapi.DecidePerformanceMode(cfg.PerformanceMode, licenseMgr.State())
+	server.StartPerformanceMode(perf)
+	switch {
+	case perf.Active:
+		logger.Warn("performance mode is on: usage is written in batches and committed without waiting for the disk flush; a database crash can lose about the last 0.5 s of usage records and a killed replica up to 100 ms",
+			"db_max_conns", cfg.DBMaxConns)
+	case perf.Requested:
+		logger.Warn("performance mode requested but not enabled", "reason", perf.Reason)
+	}
 
 	purger := jobs.NewPurger(db, quotaEngine, metrics, logger, cfg.UsageRetentionDays, cfg.AuditRetentionDays, cfg.PurgeJobTimeUTC)
 
@@ -304,8 +314,13 @@ func run() error {
 	jobs.StartTroubleshootRetention(ctx, &wg, server.Troubleshoot, jobs.TroubleshootRetentionInterval, logger)
 	jobs.StartSecgwRetention(ctx, &wg, db, jobs.SecgwRetentionInterval, logger)
 	jobs.StartInstanceHeartbeat(ctx, &wg, db, server.RateLimits, jobs.NewInstanceID(), logger, jobs.WithLicensedNodes(func() int { return licenseMgr.State().Nodes }))
+	server.StartSubscriptionChecks(ctx, &wg)
 	jobs.NewReportWorker(db, cfg.LocalOnly, logger).Start(ctx, &wg)
+	// Load-balanced model pools: probe pooled upstreams' /health and
+	// /metrics. Probes nothing until an admin builds a pool.
+	server.StartPoolProber(ctx, &wg)
 	startActiveUserGauge(ctx, &wg, db, metrics, logger)
+	startUsageRollup(ctx, &wg, db, logger)
 	otlp.Start(ctx, &wg)
 
 	httpServer := &http.Server{
@@ -360,6 +375,9 @@ func run() error {
 	}
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), drainBudget)
 	defer cancelDrain()
+	// Close the batched writer first: it flushes everything queued, and the
+	// pending work Drain waits on completes only once its batch is written.
+	server.StopPerformanceMode()
 	if err := server.Drain(drainCtx); err != nil {
 		logger.Error("background usage writers did not finish before the grace period", "error", err.Error())
 	}
@@ -405,6 +423,49 @@ func quotaNotifier(alerts *alerting.Dispatcher) quota.Notifier {
 		}
 		alerts.Dispatch(ctx, event)
 	}
+}
+
+// startUsageRollup folds settled usage into usage_rollup once a minute (and
+// keeps going without pause while catching up after a backfill or outage),
+// and re-checks recent hours against the raw log every ten minutes. Every
+// replica runs it; an advisory lock lets one roll at a time.
+func startUsageRollup(ctx context.Context, wg *sync.WaitGroup, db *store.Store, logger *slog.Logger) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		lastReconcile := time.Now()
+		for {
+			for {
+				done, err := db.RollupUsage(ctx, time.Now())
+				if err != nil {
+					if ctx.Err() == nil {
+						logger.WarnContext(ctx, "usage rollup", "error", err.Error())
+					}
+					break
+				}
+				if done || ctx.Err() != nil {
+					break
+				}
+			}
+			if time.Since(lastReconcile) >= 10*time.Minute {
+				lastReconcile = time.Now()
+				if n, err := db.ReconcileUsageRollup(ctx); err != nil {
+					if ctx.Err() == nil {
+						logger.WarnContext(ctx, "usage rollup reconcile", "error", err.Error())
+					}
+				} else if n > 0 {
+					logger.WarnContext(ctx, "usage rollup reconcile rebuilt hours that disagreed with the request log", "hours", n)
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 }
 
 // startActiveUserGauge keeps the active-user gauge fresh without putting a

@@ -319,8 +319,17 @@ function DocsSearch(): ReactNode {
 
 function DocsPageRoute(): ReactNode {
   const params = useParams();
+  const location = useLocation();
   const slug = params['*'] ?? '';
   const page = pageBySlug(slug);
+
+  // Section deep links (#vllm, #ollama…) from in-app notes land on the
+  // section, the way error-code links land on the catalog entry.
+  useEffect(() => {
+    if (location.hash) {
+      document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({ block: 'start' });
+    }
+  }, [location.hash, slug]);
 
   if (!page) {
     return (
@@ -348,7 +357,9 @@ function DocsPageRoute(): ReactNode {
         <section key={section.heading} id={slugify(section.heading)}>
           <h2>{section.heading}</h2>
           {section.body.map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
+            <p key={index}>
+              <InlineText text={paragraph} />
+            </p>
           ))}
           {section.code ? <CodeBlock code={section.code.code} language={section.code.language} /> : null}
           {section.pricing ? <PricingTableView table={section.pricing} /> : null}
@@ -607,4 +618,32 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+const DOCUMENTED_CODES = new Set(ERROR_CATALOG.map((entry) => entry.code));
+
+/**
+ * Docs paragraph text with `backticks` rendered as code. A backticked error
+ * code links to its catalog entry, so the Troubleshooting page is one click
+ * from the full cause and fix. Exported for tests.
+ */
+export function InlineText({ text }: { text: string }): ReactNode {
+  const parts = text.split(/(`[^`]+`)/g);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) {
+          const value = part.slice(1, -1);
+          return DOCUMENTED_CODES.has(value) ? (
+            <Link key={index} to={`/docs/api/errors#${value}`} className="docs-code-link">
+              <code>{value}</code>
+            </Link>
+          ) : (
+            <code key={index}>{value}</code>
+          );
+        }
+        return part;
+      })}
+    </>
+  );
 }

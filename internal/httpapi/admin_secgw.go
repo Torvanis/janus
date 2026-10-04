@@ -16,6 +16,7 @@ import (
 	"github.com/torvanis/janus/internal/secgw"
 	"github.com/torvanis/janus/internal/secgw/classify"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/subscription"
 )
 
 // Security Gateway administration: policies, bindings, term lists,
@@ -264,6 +265,21 @@ func (s *Server) handleCreateSecgwBinding(w http.ResponseWriter, r *http.Request
 	}
 	if u := UserFrom(r.Context()); u != nil {
 		b.CreatedBy = u.ID
+	}
+	if b.ScopeType == store.SecgwScopePersonalSubscription {
+		// Offered only while the feature is on; the id must name a real
+		// provider (or every provider) so the binding can ever match.
+		if on, err := s.subscriptionsAvailable(r.Context()); err != nil {
+			WriteError(w, r, err)
+			return
+		} else if !on {
+			WriteError(w, r, ErrInvalidRequest("Personal subscriptions are turned off, so there is no personal traffic to bind a policy to. Turn them on in Settings → General first.").WithParam("scope_type"))
+			return
+		}
+		if _, ok := subscription.Get(b.ScopeID); !ok && b.ScopeID != store.SecgwScopeAnyProvider {
+			WriteError(w, r, ErrInvalidRequest("Choose a subscription provider, or every provider.").WithParam("scope_id"))
+			return
+		}
 	}
 	if err := s.Store.CreateSecgwBinding(r.Context(), &b); err != nil {
 		if errors.Is(err, store.ErrSecgwDuplicateBinding) {
@@ -549,7 +565,7 @@ func (s *Server) handleSecgwEffective(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) secgwSubjectFromQuery(ctx context.Context, r *http.Request) (secgw.Subject, error) {
 	q := r.URL.Query()
-	sub := secgw.Subject{UserID: q.Get("user_id"), ServiceTokenID: q.Get("service_token_id"), ModelID: q.Get("model_id"), ManagedModelID: q.Get("managed_model_id"), UpstreamID: q.Get("upstream_id")}
+	sub := secgw.Subject{UserID: q.Get("user_id"), ServiceTokenID: q.Get("service_token_id"), ModelID: q.Get("model_id"), ManagedModelID: q.Get("managed_model_id"), UpstreamID: q.Get("upstream_id"), PersonalProvider: q.Get("personal_provider")}
 	if sub.UserID == "" && sub.ServiceTokenID == "" {
 		return sub, ErrInvalidRequest("provide user_id or service_token_id").WithParam("user_id")
 	}

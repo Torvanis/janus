@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -165,6 +166,22 @@ func encodeAuditValue(v any) string {
 
 // --- Overview & status -------------------------------------------------------
 
+// overviewPerfModels is how many of the most-used models the Overview's
+// performance charts plot.
+const overviewPerfModels = 5
+
+func addTotals(a, b store.Totals) store.Totals {
+	a.TokensIn += b.TokensIn
+	a.TokensOut += b.TokensOut
+	a.TokensCached += b.TokensCached
+	a.TokensCacheWrite5m += b.TokensCacheWrite5m
+	a.TokensCacheWrite1h += b.TokensCacheWrite1h
+	a.CostNano += b.CostNano
+	a.Requests += b.Requests
+	a.ErrorCount += b.ErrorCount
+	return a
+}
+
 func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	start, end, label := rangeBounds(r)
 	// The overview is the ORG-WIDE view: the scope carries no principal
@@ -198,15 +215,27 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// One grouped query by recorded team list; an event counts for every
+	// team in its list, exactly as the per-team LIKE filter did.
+	bySnapshot, err := s.Store.AggregateUsageBy(r.Context(), scope, "team_snapshot")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	perTeam := map[string]store.Totals{}
+	for snapshot, t := range bySnapshot {
+		seen := map[string]bool{}
+		for _, id := range strings.Split(snapshot, ",") {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			perTeam[id] = addTotals(perTeam[id], t)
+		}
+	}
 	topTeams := make([]store.Breakdown, 0, len(teams))
 	for _, team := range teams {
-		teamScope := scope
-		teamScope.TeamIDs = []string{team.ID}
-		t, err := s.Store.AggregateUsage(r.Context(), teamScope)
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
+		t := perTeam[team.ID]
 		// A zero-output request still represents usage (e.g. embeddings).
 		if t.Requests == 0 && t.TokensIn == 0 && t.TokensOut == 0 && t.TokensCached == 0 && t.TokensCacheWrite5m == 0 && t.TokensCacheWrite1h == 0 && t.CostNano == 0 {
 			continue
@@ -270,6 +299,27 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// Performance of the most-used models, on the same buckets as the org
+	// trend so the charts line up.
+	modelPerformance, err := s.Store.ModelPerformanceSeriesFor(r.Context(), scope, bucket, buckets, overviewPerfModels)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if len(modelPerformance.Models) > 0 {
+		upstreams, err := s.Store.ListUpstreams(r.Context())
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		names := make(map[string]string, len(upstreams))
+		for _, up := range upstreams {
+			names[up.ID] = up.Name
+		}
+		for i := range modelPerformance.Models {
+			modelPerformance.Models[i].UpstreamName = names[modelPerformance.Models[i].UpstreamID]
+		}
+	}
 	modelCounts, err := s.Store.CountModelsByStatus(r.Context())
 	if err != nil {
 		WriteError(w, r, err)
@@ -311,6 +361,7 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 		"top_spenders": topSpenders, "top_models": topModels, "by_status": byStatus,
 		"model_counts": modelCounts, "near_breach": nearBreach,
 		"user_count": userCount, "active_users_15m": activeUsers,
+		"model_performance": modelPerformance,
 		// Service-token visibility: their traffic is inside "totals" above,
 		// so the console shows what portion it is and which integrations
 		// drive it.
@@ -352,7 +403,7 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("Give the upstream a name.").WithParam("name"))
 		return
 	}
-	if _, err := adapter.Get(body.AdapterType); err != nil {
+	if !slices.Contains(adapter.Types(), body.AdapterType) {
 		WriteError(w, r, ErrInvalidRequest("Choose a supported provider type. Available: "+strings.Join(adapter.Types(), ", ")).WithParam("adapter_type"))
 		return
 	}
@@ -1604,6 +1655,7 @@ func (s *Server) handleCreateQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_created", "quota", q.ID, nil, map[string]any{
 		"subject_type": q.SubjectType, "subject_id": q.SubjectID, "metric": q.Metric,
 		"limit": *body.Limit, "window": q.Window, "breach_behavior": q.BreachBehavior,
@@ -1665,6 +1717,7 @@ func (s *Server) handleUpdateQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_updated", "quota", id,
 		map[string]any{"limit": existing.Limit, "window": existing.Window, "breach_behavior": existing.BreachBehavior, "alert_thresholds": existing.AlertThresholds},
 		map[string]any{"limit": limit, "window": window, "breach_behavior": behavior, "alert_thresholds": thresholds})
@@ -1677,6 +1730,7 @@ func (s *Server) handleDeleteQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_deleted", "quota", id, map[string]any{"id": id}, nil)
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
 }

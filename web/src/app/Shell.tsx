@@ -26,6 +26,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: '/dashboard', label: () => t('shell.navDashboard'), glyph: '◈' },
   { to: '/models', label: () => t('shell.navModels'), glyph: '◇' },
   { to: '/tokens', label: () => t('shell.navTokens'), glyph: '⚿' },
+  { to: '/subscriptions', label: () => t('shell.navSubscriptions'), glyph: '⚯' },
   { to: '/requests', label: () => t('shell.navRequests'), glyph: '≡' },
   { to: '/reports', label: () => 'Reports', glyph: '▥' },
   { to: '/quota', label: () => t('shell.navQuotas'), glyph: '◐' },
@@ -51,10 +52,11 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true },
 ];
 
-const MOBILE_NAV = PRIMARY_NAV.slice(0, 4);
-
 export function Shell({ children }: { children: ReactNode }): ReactNode {
   const { me, config, refresh } = useSession();
+  // The Subscriptions page exists only while the administrator has the
+  // feature on (and never on an offline install).
+  const primaryNav = PRIMARY_NAV.filter((item) => item.to !== '/subscriptions' || me?.personal_subscriptions === true);
   const appearance = useAppearance();
   const location = useLocation();
   const navigate = useNavigate();
@@ -129,7 +131,7 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
         <nav className="sidebar" aria-label={t('shell.primaryNav')}>
           <Brand collapsed={isRail} />
           <div className="nav-group">
-            {PRIMARY_NAV.map((item) => (
+            {primaryNav.map((item) => (
               <NavItemLink key={item.to} item={item} collapsed={isRail} />
             ))}
           </div>
@@ -249,7 +251,7 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
 
         {isMobile ? (
           <nav className="bottom-nav" aria-label={t('shell.primaryNav')}>
-            {MOBILE_NAV.map((item) => (
+            {primaryNav.slice(0, 4).map((item) => (
               <NavLink key={item.to} to={item.to} className="bottom-nav-item">
                 <span aria-hidden="true">{item.glyph}</span>
                 <span>{item.label()}</span>
@@ -279,7 +281,7 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
               </button>
             </div>
             <div className="nav-group">
-              {PRIMARY_NAV.map((item) => (
+              {primaryNav.map((item) => (
                 <NavItemLink key={item.to} item={item} collapsed={false} />
               ))}
               <NavItemLink
@@ -351,6 +353,13 @@ function Brand({ collapsed, compact }: { collapsed: boolean; compact?: boolean }
   );
 }
 
+/** Per-second rate: one decimal below 10 so a quiet gateway is not shown as 0. */
+export function formatPerSecond(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value < 10) return value.toFixed(1);
+  return Math.round(value).toLocaleString();
+}
+
 function ThroughputReadout({ signal, collapsed }: { signal: AmbientSignal; collapsed: boolean }): ReactNode {
   if (collapsed) {
     return (
@@ -370,6 +379,11 @@ function ThroughputReadout({ signal, collapsed }: { signal: AmbientSignal; colla
           {t('shell.tokensInPerMin', { count: Math.round(signal.tokensInPerMinute).toLocaleString() })}
           {' · '}
           {t('shell.tokensOutPerMin', { count: Math.round(signal.tokensOutPerMinute).toLocaleString() })}
+        </div>
+        <div className="small muted num" data-testid="throughput-per-second">
+          {t('shell.tokensInPerSec', { count: formatPerSecond(signal.tokensInPerMinute / 60) })}
+          {' · '}
+          {t('shell.tokensOutPerSec', { count: formatPerSecond(signal.tokensOutPerMinute / 60) })}
         </div>
       </div>
     </div>

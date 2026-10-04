@@ -15,6 +15,7 @@ import {
   type ServiceTokenRow,
 } from '../../lib/types';
 import { AsyncSection, Badge, Chevron, ConfirmDialog, EmptyState, Field, Modal, Pagination, useToast } from '../../components/ui';
+import { IconButton, RowActions } from '../../components/IconButton';
 import { useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
 import { SearchInput } from '../shared';
@@ -25,10 +26,13 @@ type GrantsView = 'model' | 'grantee';
 /** Grantee-type filter values; '' = every type. */
 type GranteeTypeFilter = '' | Grant['grantee_type'];
 
-/** Cards per page. Even a large fleet stays a short scroll. */
-const GROUPS_PER_PAGE = 12;
-/** Grantees/models previewed on a collapsed card before "+N more". */
+/** Table rows (models or grantees) per page. */
+const GROUPS_PER_PAGE = 50;
+/** Grantees/models previewed on a collapsed row before "+N more". */
 const PREVIEW_COUNT = 4;
+/** An expanded row lists its grants inline up to this many; beyond it the
+ *  list gets its own search and pager. */
+const INLINE_GRANTS_MAX = 10;
 /** With this many groups or fewer, cards open by default. */
 const AUTO_EXPAND_MAX_GROUPS = 3;
 
@@ -81,9 +85,9 @@ interface GrantGroup {
 }
 
 /**
- * Model grants, laid out to survive many grants: one collapsible card per
- * model (or per grantee), previewing who has access while collapsed, paged
- * twelve cards at a time, and filterable to a single grantee so "what can
+ * Model grants as a dense admin table: one row per model (or per grantee)
+ * that previews who has access, expanding in place to the individual grants
+ * with a revoke action each. Filterable to a single grantee so "what can
  * person X call?" is one dropdown away. Grouping, filters and page live in
  * the URL so a view can be shared.
  */
@@ -154,7 +158,9 @@ export function GrantsPage(): ReactNode {
       teams: list.filter((g) => g.grantee_type === 'team'),
       groups: list.filter((g) => g.grantee_type === 'group'),
       services: list.filter((g) => g.grantee_type === 'service_token'),
-      blanket: list.filter((g) => g.grantee_type === 'all_users' || g.grantee_type === 'all_service_tokens' || g.grantee_type === 'all_teams'),
+      blanket: list.filter(
+        (g) => g.grantee_type === 'all_users' || g.grantee_type === 'all_service_tokens' || g.grantee_type === 'all_teams',
+      ),
     };
   }, [allGrants]);
   const focusedGrantee = granteeFilter ? allGrants.find((g) => granteeKey(g) === granteeFilter) : undefined;
@@ -211,8 +217,10 @@ export function GrantsPage(): ReactNode {
         );
         if (view === 'model') {
           const label = grantModelLabel(first);
-          const parts = [label !== first.model_name ? first.model_name : '', sharedNames.has(first.model_name) ? first.upstream_name ?? '' : '']
-            .filter(Boolean);
+          const parts = [
+            label !== first.model_name ? first.model_name : '',
+            sharedNames.has(first.model_name) ? (first.upstream_name ?? '') : '',
+          ].filter(Boolean);
           return { key, title: label, subtitle: parts.length ? parts.join(' · ') : undefined, grants: sorted };
         }
         return {
@@ -225,7 +233,7 @@ export function GrantsPage(): ReactNode {
       .sort((a, b) => a.title.localeCompare(b.title));
   })();
 
-  // Paging over groups (cards), not grants, so a card is never cut in half.
+  // Paging over groups (rows), not grants, so a group is never cut in half.
   const offset = pageOffset(pageParam, groupLimit, groups.length);
   const pageGroups = groups.slice(offset, offset + groupLimit);
   useEffect(() => {
@@ -241,12 +249,14 @@ export function GrantsPage(): ReactNode {
     setExpandMode(mode);
     setExpandOverrides({});
   };
-  // A new grouping or filter set shows fresh cards: start from page one with
+  // A new grouping or filter set shows fresh rows: start from page one with
   // the automatic open/closed default.
   const changeFilters = (updates: Record<string, string | null>) => {
-    const childPages = Object.fromEntries([...new URLSearchParams(location.search).keys()]
-      .filter((key) => key.startsWith('grant-rows-') && key.endsWith('.page'))
-      .map((key) => [key, null]));
+    const childPages = Object.fromEntries(
+      [...new URLSearchParams(location.search).keys()]
+        .filter((key) => key.startsWith('grant-rows-') && key.endsWith('.page'))
+        .map((key) => [key, null]),
+    );
     setUrl({ ...childPages, ...updates, page: null });
     setExpandMode('auto');
     setExpandOverrides({});
@@ -262,7 +272,10 @@ export function GrantsPage(): ReactNode {
       <header className="page-header">
         <div>
           <h1 className="page-title">{t('adminGrants.title')}</h1>
-          <p className="page-subtitle">Access is explicit within each context. Personal, team, and service grants are separate; team access does not inherit personal or group grants.</p>
+          <p className="page-subtitle">
+            Access is explicit within each context. Personal, team, and service grants are separate; team access does not inherit
+            personal or group grants.
+          </p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
           {t('adminGrants.grantAccess')}
@@ -270,12 +283,17 @@ export function GrantsPage(): ReactNode {
       </header>
 
       <div className="row wrap grants-toolbar" data-collection-mode="complete-client">
-        <label className="row">Groups per page
+        <label className="page-size">
+          Groups per page{' '}
           <select className="select" value={groupLimit} onChange={(event) => setUrl({ size: event.target.value, page: null })}>
-            {[12, 25, 50, 100].map((size) => <option key={size}>{size}</option>)}
+            {[12, 25, 50, 100].map((size) => (
+              <option key={size}>{size}</option>
+            ))}
           </select>
         </label>
-        <span className="small muted">{filtered.length} of {allGrants.length} grants · {groups.length} matching groups · alphabetical order</span>
+        <span className="small muted">
+          {filtered.length} of {allGrants.length} grants · {groups.length} matching groups · alphabetical order
+        </span>
         <SearchInput
           value={search}
           onChange={(next) => changeFilters({ q: next || null })}
@@ -299,7 +317,15 @@ export function GrantsPage(): ReactNode {
             onChange={(event) => changeFilters({ grantee: event.target.value || null })}
           >
             <option value="">{t('adminGrants.anyGrantee')}</option>
-            {grantees.teams.length ? <optgroup label="Teams">{grantees.teams.map((g) => <option key={granteeKey(g)} value={granteeKey(g)}>{g.grantee_name}</option>)}</optgroup> : null}
+            {grantees.teams.length ? (
+              <optgroup label="Teams">
+                {grantees.teams.map((g) => (
+                  <option key={granteeKey(g)} value={granteeKey(g)}>
+                    {g.grantee_name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
             {(
               [
                 ['granteeGroupPeople', grantees.people],
@@ -381,7 +407,12 @@ export function GrantsPage(): ReactNode {
                 <div className="banner banner-info" role="status">
                   <div className="stack grants-focus">
                     <strong>{t('adminGrants.granteeFocusTitle', { name: focusedGrantee.grantee_name })}</strong>
-                    {focusedGrantee.grantee_type === 'team' ? <span className="small muted">Only this team's explicit grants are shown. Personal, group, and all-teams grants are not included in this filter.</span> : null}
+                    {focusedGrantee.grantee_type === 'team' ? (
+                      <span className="small muted">
+                        Only this team's explicit grants are shown. Personal, group, and all-teams grants are not included in this
+                        filter.
+                      </span>
+                    ) : null}
                     {focusedGrantee.grantee_type === 'user' ? (
                       <span className="small muted">{t('adminGrants.granteeFocusBody')}</span>
                     ) : null}
@@ -402,115 +433,177 @@ export function GrantsPage(): ReactNode {
                 </div>
               </div>
 
-              {pageGroups.map((group) => {
-                const open = isExpanded(group.key);
-                const bodyId = `grants-group-${group.key.replace(/[^a-z0-9_-]/gi, '_')}`;
-                const preview = group.grants.slice(0, PREVIEW_COUNT);
-                return (
-                  <section key={group.key} className="card grants-group" data-testid="grants-group">
-                    <div className="card-header grants-group-head">
-                      <button
-                        type="button"
-                        className="grants-group-toggle"
-                        aria-expanded={open}
-                        aria-controls={bodyId}
-                        aria-label={
-                          open
-                            ? t('adminGrants.hideGrants', { name: group.title })
-                            : t('adminGrants.showGrants', { name: group.title })
-                        }
-                        onClick={() => toggle(group.key)}
-                      >
-                        <Chevron open={open} className="grants-group-chevron" />
-                        <h2 className="grants-group-title">
-                          {group.title}
-                          {group.subtitle ? (
-                            <span className="small muted mono grants-group-subtitle">{group.subtitle}</span>
+              <div className="card card-flush">
+                <div className="table-wrap">
+                  <table className="data data-compact grants-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">{view === 'model' ? 'Model' : 'Grantee'}</th>
+                        <th scope="col" className="num">
+                          {view === 'model' ? 'Grants' : 'Models'}
+                        </th>
+                        <th scope="col">{view === 'model' ? 'Who has access' : 'Can call'}</th>
+                      </tr>
+                    </thead>
+                    {pageGroups.map((group) => {
+                      const open = isExpanded(group.key);
+                      const bodyId = `grants-group-${group.key.replace(/[^a-z0-9_-]/gi, '_')}`;
+                      const preview = group.grants.slice(0, PREVIEW_COUNT);
+                      const detail = (rows: Grant[]) => (
+                        <table className="data data-compact grants-detail-table">
+                          <tbody>
+                            {rows.map((grant) => (
+                              <tr key={grant.id}>
+                                {view === 'model' ? (
+                                  <>
+                                    <td className="grants-type-cell">
+                                      <Badge tone={granteeTone(grant.grantee_type)}>{granteeTypeLabel(grant.grantee_type)}</Badge>
+                                    </td>
+                                    <td className="grants-name-cell">
+                                      <button
+                                        type="button"
+                                        className="grants-link"
+                                        onClick={() => changeFilters({ grantee: granteeKey(grant) })}
+                                        title={t('adminGrants.granteeFocusTitle', { name: grant.grantee_name })}
+                                      >
+                                        {grant.grantee_name}
+                                      </button>
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td className="grants-name-cell">
+                                      {grantModelLabel(grant)}
+                                      {grantModelLabel(grant) !== grant.model_name ? (
+                                        <span className="cell-sub mono">{grant.model_name}</span>
+                                      ) : null}
+                                    </td>
+                                    <td className="small muted">
+                                      {grant.model_kind === 'managed' ? (
+                                        <Badge tone="info">{t('adminGrants.alias')}</Badge>
+                                      ) : (
+                                        (grant.upstream_name ?? '')
+                                      )}
+                                    </td>
+                                  </>
+                                )}
+                                <td>
+                                  <RowActions>
+                                    <IconButton icon="revoke" label={t('adminGrants.revoke')} danger onClick={() => setDeleting(grant)} />
+                                  </RowActions>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                      return (
+                        <tbody key={group.key} className="grants-group" data-testid="grants-group" data-open={open}>
+                          <tr>
+                            <th scope="row" className="grants-group-cell">
+                              <button
+                                type="button"
+                                className="grants-group-toggle"
+                                aria-expanded={open}
+                                aria-controls={bodyId}
+                                aria-label={
+                                  open
+                                    ? t('adminGrants.hideGrants', { name: group.title })
+                                    : t('adminGrants.showGrants', { name: group.title })
+                                }
+                                onClick={() => toggle(group.key)}
+                              >
+                                <Chevron open={open} className="grants-group-chevron" />
+                                <span className="grants-group-title">{group.title}</span>
+                                {group.badge ? <Badge tone={group.badge.tone}>{group.badge.label}</Badge> : null}
+                              </button>
+                              {group.subtitle ? <span className="cell-sub mono grants-group-subtitle">{group.subtitle}</span> : null}
+                            </th>
+                            <td className="num small">
+                              {view === 'model'
+                                ? group.grants.length === 1
+                                  ? t('adminGrants.grantCountOne', { count: group.grants.length })
+                                  : t('adminGrants.grantCountMany', { count: group.grants.length })
+                                : group.grants.length === 1
+                                  ? t('adminGrants.modelCountOne', { count: group.grants.length })
+                                  : t('adminGrants.modelCountMany', { count: group.grants.length })}
+                            </td>
+                            <td className="grants-preview-cell">
+                              {open ? (
+                                <span className="small muted">Listed below</span>
+                              ) : (
+                                <span className="row grants-preview">
+                                  {preview.map((grant) =>
+                                    view === 'model' ? (
+                                      <Badge key={grant.id} tone={granteeTone(grant.grantee_type)}>
+                                        {grant.grantee_name}
+                                      </Badge>
+                                    ) : (
+                                      <Badge key={grant.id} tone="neutral">
+                                        {grantModelLabel(grant)}
+                                      </Badge>
+                                    ),
+                                  )}
+                                  {group.grants.length > PREVIEW_COUNT ? (
+                                    <span className="small muted">
+                                      {t('adminGrants.moreCount', { count: group.grants.length - PREVIEW_COUNT })}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                          {open ? (
+                            <tr className="grants-detail-row">
+                              <td colSpan={3} id={bodyId}>
+                                {group.grants.length <= INLINE_GRANTS_MAX ? (
+                                  detail(group.grants)
+                                ) : (
+                                  <Collection
+                                    name={`grant-rows-${view}-${encodeURIComponent(group.key)}`}
+                                    rows={group.grants}
+                                    rowKey={(grant) => grant.id}
+                                    resetKey={`${search}|${granteeFilter}|${typeFilter}|${view}`}
+                                    columns={[
+                                      { id: 'model', label: 'Model', value: grantModelLabel, render: grantModelLabel },
+                                      {
+                                        id: 'native',
+                                        label: 'Native model',
+                                        value: (grant) => grant.model_name,
+                                        render: (grant) => grant.model_name,
+                                      },
+                                      {
+                                        id: 'upstream',
+                                        label: 'Upstream',
+                                        value: (grant) => grant.upstream_name ?? '',
+                                        render: (grant) => grant.upstream_name ?? '',
+                                      },
+                                      {
+                                        id: 'grantee',
+                                        label: 'Grantee',
+                                        value: (grant) => grant.grantee_name,
+                                        render: (grant) => grant.grantee_name,
+                                      },
+                                      {
+                                        id: 'type',
+                                        label: 'Type',
+                                        value: (grant) => granteeTypeLabel(grant.grantee_type),
+                                        render: (grant) => granteeTypeLabel(grant.grantee_type),
+                                      },
+                                    ]}
+                                  >
+                                    {detail}
+                                  </Collection>
+                                )}
+                              </td>
+                            </tr>
                           ) : null}
-                        </h2>
-                        {group.badge ? <Badge tone={group.badge.tone}>{group.badge.label}</Badge> : null}
-                      </button>
-                      <span className="small muted">
-                        {view === 'model'
-                          ? group.grants.length === 1
-                            ? t('adminGrants.grantCountOne', { count: group.grants.length })
-                            : t('adminGrants.grantCountMany', { count: group.grants.length })
-                          : group.grants.length === 1
-                            ? t('adminGrants.modelCountOne', { count: group.grants.length })
-                            : t('adminGrants.modelCountMany', { count: group.grants.length })}
-                      </span>
-                    </div>
-                    {open ? (
-                      <Collection
-                        name={`grant-rows-${view}-${encodeURIComponent(group.key)}`}
-                        rows={group.grants}
-                        rowKey={(grant) => grant.id}
-                        resetKey={`${search}|${granteeFilter}|${typeFilter}|${view}`}
-                        columns={[
-                          { id: 'model', label: 'Model', value: grantModelLabel, render: grantModelLabel },
-                          { id: 'native', label: 'Native model', value: (grant) => grant.model_name, render: (grant) => grant.model_name },
-                          { id: 'upstream', label: 'Upstream', value: (grant) => grant.upstream_name ?? '', render: (grant) => grant.upstream_name ?? '' },
-                          { id: 'grantee', label: 'Grantee', value: (grant) => grant.grantee_name, render: (grant) => grant.grantee_name },
-                          { id: 'type', label: 'Type', value: (grant) => granteeTypeLabel(grant.grantee_type), render: (grant) => granteeTypeLabel(grant.grantee_type) },
-                        ]}
-                      >
-                      {(rows) => <ul className="grants-list" id={bodyId}>
-                        {rows.map((grant) => (
-                          <li key={grant.id} className="row-between grants-row">
-                            {view === 'model' ? (
-                              <span className="row grants-row-main">
-                                <Badge tone={granteeTone(grant.grantee_type)}>{granteeTypeLabel(grant.grantee_type)}</Badge>
-                                <button
-                                  type="button"
-                                  className="grants-link"
-                                  onClick={() => changeFilters({ grantee: granteeKey(grant) })}
-                                  title={t('adminGrants.granteeFocusTitle', { name: grant.grantee_name })}
-                                >
-                                  {grant.grantee_name}
-                                </button>
-                              </span>
-                            ) : (
-                              <span className="row grants-row-main">
-                                <span>{grantModelLabel(grant)}</span>
-                                {grantModelLabel(grant) !== grant.model_name ? (
-                                  <span className="small muted mono">{grant.model_name}</span>
-                                ) : null}
-                                {grant.upstream_name && sharedNames.has(grant.model_name) ? (
-                                  <span className="small muted">{grant.upstream_name}</span>
-                                ) : null}
-                                {grant.model_kind === 'managed' ? <Badge tone="info">{t('adminGrants.alias')}</Badge> : null}
-                              </span>
-                            )}
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleting(grant)}>
-                              {t('adminGrants.revoke')}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>}
-                      </Collection>
-                    ) : (
-                      <div className="row wrap grants-preview" id={bodyId}>
-                        {preview.map((grant) =>
-                          view === 'model' ? (
-                            <Badge key={grant.id} tone={granteeTone(grant.grantee_type)}>
-                              {grant.grantee_name}
-                            </Badge>
-                          ) : (
-                            <Badge key={grant.id} tone="neutral">
-                              {grantModelLabel(grant)}
-                            </Badge>
-                          ),
-                        )}
-                        {group.grants.length > PREVIEW_COUNT ? (
-                          <span className="small muted">
-                            {t('adminGrants.moreCount', { count: group.grants.length - PREVIEW_COUNT })}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
+                        </tbody>
+                      );
+                    })}
+                  </table>
+                </div>
+              </div>
 
               <Pagination
                 offset={offset}
@@ -570,9 +663,7 @@ function CreateGrantModal({
   // one <select> without their ids colliding. They post to different
   // model_kind values, so the submit path splits them back apart.
   const [selection, setSelection] = useState<string[]>([]);
-  const [granteeType, setGranteeType] = useState<Grant['grantee_type']>(
-    'group',
-  );
+  const [granteeType, setGranteeType] = useState<Grant['grantee_type']>('group');
   const [granteeId, setGranteeId] = useState('');
   const [confirmBlanket, setConfirmBlanket] = useState(false);
 
@@ -624,7 +715,8 @@ function CreateGrantModal({
       const managedIds = selection.filter((s) => s.startsWith('managed:')).map((s) => s.slice('managed:'.length));
       const grantee = {
         grantee_type: granteeType,
-        grantee_id: granteeType === 'all_users' || granteeType === 'all_service_tokens' || granteeType === 'all_teams' ? '' : granteeId,
+        grantee_id:
+          granteeType === 'all_users' || granteeType === 'all_service_tokens' || granteeType === 'all_teams' ? '' : granteeId,
       };
       // Two calls only when the admin mixed kinds in one selection; the
       // common single-kind case stays a single request.
@@ -724,7 +816,11 @@ function CreateGrantModal({
           <Field label="Team" required>
             <select aria-label="Team" className="select" value={granteeId} onChange={(event) => setGranteeId(event.target.value)}>
               <option value="">Choose a team</option>
-              {(teams.data?.teams ?? []).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              {(teams.data?.teams ?? []).map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
             </select>
             {teams.isError ? <p role="alert">Teams could not be loaded. Try again before granting access.</p> : null}
           </Field>
@@ -783,13 +879,19 @@ function CreateGrantModal({
           create.mutate();
         }}
         danger={false}
-        title={granteeType === 'all_teams' ? 'Grant access to all teams?' : granteeType === 'all_service_tokens' ? t('adminGrants.allServiceTokensTitle') : t('adminGrants.allUsersTitle')}
+        title={
+          granteeType === 'all_teams'
+            ? 'Grant access to all teams?'
+            : granteeType === 'all_service_tokens'
+              ? t('adminGrants.allServiceTokensTitle')
+              : t('adminGrants.allUsersTitle')
+        }
         consequence={
           granteeType === 'all_teams'
             ? 'All teams (including future teams) will have access to the selected models in team context.'
             : granteeType === 'all_service_tokens'
-            ? t('adminGrants.allServiceTokensConsequence', { count: selection.length })
-            : t('adminGrants.allUsersConsequence', { count: selection.length })
+              ? t('adminGrants.allServiceTokensConsequence', { count: selection.length })
+              : t('adminGrants.allUsersConsequence', { count: selection.length })
         }
         confirmLabel={t('adminGrants.allUsersConfirm')}
         busy={create.isPending}

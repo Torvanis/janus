@@ -3,7 +3,7 @@ import { sortCollection } from '../lib/collections';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { isRenamedModel, modelHealth, publicModelName, type ManagedModel, type Model, type ModelHealth } from '../lib/types';
+import { isRenamedModel, modelHealth, publicModelName, type ManagedModel, type Model, type ModelActivity, type ModelHealth } from '../lib/types';
 import { formatErrorRate, formatModelRate, formatRelative, formatTokenCount, healthTone, titleCase } from '../lib/format';
 import { AsyncSection, Badge, CodeBlock, Drawer, EmptyState } from '../components/ui';
 import { useDebounced, useUrlState } from '../lib/hooks';
@@ -214,6 +214,8 @@ export function ModelsPage(): ReactNode {
                       <th scope="col">{t('models.contextWindow')}</th>
                       <th scope="col">{t('models.colHealth')}</th>
                       <th scope="col">{t('models.colErrorRate')}</th>
+                      <th scope="col" className="num">{t('models.jobsPerDay')}</th>
+                      <th scope="col" className="num">{t('models.speed')}</th>
                       <th scope="col">{t('models.colAccess')}</th>
                     </tr>
                   </thead>
@@ -244,6 +246,7 @@ export function ModelsPage(): ReactNode {
                             </Badge>
                           </td>
                           <td>—</td>
+                          <ActivityCells activity={model.activity} />
                           <td>{grantSourceLabel(model.grant_source)}</td>
                         </tr>
                       ) : (
@@ -281,6 +284,7 @@ export function ModelsPage(): ReactNode {
                           <td className="num small" title={errorRateDetail(model)}>
                             {(model.request_count_10m ?? 0) > 0 ? formatErrorRate(model.error_rate_percent) : '—'}
                           </td>
+                          <ActivityCells activity={model.activity} />
                           <td className="small muted">{grantSourceLabel(model.grant_source)}</td>
                         </tr>
                       ),
@@ -310,6 +314,14 @@ export function ModelsPage(): ReactNode {
                 <ModelHealthBadge model={detail} />
               </DetailRow>
               <DetailRow label={t('models.errorRate10m')}>{errorRateDetail(detail)}</DetailRow>
+              <DetailRow label={t('models.jobsPerDay')}>
+                {detail.activity ? `${formatJobsPerDay(detail.activity.jobs_per_day_7d)} · ${jobsTrendDetail(detail.activity)}` : '—'}
+              </DetailRow>
+              <DetailRow label={t('models.speed')}>
+                {detail.activity && detail.activity.tokens_per_second_7d > 0
+                  ? `${t('models.speedValue', { value: formatSpeed(detail.activity.tokens_per_second_7d) })} · ${t('models.speedDetail', { count: detail.activity.speed_samples_7d.toLocaleString() })}`
+                  : t('models.speedNone')}
+              </DetailRow>
               <DetailRow label={t('models.upstreamLatency')}>{upstreamProbeLabel(detail)}</DetailRow>
               <DetailRow label={t('adminModels.colUpstream')}>{detail.upstream_name}</DetailRow>
               <DetailRow label={t('models.providerType')}>{detail.adapter_type}</DetailRow>
@@ -423,6 +435,7 @@ function ModelCard({ model, localOnly, onOpen }: { model: Model; localOnly: bool
           <dt>{t('models.requests10m')}</dt>
           <dd>{hasTraffic ? requests.toLocaleString() : '0'}</dd>
         </div>
+        <ActivityStats activity={model.activity} />
         {localOnly ? null : (
           <>
             <div className="model-card-stat">
@@ -515,6 +528,7 @@ function ManagedModelCard({ model: mm }: { model: ManagedModel }): ReactNode {
           <dt>{t('models.contextWindow')}</dt>
           <dd>{formatTokenCount(mm.context_window)}</dd>
         </div>
+        <ActivityStats activity={mm.activity} />
       </dl>
 
       <div className="model-card-foot">
@@ -523,6 +537,117 @@ function ManagedModelCard({ model: mm }: { model: ManagedModel }): ReactNode {
       </div>
     </article>
   );
+}
+
+/**
+ * The 7-day figures on a model card: jobs per day with a trend arrow against
+ * the previous seven days, and the typical generation speed so users can see
+ * which models are fast. Both read "—" when there is nothing to measure.
+ */
+function ActivityStats({ activity }: { activity: ModelActivity | undefined }): ReactNode {
+  const speed = activity?.tokens_per_second_7d ?? 0;
+  return (
+    <>
+      <div className="model-card-stat" data-testid="model-jobs-per-day">
+        <dt>{t('models.jobsPerDay')}</dt>
+        <dd title={activity ? jobsTrendDetail(activity) : undefined}>
+          {activity && (activity.jobs_per_day_7d > 0 || activity.jobs_per_day_prev_7d > 0) ? (
+            <>
+              {formatJobsPerDay(activity.jobs_per_day_7d)} <TrendArrow activity={activity} />
+            </>
+          ) : (
+            '—'
+          )}
+        </dd>
+      </div>
+      <div className="model-card-stat" data-testid="model-speed" title={speed > 0 ? undefined : t('models.speedNone')}>
+        <dt>{t('models.speed')}</dt>
+        <dd
+          title={
+            speed > 0 && activity ? t('models.speedDetail', { count: activity.speed_samples_7d.toLocaleString() }) : undefined
+          }
+        >
+          {speed > 0 ? t('models.speedValue', { value: formatSpeed(speed) }) : '—'}
+        </dd>
+      </div>
+    </>
+  );
+}
+
+/** Table-view cells for the same two figures. */
+function ActivityCells({ activity }: { activity: ModelActivity | undefined }): ReactNode {
+  const speed = activity?.tokens_per_second_7d ?? 0;
+  return (
+    <>
+      <td className="num small" title={activity ? jobsTrendDetail(activity) : undefined}>
+        {activity && (activity.jobs_per_day_7d > 0 || activity.jobs_per_day_prev_7d > 0) ? (
+          <>
+            {formatJobsPerDay(activity.jobs_per_day_7d)} <TrendArrow activity={activity} />
+          </>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td className="num small">{speed > 0 ? t('models.speedValue', { value: formatSpeed(speed) }) : '—'}</td>
+    </>
+  );
+}
+
+/** ▲ / ▼ for a ±10% change, a dash when flat, "new" when there is no baseline. */
+function TrendArrow({ activity }: { activity: ModelActivity }): ReactNode {
+  const label = jobsTrendDetail(activity);
+  switch (activity.jobs_trend) {
+    case 'up':
+      return (
+        <span className="trend" data-trend="up" role="img" aria-label={label}>
+          ▲
+        </span>
+      );
+    case 'down':
+      return (
+        <span className="trend" data-trend="down" role="img" aria-label={label}>
+          ▼
+        </span>
+      );
+    case 'new':
+      return (
+        <span className="trend" data-trend="new" aria-label={label}>
+          new
+        </span>
+      );
+    default:
+      return (
+        <span className="trend" data-trend="flat" role="img" aria-label={label}>
+          –
+        </span>
+      );
+  }
+}
+
+function jobsTrendDetail(activity: ModelActivity): string {
+  const prev = formatJobsPerDay(activity.jobs_per_day_prev_7d);
+  const pct = Math.abs(Math.round(activity.jobs_change_percent));
+  switch (activity.jobs_trend) {
+    case 'up':
+      return t('models.jobsTrendUp', { percent: pct, rate: prev });
+    case 'down':
+      return t('models.jobsTrendDown', { percent: pct, rate: prev });
+    case 'new':
+      return t('models.jobsTrendNew');
+    default:
+      return t('models.jobsTrendFlat', { rate: prev });
+  }
+}
+
+/** 0.1/day resolution below 10, whole numbers above. */
+function formatJobsPerDay(value: number): string {
+  if (value <= 0) return '0';
+  if (value < 10) return value.toFixed(1).replace(/\.0$/, '');
+  return Math.round(value).toLocaleString();
+}
+
+function formatSpeed(value: number): string {
+  return value < 10 ? value.toFixed(1) : Math.round(value).toLocaleString();
 }
 
 /**

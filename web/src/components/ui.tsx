@@ -265,11 +265,20 @@ export function Drawer({
   open,
   onClose,
   title,
+  description,
+  footer,
+  wide,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** One line under the title. */
+  description?: string;
+  /** Pinned to the bottom of the panel (form actions), outside the scroll area. */
+  footer?: ReactNode;
+  /** Editors with nested sections (pools, fallbacks) need more than the detail width. */
+  wide?: boolean;
   children: ReactNode;
 }): ReactNode {
   useEscape(onClose);
@@ -280,14 +289,24 @@ export function Drawer({
   return (
     <>
       <div className="scrim" onClick={onClose} aria-hidden="true" />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
+      <aside
+        className={wide ? 'drawer drawer-wide' : 'drawer'}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={ref}
+      >
         <header className="drawer-header">
-          <h2 id={titleId}>{title}</h2>
+          <div className="drawer-heading">
+            <h2 id={titleId}>{title}</h2>
+            {description ? <p className="secondary small">{description}</p> : null}
+          </div>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} aria-label={t('common.closePanel')}>
             ✕
           </button>
         </header>
         <div className="drawer-body">{children}</div>
+        {footer ? <footer className="drawer-footer">{footer}</footer> : null}
       </aside>
     </>
   );
@@ -423,22 +442,36 @@ export function CodeBlock({ code, language }: { code: string; language?: string 
 
 /* --- Toast ---------------------------------------------------------------- */
 
+/** One button on a toast, e.g. Undo. Clicking it runs onClick and dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: number;
   tone: Tone;
   message: string;
+  action?: ToastAction;
 }
 
-const ToastContext = createContext<(message: string, tone?: Tone) => void>(() => {});
+type PushToast = (message: string, tone?: Tone, action?: ToastAction) => void;
+
+const ToastContext = createContext<PushToast>(() => {});
 
 export function ToastProvider({ children }: { children: ReactNode }): ReactNode {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
 
-  const push = useCallback((message: string, tone: Tone = 'success') => {
-    const id = Date.now() + Math.random();
-    setToasts((current) => [...current, { id, tone, message }]);
-    window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 5000);
-  }, []);
+  const push = useCallback<PushToast>(
+    (message, tone = 'success', action) => {
+      const id = Date.now() + Math.random();
+      setToasts((current) => [...current, { id, tone, message, action }]);
+      // A toast with an action stays longer so there is time to use it.
+      window.setTimeout(() => dismiss(id), action ? 8000 : 5000);
+    },
+    [dismiss],
+  );
 
   const value = useMemo(() => push, [push]);
 
@@ -464,7 +497,23 @@ export function ToastProvider({ children }: { children: ReactNode }): ReactNode 
             className={`banner banner-${toast.tone === 'danger' ? 'danger' : 'info'}`}
             style={{ boxShadow: 'var(--janus-shadow-3)' }}
           >
-            {toast.message}
+            {toast.action ? (
+              <div className="row-between" style={{ flexWrap: 'nowrap' }}>
+                <span>{toast.message}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    dismiss(toast.id);
+                    toast.action?.onClick();
+                  }}
+                >
+                  {toast.action.label}
+                </button>
+              </div>
+            ) : (
+              toast.message
+            )}
           </div>
         ))}
       </div>
@@ -472,7 +521,7 @@ export function ToastProvider({ children }: { children: ReactNode }): ReactNode 
   );
 }
 
-export function useToast(): (message: string, tone?: Tone) => void {
+export function useToast(): PushToast {
   return useContext(ToastContext);
 }
 

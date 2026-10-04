@@ -21,7 +21,12 @@ export function Continuation({
         {count ? `${offset + 1}–${offset + count}` : 'No rows on this page'} · newest first · total unknown
       </span>
       <div className="row">
-        <button type="button" className="btn btn-sm" disabled={busy || offset === 0} onClick={() => onPage(Math.max(0, offset - limit))}>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={busy || offset === 0}
+          onClick={() => onPage(Math.max(0, offset - limit))}
+        >
           Previous
         </button>
         <button type="button" className="btn btn-sm" disabled={busy || !hasMore} onClick={() => onPage(offset + limit)}>

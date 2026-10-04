@@ -215,6 +215,19 @@ func (s *Store) ResolveModelForRequest(ctx context.Context, name string) (Resolv
 			}
 		}
 		target, err := s.ModelByID(ctx, managed.TargetModelID)
+		if err == nil && target.Status != ModelEnabled && !managed.Broken {
+			// A pool whose primary is out but whose other members serve:
+			// hand the proxy any servable member; the balancer picks the
+			// real one per request.
+			for _, pm := range managed.Pool.Members {
+				if pm.Servable() {
+					if alt, altErr := s.ModelByID(ctx, pm.ModelID); altErr == nil {
+						target = alt
+						break
+					}
+				}
+			}
+		}
 		if managed.Broken || err != nil {
 			// The target is gone or disabled: a configuration-level
 			// unavailability, deterministic for every caller. Serve the

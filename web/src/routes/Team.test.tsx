@@ -213,7 +213,14 @@ describe('team workspace layout', () => {
     mocked.get.mockImplementation(((path: string) => {
       if (path === '/api/v1/me') return Promise.resolve(meFixture({}));
       if (path === '/api/v1/config')
-        return Promise.resolve({ public_url: '', version: '1', build: 'x', dev_auth: false, feature_flags: {}, provider_label: '' });
+        return Promise.resolve({
+          public_url: '',
+          version: '1',
+          build: 'x',
+          dev_auth: false,
+          feature_flags: {},
+          provider_label: '',
+        });
       if (path === '/api/v1/teams/t1')
         return Promise.resolve({
           team,

@@ -211,3 +211,28 @@ describe('A03 upstream detail — rate-card dialog', () => {
     expect(screen.getByRole('dialog', { name: 'Edit Anthropic' })).toBeTruthy();
   });
 });
+
+describe('Add upstream: self-hosted engine setup note', () => {
+  it('shows a one-line note with a docs link for self-hosted engines only', async () => {
+    mocked.get.mockImplementation((path: string) =>
+      path === '/api/v1/admin/upstreams'
+        ? Promise.resolve({ upstreams: [upstreamFixture], adapter_types: ['anthropic', 'vlm', 'llama_cpp'] })
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    renderDetail();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Add upstream' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Add upstream' });
+    const select = within(drawer).getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'vlm' } });
+    const note = screen.getByTestId('engine-setup-note');
+    expect(note.textContent).toContain('--enable-per-request-metrics');
+    const link = within(note).getByRole('link', { name: 'Recommended server settings' });
+    expect(link.getAttribute('href')).toBe('/docs/admin/self-hosted-engines#vllm');
+    fireEvent.change(select, { target: { value: 'llama_cpp' } });
+    expect(within(screen.getByTestId('engine-setup-note')).getByRole('link').getAttribute('href')).toBe(
+      '/docs/admin/self-hosted-engines#llama-cpp-llama-server',
+    );
+    fireEvent.change(select, { target: { value: 'anthropic' } });
+    expect(screen.queryByTestId('engine-setup-note')).toBeNull();
+  });
+});

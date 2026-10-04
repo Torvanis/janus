@@ -238,6 +238,16 @@ type Adapter interface {
 	NewStreamTransformer(req *Request, respHeader http.Header) StreamTransformer
 }
 
+// EventStreamBufferer is implemented by adapters whose upstream answers a
+// non-streaming request with an event stream anyway (the ChatGPT plan
+// surface streams unconditionally). When BuffersEventStream reports true
+// the proxy relays the response through the buffered path, so
+// TransformResponse can fold the whole stream into one JSON body for a
+// caller that did not ask to stream.
+type EventStreamBufferer interface {
+	BuffersEventStream(req *Request) bool
+}
+
 // PassthroughResponse is the TransformResponse implementation for providers
 // whose native response already IS the OpenAI shape.
 func PassthroughResponse(_ *Request, body []byte) ([]byte, error) { return body, nil }
@@ -275,12 +285,21 @@ func Get(adapterType string) (Adapter, error) {
 	return a, nil
 }
 
-// Types lists every registered adapter type, sorted for stable UI ordering.
+// PersonalOnly is implemented by adapters that exist only for personal
+// subscriptions (a consumer plan's inference surface, reached with the
+// user's own sign-in). They are never offered as an upstream type.
+type PersonalOnly interface{ PersonalOnly() bool }
+
+// Types lists every adapter an administrator can configure as an upstream,
+// sorted for stable UI ordering. Personal-only adapters are excluded.
 func Types() []string {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	out := make([]string, 0, len(registry))
-	for k := range registry {
+	for k, a := range registry {
+		if p, ok := a.(PersonalOnly); ok && p.PersonalOnly() {
+			continue
+		}
 		out = append(out, k)
 	}
 	sort.Strings(out)

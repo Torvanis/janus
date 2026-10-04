@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-const managedModelColumns = `id, name, description, target_model_id, status, created_by_user_id, created_at, updated_at, fallback_model_id, fallback_triggers`
+const managedModelColumns = `id, name, description, target_model_id, status, created_by_user_id, created_at, updated_at, fallback_model_id, fallback_triggers, lb_policy, lb_affinity, lb_spill_pct`
 
 func scanManagedModel(scan func(...any) error) (*ManagedModel, error) {
 	var m ManagedModel
 	var created, updated, triggers string
 	if err := scan(&m.ID, &m.Name, &m.Description, &m.TargetModelID, &m.Status, &m.CreatedBy, &created, &updated,
-		&m.FallbackModelID, &triggers); err != nil {
+		&m.FallbackModelID, &triggers, &m.Pool.Policy, &m.Pool.Affinity, &m.Pool.SpillPct); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = ParseTime(created)
@@ -120,6 +120,11 @@ func (s *Store) SetManagedModelFallback(ctx context.Context, id, fallbackModelID
 	fallbackModelID = strings.TrimSpace(fallbackModelID)
 	if err := s.assertValidFallback(ctx, m.TargetModelID, fallbackModelID); err != nil {
 		return err
+	}
+	for _, member := range m.Pool.Members {
+		if fallbackModelID != "" && member.ModelID == fallbackModelID {
+			return &ValidationError{Field: "fallback_model_id", Message: "that model is already a member of this alias's pool; the fallback serves when every member is out, so choose a different model"}
+		}
 	}
 	triggers = normalizeFallbackTriggers(triggers)
 	if err := validateFallbackTriggers(triggers); err != nil {
@@ -267,8 +272,15 @@ func (s *Store) CreateManagedModel(ctx context.Context, name, description, targe
 		TargetModelID: targetModelID, Status: ManagedModelEnabled,
 		CreatedBy: createdByUserID, CreatedAt: now, UpdatedAt: now,
 	}
-	err = s.exec(ctx, `INSERT INTO managed_model (`+managedModelColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.Name, m.Description, m.TargetModelID, m.Status, m.CreatedBy, FormatTime(m.CreatedAt), FormatTime(m.UpdatedAt), "", "")
+	m.Pool = ManagedModelPool{Policy: PoolPolicyFailover, Affinity: PoolAffinityBounded, SpillPct: DefaultPoolSpillPct}
+	err = s.InTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO managed_model (`+managedModelColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+			m.ID, m.Name, m.Description, m.TargetModelID, m.Status, m.CreatedBy, FormatTime(m.CreatedAt), FormatTime(m.UpdatedAt), "", "",
+			m.Pool.Policy, m.Pool.Affinity, m.Pool.SpillPct); err != nil {
+			return err
+		}
+		return s.replaceSingleMember(ctx, tx, m.ID, m.TargetModelID)
+	})
 	m.FallbackTriggers = []string{}
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -376,6 +388,9 @@ func (s *Store) decorateManagedModel(ctx context.Context, m *ManagedModel) (*Man
 		m.ID, ModelKindManaged).Scan(&m.GrantCount); err != nil {
 		return nil, fmt.Errorf("count managed model grants: %w", err)
 	}
+	if err := s.loadPool(ctx, m); err != nil {
+		return nil, err
+	}
 	target, err := s.ModelByID(ctx, m.TargetModelID)
 	if errors.Is(err, ErrNotFound) {
 		m.Broken = true
@@ -402,6 +417,11 @@ func (s *Store) decorateManagedModel(ctx context.Context, m *ManagedModel) (*Man
 			m.BrokenReason = fmt.Sprintf("the underlying model %q is %s; requests to this alias are served by its fallback",
 				target.PublicName(), target.Status)
 		}
+	}
+	if m.Broken && m.Pool.servableMembers() > 0 {
+		// A pool keeps serving from its other members; the primary being
+		// out is a warning on the member, not a broken alias.
+		m.Broken, m.BrokenReason = false, ""
 	}
 	m.Servable = m.Status == ManagedModelEnabled && !m.Broken
 	if err := s.decorateManagedModelFallback(ctx, m); err != nil {
@@ -484,19 +504,30 @@ func (s *Store) SetManagedModelTarget(ctx context.Context, id, targetModelID str
 	if err := s.assertValidTarget(ctx, targetModelID); err != nil {
 		return err
 	}
-	if m, err := s.ManagedModelByID(ctx, id); err == nil && m.FallbackModelID != "" && m.FallbackModelID == targetModelID {
+	current, err := s.ManagedModelByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current.FallbackModelID != "" && current.FallbackModelID == targetModelID {
 		return &ValidationError{Field: "target_model_id", Message: "that model is this alias's fallback; choose a different target or change the fallback first"}
 	}
-	res, err := s.db.ExecContext(ctx, s.rebind(
-		`UPDATE managed_model SET target_model_id = ?, updated_at = ? WHERE id = ?`),
-		targetModelID, FormatTime(nowUTC()), id)
-	if err != nil {
-		return fmt.Errorf("repoint managed model: %w", err)
+	if len(current.Pool.Members) > 1 {
+		// A repoint would silently drop every other member. Pools are
+		// edited as a whole through SetManagedModelPool.
+		return &ValidationError{Field: "target_model_id", Message: "this alias is a pool of several models; edit its members instead of repointing it"}
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.InTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, s.rebind(
+			`UPDATE managed_model SET target_model_id = ?, updated_at = ? WHERE id = ?`),
+			targetModelID, FormatTime(nowUTC()), id)
+		if err != nil {
+			return fmt.Errorf("repoint managed model: %w", err)
+		}
+		if n, err := res.RowsAffected(); err == nil && n == 0 {
+			return ErrNotFound
+		}
+		return s.replaceSingleMember(ctx, tx, id, targetModelID)
+	})
 }
 
 // SetManagedModelStatus enables or disables an alias. A disabled alias keeps
@@ -531,6 +562,11 @@ func (s *Store) DeleteManagedModel(ctx context.Context, id string) error {
 		if _, err := tx.ExecContext(ctx, s.rebind(
 			`DELETE FROM model_grant WHERE model_id = ? AND model_kind = ?`), id, ModelKindManaged); err != nil {
 			return fmt.Errorf("delete managed model grants: %w", err)
+		}
+		for _, table := range []string{"managed_model_target", "pool_member_state"} {
+			if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM `+table+` WHERE managed_model_id = ?`), id); err != nil {
+				return fmt.Errorf("delete managed model pool: %w", err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, s.rebind(`DELETE FROM managed_model WHERE id = ?`), id); err != nil {
 			return fmt.Errorf("delete managed model: %w", err)

@@ -5,6 +5,10 @@ export function legacyWorkspaceTarget(pathname: string, search: string, hash: st
   let target = pathname;
   if (pathname === '/admin/settings') target = '/admin/settings/general';
   if (pathname === '/admin/provisioning') target = '/admin/settings/sign-in';
+  if (pathname === '/admin/subscriptions') {
+    target = '/admin/settings/general';
+    if (!hash) hash = '#personal-subscriptions';
+  }
   if (pathname === '/admin/team-import' || pathname === '/teams/import') target = '/admin/teams/import';
   if (pathname === '/admin/system') {
     const anchor = hash.slice(1).toLowerCase();

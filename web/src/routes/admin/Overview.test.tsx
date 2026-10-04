@@ -202,3 +202,82 @@ describe('Organisation trend — token direction picker', () => {
     expect(screen.getByText('total 300')).toBeTruthy();
   });
 });
+
+describe('Model performance charts', () => {
+  const perf = {
+    buckets: ['2026-08-01T00:00:00Z', '2026-08-02T00:00:00Z', '2026-08-03T00:00:00Z'],
+    bucket_seconds: 86400,
+    models: [
+      {
+        key: 'm-1',
+        model_name: 'local/llama-8b',
+        requests: 8451,
+        avg_concurrency: 24.6,
+        tokens_per_second: 36,
+        avg_input_tokens: 6830,
+        concurrency: [0, 12.5, 24.6],
+        tokens_per_second_series: [null, 35.1, 36],
+        input_tokens_series: [null, 6100, 6830],
+      },
+      {
+        key: 'm-2',
+        model_name: 'qwen3.8-27b',
+        requests: 130,
+        avg_concurrency: 0.08,
+        tokens_per_second: 0,
+        avg_input_tokens: 0,
+        concurrency: [0.08, 0, 0],
+        tokens_per_second_series: [null, null, null],
+        input_tokens_series: [null, null, null],
+      },
+    ],
+  };
+
+  it('plots concurrency, speed and input context per top model with range averages in the legend', async () => {
+    mocked.get.mockResolvedValue({ ...overviewData(), model_performance: perf });
+    renderOverview();
+    const card = await screen.findByTestId('model-performance');
+    expect(within(card).getByRole('heading', { name: 'Model performance' })).toBeTruthy();
+    for (const title of ['Average concurrency', 'Average tokens per second', 'Average input context']) {
+      expect(within(card).getByRole('img', { name: title })).toBeTruthy();
+    }
+    const legends = within(card).getAllByRole('list', { name: 'Chart series' });
+    expect(legends).toHaveLength(3);
+    expect(legends[0]!.textContent).toContain('local/llama-8b');
+    expect(legends[0]!.textContent).toContain('25');
+    expect(legends[0]!.textContent).toContain('0.08');
+    expect(legends[1]!.textContent).toContain('36 tok/s');
+    // A model with nothing measurable shows a dash, not a fake zero.
+    expect(legends[1]!.textContent).toContain('—');
+    expect(legends[2]!.textContent).toContain('6,830 tok');
+    // Null buckets are gaps: the speed line for m-1 starts at bucket 2.
+    const speedSvg = within(card).getByRole('img', { name: 'Average tokens per second' });
+    const path = speedSvg.querySelector('g[data-series="m-1"] path')!.getAttribute('d')!;
+    expect(path.startsWith('M50.00,')).toBe(true);
+  });
+
+  it('adds the upstream to the legend only when two plotted models share a name', async () => {
+    const twin = (key: string, upstream: string) => ({ ...perf.models[1]!, key, model_name: 'qwen3.8-27b', upstream_name: upstream });
+    mocked.get.mockResolvedValue({
+      ...overviewData(),
+      model_performance: { ...perf, models: [perf.models[0], twin('a', 'qwen-vllm-a'), twin('b', 'qwen-llama-a')] },
+    });
+    renderOverview();
+    const legend = within(await screen.findByTestId('model-performance')).getAllByRole('list', { name: 'Chart series' })[0]!;
+    expect(legend.textContent).toContain('qwen3.8-27b · qwen-vllm-a');
+    expect(legend.textContent).toContain('qwen3.8-27b · qwen-llama-a');
+    expect(legend.textContent).not.toContain('local/llama-8b ·');
+  });
+
+  it('says so when no model had traffic, and hides the card for older servers', async () => {
+    mocked.get.mockResolvedValue({ ...overviewData(), model_performance: { ...perf, models: [] } });
+    renderOverview();
+    const card = await screen.findByTestId('model-performance');
+    expect(card.textContent).toContain('No model traffic in this range.');
+    cleanup();
+    mocked.get.mockResolvedValue(overviewData());
+    renderOverview();
+    await screen.findByText('Organisation trend');
+    expect(screen.queryByTestId('model-performance')).toBeNull();
+  });
+});

@@ -14,7 +14,7 @@ export function QuotaPage(): ReactNode {
   const [status] = useUrlState('quota.status', '');
   const [sort] = useUrlState('quota.order', 'usage:desc');
   const setUrl = useUrlStateBatch();
-  const statusOf = (quota: QuotaStatus) => quota.breached ? 'exhausted' : quota.at_risk ? 'at-risk' : 'healthy';
+  const statusOf = (quota: QuotaStatus) => (quota.breached ? 'exhausted' : quota.at_risk ? 'at-risk' : 'healthy');
   const quotas = useQuery({
     queryKey: ['dashboard', 'quota', 'page'],
     queryFn: () => api.get<{ quotas: QuotaStatus[] }>('/api/v1/dashboard/quota'),
@@ -46,24 +46,51 @@ export function QuotaPage(): ReactNode {
         {(data) => (
           <>
             <div className="row wrap">
-              <label className="row">Quota status
-                <select className="select" value={status} onChange={(e) => setUrl({ 'quota.status': e.target.value, 'personal-quotas.page': null })}>
-                  <option value="">All statuses</option><option value="healthy">Healthy</option><option value="at-risk">Approaching limit</option><option value="exhausted">Exhausted</option>
+              <label className="row">
+                Quota status
+                <select
+                  className="select"
+                  value={status}
+                  onChange={(e) => setUrl({ 'quota.status': e.target.value, 'personal-quotas.page': null })}
+                >
+                  <option value="">All statuses</option>
+                  <option value="healthy">Healthy</option>
+                  <option value="at-risk">Approaching limit</option>
+                  <option value="exhausted">Exhausted</option>
                 </select>
               </label>
-              <label className="row">Sort quotas
-                <select className="select" value={sort} onChange={(e) => setUrl({ 'quota.order': e.target.value, 'personal-quotas.page': null })}>
-                  <option value="usage:desc">Usage percent (highest first)</option><option value="usage:asc">Usage percent (lowest first)</option><option value="metric:asc">Metric (A–Z)</option><option value="reset:asc">Reset (earliest first)</option>
+              <label className="row">
+                Sort quotas
+                <select
+                  className="select"
+                  value={sort}
+                  onChange={(e) => setUrl({ 'quota.order': e.target.value, 'personal-quotas.page': null })}
+                >
+                  <option value="usage:desc">Usage percent (highest first)</option>
+                  <option value="usage:asc">Usage percent (lowest first)</option>
+                  <option value="metric:asc">Metric (A–Z)</option>
+                  <option value="reset:asc">Reset (earliest first)</option>
                 </select>
               </label>
               <span className="small muted">{data.quotas.length} quotas in your complete authorized inventory</span>
-              {status && <button type="button" className="btn btn-sm" onClick={() => setUrl({ 'quota.status': null, 'personal-quotas.page': null })}>Clear status</button>}
+              {status && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setUrl({ 'quota.status': null, 'personal-quotas.page': null })}
+                >
+                  Clear status
+                </button>
+              )}
             </div>
             <Collection<QuotaStatus>
               name="personal-quotas"
-              rows={sortCollection(data.quotas.filter((quota) => !status || statusOf(quota) === status),
-                (quota) => sort.startsWith('metric:') ? quota.metric_label : sort.startsWith('reset:') ? quota.reset_at : quota.percent,
-                sort.endsWith(':asc'))}
+              rows={sortCollection(
+                data.quotas.filter((quota) => !status || statusOf(quota) === status),
+                (quota) =>
+                  sort.startsWith('metric:') ? quota.metric_label : sort.startsWith('reset:') ? quota.reset_at : quota.percent,
+                sort.endsWith(':asc'),
+              )}
               rowKey={(quota) => quota.id}
               resetKey={`${status}|${sort}`}
               columns={[
@@ -73,7 +100,13 @@ export function QuotaPage(): ReactNode {
                 { id: 'model', label: 'Model', value: (q) => q.model_name, render: (q) => q.model_name },
               ]}
             >
-              {(rows) => <div className="grid grid-halves">{rows.map((quota) => <QuotaCard key={quota.id} quota={quota} />)}</div>}
+              {(rows) => (
+                <div className="grid grid-halves">
+                  {rows.map((quota) => (
+                    <QuotaCard key={quota.id} quota={quota} />
+                  ))}
+                </div>
+              )}
             </Collection>
           </>
         )}

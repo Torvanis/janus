@@ -188,6 +188,18 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				{"code": "policy.quota_exceeded", "status": "429", "fix": "You reached a limit. Wait until reset_at, or ask for a higher quota."},
 				{"code": "upstream.unavailable", "status": "503", "fix": "The provider could not be reached. Retry shortly."},
 				{"code": "upstream.rate_limit", "status": "429", "fix": "The provider throttled the gateway. Back off and retry."},
+				{"code": "upstream.stream_interrupted", "status": "200 + in-band error", "fix": "The provider ended the stream early; the answer is incomplete. Retry."},
+				{"code": "policy.service_token_expired", "status": "401", "fix": "This service token passed its expiry date. Ask an administrator for a replacement."},
+				{"code": "policy.security_blocked", "status": "403", "fix": "A guardrail check refused the request. Remove the flagged material, or give the request_id to an administrator."},
+				{"code": "policy.subscription_reauth_required", "status": "403", "fix": "Your personal provider subscription needs to be reconnected on the Subscriptions page."},
+				{"code": "policy.service_token_scope", "status": "403", "fix": "Service tokens only work on the /v1 model API."},
+				{"code": "policy.rate_limit", "status": "429", "fix": "Too many requests per minute. Wait retry_after seconds."},
+				{"code": "policy.managed_model_unavailable", "status": "503", "fix": "This managed model points at a missing or disabled model. Use another model and tell an administrator."},
+				{"code": "policy.managed_model_fallback_exhausted", "status": "503", "fix": "The managed model and its fallback are both unavailable. Retry later or report the request_id."},
+				{"code": "policy.response_too_large", "status": "500", "fix": "The answer exceeded the gateway response size cap. Ask for a shorter answer."},
+				{"code": "invalid_request_error", "status": "400", "fix": "The request body is malformed or missing a field such as model. The message says what to fix."},
+				{"code": "not_found_error", "status": "404", "fix": "The path or item does not exist. Model calls need a base URL ending in /v1."},
+				{"code": "server_error", "status": "500", "fix": "Unexpected gateway fault. Retry once, then quote the request_id."},
 			},
 		}, true
 

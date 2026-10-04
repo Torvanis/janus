@@ -47,6 +47,12 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	personalSubs, err := s.subscriptionsAvailable(r.Context())
+	if err != nil {
+		// A settings read failure must not break /me; the page just hides.
+		s.Logger.WarnContext(r.Context(), "read personal subscription setting", "error", err.Error())
+		personalSubs = false
+	}
 	leads := []string{}
 	for _, t := range teams {
 		if t.Role == "leader" {
@@ -72,6 +78,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		// Local-only mode (JANUS_LOCAL_ONLY): the SPA hides every
 		// cost/spend/pricing surface when true.
 		"local_only": s.Config.LocalOnly,
+		// Whether the Subscriptions page (personal vendor plans) is offered:
+		// the administrator's switch, and never in offline mode.
+		"personal_subscriptions": personalSubs,
 		// License banner state for the shell (edition/status only; the full
 		// claims are admin-only under /admin/system/license).
 		"license": s.licenseSummary(),
@@ -130,6 +139,18 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -30)
+	// One grouped query for every token's figures, not two per token.
+	window := store.UsageScope{UserID: user.ID, Start: start, End: now}
+	totalsByToken, err := s.Store.AggregateUsageBy(r.Context(), window, "token")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	modelsByToken, err := s.Store.BreakdownUsageBy(r.Context(), window, "token", "model")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	rows := make([]map[string]any, 0, len(tokens))
 	for _, tok := range tokens {
 		// Re-encode through the token's own MarshalJSON so the revoked_at ==
@@ -144,20 +165,8 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
-		totals, err := s.Store.AggregateUsage(r.Context(), store.UsageScope{
-			UserID: user.ID, TokenID: tok.ID, Start: start, End: now,
-		})
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
-		models, err := s.Store.BreakdownUsage(r.Context(), store.UsageScope{
-			UserID: user.ID, TokenID: tok.ID, Start: start, End: now,
-		}, "model")
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
+		totals := totalsByToken[tok.ID]
+		models := modelsByToken[tok.ID]
 		topModel := ""
 		if len(models) > 0 {
 			topModel = models[0].Key
@@ -284,6 +293,10 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	if err := s.attachModelActivity(r.Context(), catalog); err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"models":         catalog.Models,
 		"managed_models": catalog.Managed,
@@ -314,6 +327,33 @@ func (s *Server) attachModelHealth(ctx context.Context, models []*store.Model) e
 	}
 	for _, m := range models {
 		m.SetHealth(byID[m.UpstreamID], stats[m.ID])
+	}
+	return nil
+}
+
+// modelPerfCacheTTL bounds how stale the catalog's 7-day figures may be.
+const modelPerfCacheTTL = time.Minute
+
+// attachModelActivity fills each catalog entry's 7-day jobs/day trend and
+// generation speed. Aliases show their current target's figures, because
+// alias traffic is recorded against the model it resolved to.
+func (s *Server) attachModelActivity(ctx context.Context, catalog GrantedCatalog) error {
+	if len(catalog.Models) == 0 && len(catalog.Managed) == 0 {
+		return nil
+	}
+	stats, err := cachedRead(&s.perfCache, "model_activity", func() (map[string]store.ModelActivity, error) {
+		return s.Store.ModelActivityStats(ctx, time.Now())
+	})
+	if err != nil {
+		return err
+	}
+	for _, m := range catalog.Models {
+		a := stats[m.ID]
+		m.Activity = &a
+	}
+	for _, mm := range catalog.Managed {
+		a := stats[mm.TargetModelID]
+		mm.Activity = &a
 	}
 	return nil
 }
@@ -408,6 +448,7 @@ func (s *Server) requestFilter(r *http.Request, user *store.User) store.RequestF
 		// accounting=<token_accounting_method> lists the requests behind
 		// one metering outcome (the System page links here for gaps).
 		Accounting: r.URL.Query().Get("accounting"),
+		Source:     r.URL.Query().Get("source"),
 	}
 	if r.URL.Query().Get("range") != "" {
 		f.Start, f.End = start, end

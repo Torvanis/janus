@@ -75,22 +75,22 @@ func (s *Server) handleListServiceTokens(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -30)
+	// One grouped query for every token's figures, not two per token.
+	window := store.UsageScope{Start: start, End: now, Principal: store.PrincipalServiceTokens}
+	totalsByToken, err := s.Store.AggregateUsageBy(r.Context(), window, "service_token")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	modelsByToken, err := s.Store.BreakdownUsageBy(r.Context(), window, "service_token", "model")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	rows := make([]map[string]any, 0, len(tokens))
 	for _, tok := range tokens {
-		totals, err := s.Store.AggregateUsage(r.Context(), store.UsageScope{
-			ServiceTokenID: tok.ID, Start: start, End: now,
-		})
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
-		models, err := s.Store.BreakdownUsage(r.Context(), store.UsageScope{
-			ServiceTokenID: tok.ID, Start: start, End: now,
-		}, "model")
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
+		totals := totalsByToken[tok.ID]
+		models := modelsByToken[tok.ID]
 		// "Which model is this integration actually using" is the first
 		// question after "is it expensive", so the top one rides along in
 		// the row rather than requiring the detail page.
@@ -424,6 +424,7 @@ func (s *Server) mountManagedModelRoutes(r chi.Router) {
 	r.Get("/admin/managed-models", s.handleListManagedModels)
 	r.Post("/admin/managed-models", s.gateCreate("managed model", s.handleCreateManagedModel))
 	r.Get("/admin/managed-models/{id}", s.handleManagedModelDetail)
+	r.Get("/admin/managed-models/{id}/pool-health", s.handlePoolHealth)
 	r.Patch("/admin/managed-models/{id}", s.handlePatchManagedModel)
 	r.Delete("/admin/managed-models/{id}", s.handleDeleteManagedModel)
 }
@@ -465,19 +466,22 @@ func (s *Server) handleListManagedModels(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -30)
+	// One grouped query per figure for every alias, not two per alias.
+	window := store.UsageScope{Start: start, End: now}
+	totalsByAlias, err := s.Store.AggregateUsageBy(r.Context(), window, "requested_model")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	principalsByAlias, err := s.Store.CountDistinctPrincipalsBy(r.Context(), window, "requested_model")
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	rows := make([]map[string]any, 0, len(models))
 	for _, m := range models {
-		scope := store.UsageScope{RequestedModelName: m.Name, Start: start, End: now}
-		totals, err := s.Store.AggregateUsage(r.Context(), scope)
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
-		principals, err := s.Store.CountDistinctPrincipals(r.Context(), scope)
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
+		totals := totalsByAlias[m.Name]
+		principals := principalsByAlias[m.Name]
 		rows = append(rows, map[string]any{
 			"id": m.ID, "name": m.Name, "description": m.Description,
 			"status": m.Status, "target_model_id": m.TargetModelID,
@@ -486,6 +490,7 @@ func (s *Server) handleListManagedModels(w http.ResponseWriter, r *http.Request)
 			"broken": m.Broken, "broken_reason": m.BrokenReason,
 			"servable": m.Servable, "modalities": m.Modalities,
 			"context_window":         m.ContextWindow,
+			"pool":                   m.Pool,
 			"fallback_model_id":      m.FallbackModelID,
 			"fallback_triggers":      m.FallbackTriggers,
 			"fallback_model_name":    m.FallbackName,
@@ -592,10 +597,31 @@ func (s *Server) handleCreateManagedModel(w http.ResponseWriter, r *http.Request
 		TargetModelID    string   `json:"target_model_id"`
 		FallbackModelID  string   `json:"fallback_model_id"`
 		FallbackTriggers []string `json:"fallback_triggers"`
+		// Pool optionally makes the alias a load-balanced pool. Its first
+		// member may stand in for target_model_id.
+		Pool *store.PoolInput `json:"pool"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	var pool *store.ManagedModelPool
+	if body.Pool != nil {
+		if strings.TrimSpace(body.TargetModelID) == "" && len(body.Pool.Members) > 0 {
+			body.TargetModelID = body.Pool.Members[0].ModelID
+		}
+		normalized, err := s.Store.NormalizePool(r.Context(), *body.Pool, strings.TrimSpace(body.FallbackModelID))
+		if err != nil {
+			WriteError(w, r, managedModelWriteError(err))
+			return
+		}
+		if normalized.IsLoadBalanced() {
+			if err := s.requireFeature("load_balancing"); err != nil {
+				WriteError(w, r, err)
+				return
+			}
+		}
+		pool = &normalized
 	}
 	m, err := s.Store.CreateManagedModel(r.Context(), body.Name, body.Description, body.TargetModelID, actorID(actor))
 	if err != nil {
@@ -621,11 +647,23 @@ func (s *Server) handleCreateManagedModel(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	if pool != nil {
+		if err := s.Store.SetManagedModelPool(r.Context(), m.ID, *pool); err != nil {
+			_ = s.Store.DeleteManagedModel(r.Context(), m.ID)
+			WriteError(w, r, managedModelWriteError(err))
+			return
+		}
+		if m, err = s.Store.ManagedModelByID(r.Context(), m.ID); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
 	s.InvalidateConfigCache()
 	s.InvalidateResolvedModelCache(m.Name)
 	s.audit(r, "managed_model_created", "managed_model", m.ID, nil, map[string]any{
 		"name": m.Name, "target_model_id": m.TargetModelID, "target_model": m.TargetPublicName,
 		"fallback_model_id": m.FallbackModelID, "fallback_model": m.FallbackPublicName, "fallback_triggers": m.FallbackTriggers,
+		"pool": poolAuditView(m.Pool),
 	})
 	WriteJSON(w, http.StatusCreated, map[string]any{"managed_model": m})
 }
@@ -674,10 +712,38 @@ func (s *Server) handlePatchManagedModel(w http.ResponseWriter, r *http.Request)
 		// fallback.
 		FallbackModelID  *string   `json:"fallback_model_id"`
 		FallbackTriggers *[]string `json:"fallback_triggers"`
+		// Pool replaces the alias's balancing configuration and members.
+		Pool *store.PoolInput `json:"pool"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	var pool *store.ManagedModelPool
+	if body.Pool != nil {
+		if body.TargetModelID != nil {
+			WriteError(w, r, ErrInvalidRequest("Send either target_model_id or pool, not both; a pool's first member is its target.").WithParam("pool"))
+			return
+		}
+		fallbackID := before.FallbackModelID
+		if body.FallbackModelID != nil {
+			fallbackID = strings.TrimSpace(*body.FallbackModelID)
+		}
+		normalized, err := s.Store.NormalizePool(r.Context(), *body.Pool, fallbackID)
+		if err != nil {
+			WriteError(w, r, managedModelWriteError(err))
+			return
+		}
+		// Only turning balancing ON (or widening it) needs the license;
+		// editing or shrinking an existing pool never does, so an expired
+		// key never strands an admin who needs to take a member out.
+		if normalized.IsLoadBalanced() && !poolWithin(normalized, before.Pool) {
+			if err := s.requireFeature("load_balancing"); err != nil {
+				WriteError(w, r, err)
+				return
+			}
+		}
+		pool = &normalized
 	}
 
 	if body.Name != nil || body.Description != nil {
@@ -719,6 +785,19 @@ func (s *Server) handlePatchManagedModel(w http.ResponseWriter, r *http.Request)
 		s.audit(r, "managed_model_repointed", "managed_model", id,
 			map[string]any{"target_model_id": before.TargetModelID, "target_model": before.TargetPublicName},
 			map[string]any{"target_model_id": after.TargetModelID, "target_model": after.TargetPublicName})
+	}
+	if pool != nil {
+		if err := s.Store.SetManagedModelPool(r.Context(), id, *pool); err != nil {
+			WriteError(w, r, managedModelWriteError(err))
+			return
+		}
+		after, err := s.Store.ManagedModelByID(r.Context(), id)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		s.audit(r, "managed_model_pool_changed", "managed_model", id,
+			map[string]any{"pool": poolAuditView(before.Pool)}, map[string]any{"pool": poolAuditView(after.Pool)})
 	}
 	if body.FallbackModelID != nil && strings.TrimSpace(*body.FallbackModelID) != "" {
 		if err := s.requireFeature("model_fallbacks"); err != nil {
@@ -852,6 +931,41 @@ func equalStrings(a, b []string) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// poolAuditView is the audit-log shape of a pool: settings plus members by
+// name, so the log reads without resolving ids.
+func poolAuditView(p store.ManagedModelPool) map[string]any {
+	members := make([]map[string]any, 0, len(p.Members))
+	for _, m := range p.Members {
+		members = append(members, map[string]any{
+			"model_id": m.ModelID, "model": m.PublicName, "upstream": m.UpstreamName,
+			"weight": m.Weight, "priority": m.Priority, "enabled": m.Enabled, "context_capacity": m.ContextCapacity,
+		})
+	}
+	return map[string]any{"policy": p.Policy, "affinity": p.Affinity, "spill_pct": p.SpillPct, "members": members}
+}
+
+// poolWithin reports whether next balances no more than current already did:
+// same policy and every enabled member of next was already an enabled member.
+// Such an edit (re-weighting, disabling or removing a member) is allowed
+// without a load_balancing license so an existing pool stays manageable.
+func poolWithin(next, current store.ManagedModelPool) bool {
+	if !current.IsLoadBalanced() || next.Policy != current.Policy {
+		return false
+	}
+	was := map[string]bool{}
+	for _, m := range current.Members {
+		if m.Enabled {
+			was[m.ModelID] = true
+		}
+	}
+	for _, m := range next.Members {
+		if m.Enabled && !was[m.ModelID] {
 			return false
 		}
 	}

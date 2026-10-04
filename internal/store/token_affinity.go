@@ -48,14 +48,11 @@ func (s *Store) ChangeTokenTeam(ctx context.Context, tokenID, ownerID, teamID st
 	var token *Token
 	var moved int64
 	err := s.modelTx(ctx, func(tx *Store) error {
-		// Follow membership writers' lock order and serialize empty-snapshot
-		// attribution for this owner. Lock the token against revocation too.
-		// Explicit-snapshot inserts need not wait: only rows visible to the
-		// history UPDATE are moved, never events arriving after that statement.
+		// Follow membership writers' lock order so membership cannot change
+		// under the validation below, and lock the token against revocation.
+		// Usage writes take no lock: only rows visible to the history UPDATE
+		// move; a request in flight keeps the context it was admitted with.
 		if err := tx.lockTeamMembership(ctx); err != nil {
-			return err
-		}
-		if err := tx.lockTeamAttributionUser(ctx, ownerID); err != nil {
 			return err
 		}
 		if err := tx.exec(ctx, `UPDATE api_token SET id=id WHERE id=?`, tokenID); err != nil {
@@ -96,6 +93,11 @@ func (s *Store) ChangeTokenTeam(ctx context.Context, tokenID, ownerID, teamID st
 			moved, err = res.RowsAffected()
 			if err != nil {
 				return err
+			}
+			if moved > 0 {
+				if err := tx.rebuildRollupToken(ctx, tokenID); err != nil {
+					return err
+				}
 			}
 		}
 		oldValue, _ := json.Marshal(map[string]any{"team_id": oldTeam})

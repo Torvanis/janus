@@ -58,45 +58,6 @@ func TestTeamAttributionDirectoryRevokesSoleLeader(t *testing.T) {
 	}
 }
 
-func TestTeamAttributionLateWriteUsesEarliestJoin(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	attributionUser(t, s, "late")
-	a, err := s.CreateTeam(ctx, "first", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := s.CreateTeam(ctx, "second", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	oldNow := nowUTC
-	nowUTC = func() time.Time { return start.Add(time.Hour) }
-	defer func() { nowUTC = oldNow }()
-	if err := s.AddTeamMember(ctx, a.ID, "late", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RemoveTeamMemberSource(ctx, a.ID, "late", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	nowUTC = func() time.Time { return start.Add(3 * time.Hour) }
-	if err := s.AddTeamMember(ctx, b.ID, "late", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	e := &UsageEvent{UserID: "late", CreatedAt: start}
-	if err := s.InsertUsageEvent(ctx, e); err != nil {
-		t.Fatal(err)
-	}
-	var got string
-	if err := s.queryRow(ctx, `SELECT team_ids FROM usage_event WHERE id=?`, e.ID).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != a.ID {
-		t.Fatalf("late write team = %q, want earliest %q", got, a.ID)
-	}
-}
-
 func TestTeamAttributionSetUserTeamsPreservesSources(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -157,7 +118,9 @@ func TestTeamAttributionSetUserTeamsPreservesSources(t *testing.T) {
 	}
 }
 
-func TestTeamAttributionPersonalAndExplicitSnapshots(t *testing.T) {
+// Joining a team never moves usage: Personal stays Personal, explicit snapshots
+// stay put, and only an explicit token team change (move_history) relabels.
+func TestTeamAttributionJoinDoesNotMoveUsage(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	attributionUser(t, s, "snapshots")
@@ -170,9 +133,6 @@ func TestTeamAttributionPersonalAndExplicitSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	oldNow := nowUTC
-	nowUTC = func() time.Time { return base.Add(time.Hour) }
-	defer func() { nowUTC = oldNow }()
 	insert := func(at time.Time, team string) *UsageEvent {
 		t.Helper()
 		e := &UsageEvent{UserID: "snapshots", CreatedAt: at, TeamIDs: team}
@@ -191,50 +151,24 @@ func TestTeamAttributionPersonalAndExplicitSnapshots(t *testing.T) {
 			t.Fatalf("event %s: got %q want %q", e.ID, got, want)
 		}
 	}
-	historical := insert(base, "")
+	personal := insert(base, "")
 	explicit := insert(base, "explicit,other")
 	if err := s.AddTeamMember(ctx, a.ID, "snapshots", "member", "manual", ""); err != nil {
 		t.Fatal(err)
 	}
-	check(historical, a.ID)
-	personal := insert(base.Add(2*time.Hour), "")
 	check(personal, "")
-	nowUTC = func() time.Time { return base.Add(3 * time.Hour) }
-	if err := s.AddTeamMember(ctx, a.ID, "snapshots", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddTeamMember(ctx, b.ID, "snapshots", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	check(personal, "")
-	var transitions int
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM team_attribution_transition WHERE user_id='snapshots'`).Scan(&transitions); err != nil {
-		t.Fatal(err)
-	}
-	if transitions != 1 {
-		t.Fatalf("duplicate/second membership recorded transition: %d", transitions)
-	}
-	for _, id := range []string{a.ID, b.ID} {
-		if err := s.RemoveTeamMemberSource(ctx, id, "snapshots", "manual", ""); err != nil {
-			t.Fatal(err)
-		}
-	}
-	nowUTC = func() time.Time { return base.Add(4 * time.Hour) }
-	if err := s.AddTeamMember(ctx, b.ID, "snapshots", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	check(personal, b.ID)
-	check(historical, a.ID)
 	check(explicit, "explicit,other")
-	check(insert(base, "explicit,other"), "explicit,other")
-	check(insert(base.Add(2*time.Hour), ""), b.ID)
-	check(insert(base.Add(5*time.Hour), ""), "")
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM team_attribution_transition WHERE user_id='snapshots'`).Scan(&transitions); err != nil {
+	// A record admitted as Personal but written after the join (in flight) keeps
+	// its admitted context.
+	check(insert(base.Add(-time.Minute), ""), "")
+	if err := s.RemoveTeamMemberSource(ctx, a.ID, "snapshots", "manual", ""); err != nil {
 		t.Fatal(err)
 	}
-	if transitions != 2 {
-		t.Fatalf("rejoin did not record transition: %d", transitions)
+	if err := s.AddTeamMember(ctx, b.ID, "snapshots", "member", "manual", ""); err != nil {
+		t.Fatal(err)
 	}
+	check(personal, "")
+	check(explicit, "explicit,other")
 }
 
 func TestTeamAttributionConcurrentJoinAndUsage(t *testing.T) {
@@ -260,8 +194,16 @@ func TestTeamAttributionConcurrentJoinAndUsage(t *testing.T) {
 	if err := s.queryRow(ctx, `SELECT team_ids FROM usage_event WHERE id=?`, e.ID).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got != team.ID {
-		t.Fatalf("concurrent write missed attribution: %q", got)
+	if got != "" {
+		t.Fatalf("join moved admitted Personal usage: %q", got)
+	}
+}
+
+func TestTeamAttributionTransitionTableDropped(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.exec(ctx, `SELECT COUNT(*) FROM team_attribution_transition`); err == nil {
+		t.Fatal("team_attribution_transition still exists after 0045")
 	}
 }
 

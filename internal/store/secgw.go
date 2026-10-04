@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/torvanis/janus/internal/subscription"
 )
 
 // SecgwCipher is the subset of crypto.Cipher the term-list and violation
@@ -227,6 +229,13 @@ func (s *Store) secgwScopeName(ctx context.Context, scopeType, scopeID string) s
 		var name string
 		if err := s.queryRow(ctx, `SELECT name FROM managed_model WHERE id = ?`, scopeID).Scan(&name); err == nil {
 			return name
+		}
+	case SecgwScopePersonalSubscription:
+		if scopeID == SecgwScopeAnyProvider {
+			return "Every provider"
+		}
+		if p, ok := subscription.Get(scopeID); ok {
+			return p.DisplayName()
 		}
 	}
 	return scopeID

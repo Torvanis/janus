@@ -133,11 +133,14 @@ function ChartScale({
   metric,
   height,
   children,
+  format,
 }: {
   max: number;
   metric: MetricKey;
   height: number;
   children: ReactNode;
+  /** Overrides the metric formatter for the tick labels. */
+  format?: (value: number) => string;
 }): ReactNode {
   // Fractions match the 25/50/75 gridlines the charts already draw, plus the
   // top and the zero baseline.
@@ -170,7 +173,7 @@ function ChartScale({
               whiteSpace: 'nowrap',
             }}
           >
-            {formatMetric(max * fraction, metric)}
+            {format ? format(max * fraction) : formatMetric(max * fraction, metric)}
           </span>
         ))}
       </div>
@@ -417,6 +420,136 @@ function StackedAreaChart({
         <span>peak {formatMetric(peak, metric)}</span>
         <span>total {formatMetric(total, metric)}</span>
       </div>
+    </figure>
+  );
+}
+
+/** One line of a LineChart. `null` values are gaps (nothing measured). */
+export interface LineSeries {
+  key: string;
+  label: string;
+  values: (number | null)[];
+  /** Shown after the label in the legend, e.g. the range average. */
+  summary?: string;
+}
+
+/**
+ * Overlaid (NOT stacked) lines for per-model averages, where adding the series
+ * up would be meaningless. Each line gets a palette colour and a distinct dash
+ * so hue is never the only encoding; null buckets break the line instead of
+ * dropping it to zero; a bucket with a single point gets a dot so it is seen.
+ */
+export function LineChart({
+  series,
+  height = 160,
+  label,
+  format = (value) => formatNumber(value, { compact: true }),
+  emptyLabel = 'No activity in this range yet.',
+}: {
+  series: LineSeries[];
+  height?: number;
+  label: string;
+  format?: (value: number) => string;
+  emptyLabel?: string;
+}): ReactNode {
+  const width = 100;
+  const bucketCount = series.reduce((longest, line) => Math.max(longest, line.values.length), 0);
+  const peak = Math.max(0, ...series.flatMap((line) => line.values.filter((v): v is number => v !== null)));
+  if (bucketCount === 0 || series.length === 0 || peak <= 0) {
+    return (
+      <div className="state" style={{ padding: 'var(--janus-space-6)' }}>
+        <p className="state-body small">{emptyLabel}</p>
+      </div>
+    );
+  }
+  const max = niceAxisMax(peak);
+  const x = (index: number): number => (bucketCount === 1 ? width / 2 : (index / (bucketCount - 1)) * width);
+  const y = (value: number): number => 100 - (value / max) * 92;
+  const paths = series.map((line, index) => {
+    let d = '';
+    let open = false;
+    const dots: Array<[number, number]> = [];
+    line.values.forEach((value, i) => {
+      if (value === null) {
+        open = false;
+        return;
+      }
+      const prevNull = i === 0 || line.values[i - 1] === null;
+      const nextNull = i === line.values.length - 1 || line.values[i + 1] === null;
+      if (prevNull && nextNull) dots.push([x(i), y(value)]);
+      d += `${open ? 'L' : 'M'}${x(i).toFixed(2)},${y(value).toFixed(2)} `;
+      open = true;
+    });
+    return { key: line.key, d: d.trim(), dots, color: seriesColor(index), dash: DASH_PATTERNS[index % DASH_PATTERNS.length]! };
+  });
+  return (
+    <figure style={{ margin: 0 }}>
+      <figcaption className="sr-only">
+        {label}:{' '}
+        {series.map((line) => `${line.label}${line.summary ? ` ${line.summary}` : ''}`).join('; ')}.
+      </figcaption>
+      <ChartScale max={max} metric="requests" height={height} format={format}>
+        <svg
+          viewBox={`0 0 ${width} 100`}
+          preserveAspectRatio="none"
+          style={{ width: '100%', height, display: 'block' }}
+          role="img"
+          aria-label={label}
+        >
+          {[25, 50, 75].map((gridY) => (
+            <line key={gridY} x1="0" y1={gridY} x2={width} y2={gridY} stroke="var(--janus-chart-grid)" strokeWidth="0.3" />
+          ))}
+          {paths.map((p) => (
+            <g key={p.key} data-series={p.key}>
+              {p.d ? (
+                <path
+                  d={p.d}
+                  fill="none"
+                  stroke={p.color}
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                  strokeDasharray={p.dash === '0' ? undefined : p.dash}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+              {p.dots.map(([cx, cy], i) => (
+                <line
+                  key={i}
+                  x1={cx}
+                  y1={cy}
+                  x2={cx}
+                  y2={cy}
+                  stroke={p.color}
+                  strokeWidth="5"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </g>
+          ))}
+        </svg>
+      </ChartScale>
+      <ul className="line-legend small" aria-label="Chart series">
+        {series.map((line, index) => (
+          <li key={line.key}>
+            <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true" style={{ flex: 'none' }}>
+              <line
+                x1="1"
+                y1="4"
+                x2="21"
+                y2="4"
+                stroke={seriesColor(index)}
+                strokeWidth="2.4"
+                strokeDasharray={paths[index]!.dash === '0' ? undefined : paths[index]!.dash}
+              />
+            </svg>
+            <span className="truncate" title={line.label}>
+              {line.label}
+            </span>
+            {line.summary ? <span className="muted num line-legend-value">{line.summary}</span> : null}
+          </li>
+        ))}
+      </ul>
     </figure>
   );
 }

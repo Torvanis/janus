@@ -483,9 +483,12 @@ describe('A14 System page — loading and error states', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/subscriptions')
+        return Promise.resolve({ offline: false, enabled: false, providers: [], connections: [] });
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
+    // Each card retries its own query.
+    for (const retry of screen.getAllByRole('button', { name: 'Try again' })) await userEvent.setup().click(retry);
     expect(await screen.findByText('Embedded SQLite')).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
@@ -629,5 +632,41 @@ describe('Metering health tile', () => {
         .getByRole('link', { name: /View unmetered requests/ })
         .getAttribute('href'),
     ).toBe('/admin/requests?accounting=unmetered_modality');
+  });
+});
+
+describe('Performance mode tile', () => {
+  function mockWith(status: SystemStatus) {
+    mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
+      if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
+      if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
+      if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+
+  it('is hidden when performance mode was not requested', async () => {
+    mockWith({ ...postgresStatus, performance_mode: { requested: false, active: false } });
+    renderPage();
+    await screen.findByText('PostgreSQL');
+    expect(screen.queryByText('Performance mode')).toBeNull();
+  });
+
+  it('states the loss window when active', async () => {
+    mockWith({ ...postgresStatus, performance_mode: { requested: true, active: true } });
+    renderPage();
+    const tile = (await screen.findByText('Performance mode')).closest('article') as HTMLElement;
+    expect(within(tile).getByText(/0\.5 s of usage records/)).toBeTruthy();
+  });
+
+  it('names why a request was not honoured', async () => {
+    const reason = 'Performance mode requires a Business license; running in normal mode.';
+    mockWith({ ...postgresStatus, performance_mode: { requested: true, active: false, reason } });
+    renderPage();
+    const tile = (await screen.findByText('Performance mode')).closest('article') as HTMLElement;
+    expect(within(tile).getByText(reason)).toBeTruthy();
+    expect(within(tile).getByText('Attention')).toBeTruthy();
   });
 });

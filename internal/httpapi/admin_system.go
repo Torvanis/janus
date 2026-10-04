@@ -102,6 +102,9 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"adapters":      adapter.Types(),
 		// Local-only mode (JANUS_LOCAL_ONLY): cost tracking disabled instance-wide.
 		"local_only": s.Config.LocalOnly,
+		// Performance mode (JANUS_PERFORMANCE_MODE, Business): decided at
+		// startup; reason explains a request that was not honoured.
+		"performance_mode": s.Performance,
 		// Per-hop upstream timeouts in force right now, with their provenance,
 		// so the System page can offer the same document the dedicated
 		// endpoint serves without a second request.

@@ -226,8 +226,8 @@ func validTeamSource(typ, id string) bool {
 }
 
 // The migration ledger row is a portable transaction mutex. Taking it before
-// any membership/group writes serializes cross-team zero-to-one transitions and
-// multi-user last-leader changes without lock-order inversions in bulk syncs.
+// any membership/group writes serializes multi-user last-leader changes and
+// token team changes without lock-order inversions in bulk syncs.
 // PostgreSQL holds the row lock until commit; SQLite serializes its writer.
 func (s *Store) lockTeamMembership(ctx context.Context) error {
 	return s.exec(ctx, `UPDATE schema_migration SET name=name WHERE name='0027_team_membership'`)
@@ -263,9 +263,6 @@ func (s *Store) AddTeamMember(ctx context.Context, teamID, userID, role, sourceT
 		if err := s.activeTeam(ctx, teamID); err != nil {
 			return err
 		}
-		if err := s.lockTeamAttributionUser(ctx, userID); err != nil {
-			return err
-		}
 		var active int
 		if err := s.queryRow(ctx, `SELECT is_active FROM app_user WHERE id=?`, userID).Scan(&active); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -275,19 +272,6 @@ func (s *Store) AddTeamMember(ctx context.Context, teamID, userID, role, sourceT
 		}
 		if active != 1 {
 			return errors.New("cannot add inactive user to team")
-		}
-		var before int
-		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM team_member m JOIN team t ON t.id=m.team_id WHERE m.user_id=? AND t.archived_at=''`, userID).Scan(&before); err != nil {
-			return err
-		}
-		if before == 0 {
-			effectiveAt := FormatTime(nowUTC())
-			if err := s.exec(ctx, `INSERT INTO team_attribution_transition(id,user_id,team_id,effective_at) VALUES (?,?,?,?)`, NewID(), userID, teamID, effectiveAt); err != nil {
-				return err
-			}
-			if err := s.exec(ctx, `UPDATE usage_event SET team_ids=? WHERE user_id=? AND team_ids='' AND created_at<=?`, teamID, userID, effectiveAt); err != nil {
-				return err
-			}
 		}
 		if err := s.exec(ctx, `INSERT INTO team_member(team_id,user_id,role) VALUES (?,?,?) ON CONFLICT(team_id,user_id) DO NOTHING`, teamID, userID, role); err != nil {
 			return err
@@ -631,7 +615,8 @@ func (s *Store) SetUserTeams(ctx context.Context, userID string, teamIDs []strin
 		if err != nil {
 			return err
 		}
-		// Add first to avoid a spurious zero-to-one transition when switching teams.
+		// Add before removing so the user is never momentarily team-less, which
+		// would also trip the last-leader guard on a switch.
 		for _, tid := range teamIDs {
 			if err := s.AddTeamMember(ctx, tid, userID, "member", "manual", ""); err != nil {
 				return err

@@ -23,7 +23,28 @@ export function renewalAttention(notice: RenewalNotice | undefined, now = Date.n
   if (notice.reason === 'subscription_attention') return t('licenseBanner.subscriptionAttention');
   if (notice.reason === 'stale' || (notice.reason === 'auto_renew' && !(Date.parse(notice.fresh_until ?? '') > now)))
     return t('licenseBanner.stale');
-  if (['unknown', 'unknown_subscription', 'network', 'credentials_rejected', 'credential', 'storage', 'rate_limited', 'upstream', 'response_size', 'response_invalid', 'identity_changed', 'signature_invalid', 'key_regression', 'unsafe_endpoint', 'revision_regression', 'metadata_invalid', 'request', 'local_refresh'].includes(notice.reason))
+  if (
+    [
+      'unknown',
+      'unknown_subscription',
+      'network',
+      'credentials_rejected',
+      'credential',
+      'storage',
+      'rate_limited',
+      'upstream',
+      'response_size',
+      'response_invalid',
+      'identity_changed',
+      'signature_invalid',
+      'key_regression',
+      'unsafe_endpoint',
+      'revision_regression',
+      'metadata_invalid',
+      'request',
+      'local_refresh',
+    ].includes(notice.reason)
+  )
     return t('licenseBanner.syncAttention');
   return null;
 }
