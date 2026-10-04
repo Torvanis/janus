@@ -131,10 +131,59 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     retryable: true,
   },
   {
+    code: 'policy.response_too_large',
+    status: 500,
+    when: "The provider's response grew past the gateway's response size cap (JANUS_MAX_RESPONSE_BYTES). On a stream the text before this point was delivered and this arrives as a final in-band error frame.",
+    action: 'Ask for a shorter answer (lower max_tokens, or split the task). If large responses are expected, an administrator can raise JANUS_MAX_RESPONSE_BYTES.',
+    retryable: false,
+  },
+  {
+    code: 'policy.service_token_scope',
+    status: 403,
+    when: 'A service token was used outside the /v1 inference API, for example against a dashboard or admin endpoint. Service tokens only authenticate model calls.',
+    action: 'Use the service token only for /v1 requests. For the web API, sign in with a user account.',
+    retryable: false,
+  },
+  {
+    code: 'policy.service_token_expired',
+    status: 401,
+    when: 'The service token has passed the expiry date set when it was created. This is different from a revocation: nobody turned it off, it aged out.',
+    action: 'Ask a Janus administrator to issue a replacement under Admin → Service tokens and update the integration.',
+    retryable: false,
+  },
+  {
+    code: 'policy.managed_model_unavailable',
+    status: 503,
+    when: 'The managed model (alias) you called points at a model that is missing or disabled. Your request is correct; the alias needs repairing.',
+    action: 'Contact a Janus administrator. Until it is fixed, call another model from GET /v1/models directly.',
+    retryable: true,
+  },
+  {
+    code: 'policy.managed_model_fallback_exhausted',
+    status: 503,
+    when: "The managed model's target is unavailable and the fallback configured for exactly that case cannot take over either. The message names both reasons.",
+    action: 'Retry in a few minutes; if it persists, contact a Janus administrator with the request_id so they can fix the target or the fallback.',
+    retryable: true,
+  },
+  {
+    code: 'policy.subscription_reauth_required',
+    status: 403,
+    when: 'The call used one of your personal provider subscriptions (my/… models) and its stored sign-in no longer works: it expired, was revoked at the provider, or the password changed.',
+    action: 'Open the Subscriptions page and connect that subscription again, then retry.',
+    retryable: false,
+  },
+  {
     code: 'upstream.unavailable',
     status: 503,
     when: 'The provider behind the requested model could not be reached, or its credentials could not be decrypted.',
     action: 'Retry shortly. If it persists, an administrator should check Admin → Settings → System status for that upstream.',
+    retryable: true,
+  },
+  {
+    code: 'upstream.stream_interrupted',
+    status: 502,
+    when: 'The provider ended a streaming response early: its connection dropped, or it closed the stream without a [DONE], finish_reason or usage block. The HTTP status was already 200, so this arrives as a final in-band error frame and the text before it is incomplete.',
+    action: 'Retry the request. If it keeps happening, an administrator should check the upstream server (restarts, out-of-memory kills, proxies with short idle timeouts). The request log shows these with this code.',
     retryable: true,
   },
   {
@@ -147,8 +196,15 @@ export const ERROR_CATALOG: ErrorEntry[] = [
   {
     code: 'invalid_request_error',
     status: 400,
-    when: 'The request body was malformed, or a required field such as `model` was missing.',
-    action: 'Read the param field, fix the request, and send it again.',
+    when: 'The request body was malformed, or a required field such as `model` was missing. The same code is used, with HTTP 413, when a body is too large for the provider adapter to rewrite, and with HTTP 409 when an admin change conflicts with things that depend on it.',
+    action: 'Read the message and param field, fix the request, and send it again. For 413, send a smaller payload; for 409, deal with the dependents the message names first.',
+    retryable: false,
+  },
+  {
+    code: 'not_found_error',
+    status: 404,
+    when: 'The path does not exist on this gateway, or the item it names (a token, model, request, team…) was not found or is not visible to you.',
+    action: 'Check the URL and the id. For model calls the base URL must end in /v1; for model names call GET /v1/models.',
     retryable: false,
   },
   {
@@ -163,6 +219,20 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     status: 403,
     when: 'The signed-in account lacks the role required for an administrative action.',
     action: 'Ask an administrator to perform the action or to grant you the role.',
+    retryable: false,
+  },
+  {
+    code: 'license.required',
+    status: 402,
+    when: 'An administrator tried to create something new (an upstream, token, model…) while the gateway has no valid license. Everything already configured keeps working.',
+    action: 'An administrator installs or renews the license key under Admin → System.',
+    retryable: false,
+  },
+  {
+    code: 'license.feature_not_licensed',
+    status: 402,
+    when: "An administrator tried to switch on a feature the installed edition does not include (for example load balancing or guardrail enforcement).",
+    action: 'Install a key for an edition that includes the feature under Admin → System, or leave the feature off.',
     retryable: false,
   },
   {
@@ -423,7 +493,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'Procedure',
         body: [
           '1. Admin → Upstreams → Add upstream. Choose the provider type: it is immutable afterwards, because it determines how every stored model is addressed.',
-          '2. Save. Janus immediately runs discovery and records what the provider reports.',
+          '2. Save. Janus immediately runs discovery and records what the provider reports. For a self-hosted engine (vLLM, llama.cpp, Ollama, TEI), check the server flags in “Self-hosted engines” first: they decide whether speed, cache savings and the context window are exact.',
           '3. Admin → Models. New models arrive as “pending approval” and disabled.',
           '4. Open Edit to review automatic metadata and pricing warnings, set any overrides, then enable. Unknown prices require review; unsupported tiers and per-image rates are never flattened into token prices.',
           '5. Admin → Grants. Grant the model to a user, a group, or all users.',
@@ -447,6 +517,19 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'Two upstreams can serve a model under the same name — the same vLLM model on two nodes, or an old and a new endpoint while a pod moves. Each copy is its own catalog entry with its own rate card and grants, and the Models page marks it “Also on N other upstream(s)”. A request for the name goes to the most recently discovered copy the caller is granted, so granting the new copy is enough to move traffic; the old copy’s grants never apply to the new one, and an ungranted copy is never used as a fallback.',
           'If only the address changed, edit the existing upstream’s base URL instead of adding a new one: the upstream keeps its models, rate cards and grants, and traffic follows the new address immediately.',
           'For one stable name users never have to change, create a managed model on the Managed models page, grant it, and repoint it whenever the model moves. Grants on a managed model are independent of the model it points at, so repointing moves every caller without touching a single grant.',
+          'To use several copies at once, make the managed model a load-balanced pool (below).',
+        ],
+      },
+      {
+        heading: 'Load-balanced pools (Business)',
+        body: [
+          'A managed model can list several models — typically the same model served by several vLLM or llama.cpp servers — and Janus spreads its traffic across them. Open Managed models → Edit, and under Load balancing use Add a model. Callers keep using the one alias name; grants, quotas and the fallback stay on the alias, and the request log records which server actually answered.',
+          'Balancing: Failover uses the first model and keeps the rest as standbys. Round robin takes turns by weight. Least loaded picks the server with the shortest queue (waiting requests count double). Context aware compares how much of each server’s context capacity is taken by the conversations it is running, so one 100,000-token conversation counts for more than several short chats — set a server’s Context capacity to override what it reports. Priority groups servers into tiers: lower numbers serve first and higher numbers only take traffic when every lower-priority server is out.',
+          'Keep conversations together: every turn of a conversation goes to the server that already holds its prompt cache, which makes follow-up turns much faster. Janus recognises a conversation from an X-Janus-Session, X-Session-Id or X-Conversation-Id header, the OpenAI prompt_cache_key field, or — when a client sends none — from its tools, system prompt and first message, which stay the same on every turn. Bounded (the default) moves a conversation to its second-choice server only while its own server is busier than the pool average by the chosen percentage and by a meaningful absolute amount; Strict moves it only when its server is out of service; Off balances every request separately.',
+          'Every gateway replica makes the same choice for the same conversation without sharing any state on the request path, so pools work the same with one replica or many. Live load is read every 2 seconds from each server’s /metrics endpoint (vLLM: requests running and waiting, KV-cache use and size; llama.cpp: run llama-server with --metrics, and --slots for context figures). Servers without metrics (cloud APIs, Ollama) are balanced on Janus’s own in-flight counts and marked “No live metrics”. The full flag list per engine is in “Self-hosted engines”.',
+          'Failures: a server that refuses a request before sending anything (connection error, 502, 503, 504, 429) is skipped and the request goes to the next server in the same call, so the caller does not see the error; nothing is retried once a response has started. Three consecutive failures take a server out for 5 seconds, doubling up to 2 minutes, and every replica takes it out together. When every server is out, the alias’s fallback model serves (response header X-Janus-Fallback-Reason: pool_exhausted); without a fallback the request fails with a message naming the pool.',
+          'Pooled responses carry X-Janus-Pool-Member (model@upstream) and X-Janus-Pool-Reason (policy, affinity, spill, moved, retry or only). The editor’s Servers right now panel shows each server’s state, queue, context use and prompt-cache hit rate, refreshed every few seconds.',
+          'Licensing: a pool of more than one model, or any policy other than Failover, needs a Business license with load balancing. When the license lapses, existing pools keep balancing and can still be shrunk or re-weighted; adding servers is what is blocked.',
         ],
       },
       {
@@ -460,6 +543,84 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         body: [
           'Disabling an upstream stops all traffic through it and disables its models, while retaining every historical usage event that references it.',
           'Deleting an upstream first shows what depends on it: the models it hosts (all disabled by the delete), the managed models whose target lives there (they keep resolving by name but can no longer be served unless they have a fallback), and the direct grants on those models. While an enabled managed model still targets the upstream the delete is blocked — repoint or disable the alias on the Managed models page, or tick the explicit “delete anyway” acknowledgement (DELETE …?force=true) and repoint afterwards. An opt-in also removes the direct grants on the upstream’s models (?purge_grants=true) rather than leaving them attached to models nobody can call.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/self-hosted-engines',
+    title: 'Self-hosted engines',
+    summary: 'Server flags that give Janus exact usage, real speed, the right context size and live load for vLLM, llama.cpp, Ollama and TEI.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'Why engine settings matter',
+        body: [
+          'Janus works with any of these engines out of the box, but several figures are only as good as what the engine reports. Exact token counts and cost, the speed users see on the Models page, the context window on each model, prompt-cache savings and live load for pools all come from the engine. Without them Janus falls back to its own estimates, which are marked as such but are less accurate.',
+          'Each engine section below lists what to turn on, what Janus reads, and what you lose without it. After changing flags, restart the server and run discovery again from Admin → Upstreams so the context window is refreshed.',
+        ],
+      },
+      {
+        heading: 'vLLM',
+        body: [
+          'Provider type: vLLM. Base URL: the server root with /v1, for example http://vllm.example:8000/v1.',
+          '`--enable-per-request-metrics` — returns each request’s timing (prefill time and decode time) with its usage. Janus records decode speed as reported by the provider; without it, speed is measured on the gateway’s clock and includes prompt processing, so long prompts make the model look slow. Requires engine statistics: do not also pass `--disable-log-stats`.',
+          '`--enable-force-include-usage` — puts a usage block on every stream, even when a client does not ask for one. Janus already asks on the requests it forwards, so this is a safety net for exact metering.',
+          '`--enable-prompt-tokens-details` — reports cached prompt tokens, so prompt-cache savings are billed at the cached rate and shown on the request log. Pair it with `--enable-prefix-caching`.',
+          '`--max-model-len` — the context window Janus reads from /v1/models (max_model_len). Set it to what the server can actually hold; discovery copies it onto the model.',
+          'Live load for pools: /metrics is on by default. Janus reads requests running and waiting, KV-cache use and prefix-cache hit rate from it every 2 seconds.',
+          '`--served-model-name` — the model name users call. Keep it identical on every server of a pool so they appear as the same model.',
+        ],
+        code: {
+          language: 'bash',
+          code: 'vllm serve /models/qwen3-32b \\\n  --served-model-name qwen3-32b --max-model-len 32768 \\\n  --enable-prefix-caching --enable-prompt-tokens-details \\\n  --enable-force-include-usage --enable-per-request-metrics',
+        },
+      },
+      {
+        heading: 'llama.cpp (llama-server)',
+        body: [
+          'Provider type: Llama Cpp. Base URL: the server root with /v1, for example http://llama.example:8080/v1.',
+          'Speed and token counts: llama-server returns its own timings (prompt and generation tokens per second) with every response. Janus records them as reported by the provider with no extra flag.',
+          '`--metrics` — enables /metrics, which pools use for live queue length and KV-cache use. Without it the server is balanced on Janus’s own in-flight count and shows “No live metrics”.',
+          '`--slots` — enables /slots, which gives pools each server’s real context capacity and current use for context-aware balancing.',
+          '`--ctx-size` and `--parallel` — the served context is ctx-size, which /v1/models reports as meta.n_ctx and Janus copies onto the model. With `--parallel N` and a non-unified KV cache (`--no-kv-unified`), each request gets ctx-size ÷ N, so set ctx-size to N × the context you want per request.',
+          '`--alias` — the model name users call; without it the name is the GGUF file path. Keep it identical across a pool.',
+          'Prompt caching is on by default (cache_prompt), and cached tokens are reported as prompt_tokens_details.cached_tokens.',
+        ],
+        code: {
+          language: 'bash',
+          code: 'llama-server -m /models/Qwen3-32B-Q4_K_M.gguf --alias qwen3-32b \\\n  --ctx-size 65536 --parallel 2 --no-kv-unified \\\n  --jinja --metrics --slots',
+        },
+      },
+      {
+        heading: 'Ollama',
+        body: [
+          'Provider type: Ollama. Base URL: the server root without /v1, for example http://ollama.example:11434. Discovery reads /api/tags and /api/show; traffic goes through Ollama’s OpenAI-compatible endpoint.',
+          'Speed: the OpenAI-compatible endpoint returns no timings, so speed is measured on the gateway’s clock (marked Calculated in the request log). Treat it as a lower bound.',
+          'Context window: discovery reads the model’s trained context length from /api/show, but Ollama serves only `num_ctx` (by default a few thousand tokens) unless told otherwise. Set `OLLAMA_CONTEXT_LENGTH` on the server, or a `PARAMETER num_ctx` in the Modelfile, and override the model’s context window in Admin → Models to match. Otherwise long prompts are silently truncated by Ollama.',
+          'Pools: Ollama has no /metrics endpoint, so pooled Ollama servers are balanced on Janus’s own in-flight counts. Set `OLLAMA_NUM_PARALLEL` to how many requests each server should run at once.',
+          '`OLLAMA_KEEP_ALIVE` — keep models loaded (for example 24h). A model that has to load first makes the first request after idle very slow, which shows up in the speed and latency figures.',
+        ],
+      },
+      {
+        heading: 'Hugging Face TEI',
+        body: [
+          'Provider type: TEI. Base URL: the server root, for example http://tei.example:8080. TEI serves one embedding, reranker or classifier model per process; discovery reads /info and fills in the model name, its input cap (max_input_length) and, for a guard classifier, its security role.',
+          '`--served-model-name` — the model name users call; without it Janus uses the last part of the model id.',
+          'TEI has no chat endpoint: a TEI upstream only proxies /v1/embeddings. Use it for embeddings and for the Prompt Guard classifier (see Security gateway).',
+        ],
+      },
+      {
+        heading: 'Other OpenAI-compatible servers',
+        body: [
+          'SGLang, LM Studio, LocalAI, TGI’s OpenAI endpoint and similar servers work with the OpenAI compatible provider type. Check three things on the first requests in the request log: the counting method should say Reported by upstream (not Estimated from byte count), streamed requests should carry token counts (the server must honour stream_options.include_usage), and the model’s context window should be filled in after discovery. Set any missing context window by hand in Admin → Models.',
+        ],
+      },
+      {
+        heading: 'Checking an engine is set up well',
+        body: [
+          'Open the request log, filter by the model, and open a recent request. Counting method should be Reported by upstream. Throughput should say Reported by upstream for vLLM (with per-request metrics) and llama.cpp; Calculated means Janus timed it. Cached input tokens should appear on repeat prompts if prefix caching is on.',
+          'For pools, Managed models → Edit → Servers right now should show each server’s queue and context use rather than “No live metrics”.',
         ],
       },
     ],
@@ -824,7 +985,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'What a Business key unlocks',
         body: [
           'Every Business feature is a control that is already in the product; Community shows it greyed out with a one-line reason, and the API answers 402 feature_not_licensed if it is called anyway. Reads are never gated, and anything configured before a downgrade keeps running — only the enabling write is refused.',
-          'Guardrails enforce: redact and block modes on security policies (observe is Community). Request capture: turning troubleshooting recording on. Email alerts: the email channel on an alert (in-app and webhook are Community). Model fallbacks: a fallback model on a managed model. Audit export: the CSV download on the audit log. Scheduled reports, SCIM provisioning, multiple identity providers, LDAP directory sign-in and more than one node are described on their own pages.',
+          'Guardrails enforce: redact and block modes on security policies (observe is Community). Request capture: turning troubleshooting recording on. Email alerts: the email channel on an alert (in-app and webhook are Community). Model fallbacks: a fallback model on a managed model. Load balancing: a managed model with more than one model, or a balancing policy other than failover. Audit export: the CSV download on the audit log. Scheduled reports, SCIM provisioning, multiple identity providers, LDAP directory sign-in and more than one node are described on their own pages.',
         ],
       },
       {
@@ -1068,13 +1229,73 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
   {
     slug: 'troubleshooting',
     title: 'Troubleshooting',
-    summary: 'Symptom-first diagnosis.',
+    summary: 'Symptom-first diagnosis, and what every error code you can receive means.',
     group: 'Reference',
     sections: [
       {
-        heading: 'I got a 401',
+        heading: 'Start with the error code',
         body: [
-          'The token is missing, revoked, mistyped, or belongs to a disabled account. Check the Tokens page: a revoked token shows as revoked. Confirm your client sends `Authorization: Bearer <token>` and not the token alone.',
+          'Every error Janus itself returns has a stable `code` in the error body (and a request_id to quote). Find the code in the sections below; the error catalog has the full cause and fix for each. Errors that come from the provider are passed through unchanged and do not use these codes.',
+          'Streaming requests already returned HTTP 200 before anything could go wrong, so a failure mid-stream arrives as a final `data:` frame with an `error` object instead of an HTTP status. Check the last frame when a stream ends without [DONE].',
+        ],
+      },
+      {
+        heading: 'I got a 401: my key is not accepted',
+        body: [
+          '`policy.token_invalid` — the token is missing, mistyped, revoked, or belongs to a deleted account. Check the Tokens page: a revoked token shows as revoked. Confirm your client sends `Authorization: Bearer <token>` and not the token alone.',
+          '`policy.service_token_expired` — a service token reached the expiry set when it was created. An administrator issues a replacement under Admin → Service tokens.',
+          '`authentication_error` — a browser call to the web API had no valid session; it expired after 24 hours or 4 idle hours. Sign in again.',
+        ],
+      },
+      {
+        heading: 'I got a 403: I am not allowed',
+        body: [
+          '`policy.model_not_granted` — the model is not enabled, or you hold no grant for it. Call GET /v1/models to see what you can use; ask an administrator for a grant.',
+          '`policy.user_disabled` — an administrator deactivated your account. Every call is refused until it is re-enabled.',
+          '`policy.endpoint_blocked` — a policy rule matched the request. The reason field names the rule and the clause that fired.',
+          '`policy.security_blocked` — a Security Gateway check refused the request or withheld the response; error.param names the check (secrets, pii, terms, shape, prompt_injection). Remove the flagged material and retry, or give the request_id to an administrator. If the message says the policy fails closed, the classifier was unreachable and nothing matched.',
+          '`policy.subscription_reauth_required` — a my/… model uses your personal provider subscription and its sign-in stopped working. Reconnect it on the Subscriptions page.',
+          '`policy.service_token_scope` — a service token was used outside /v1. Service tokens only make model calls.',
+          '`permission_error` — your account lacks the role for an administrative action.',
+        ],
+      },
+      {
+        heading: 'I got a 429: too many requests or quota used up',
+        body: [
+          '`policy.quota_exceeded` — a token, spend, or request quota is used up. Retrying before reset_at fails the same way; ask for a higher limit if you need one.',
+          '`policy.rate_limit` — a per-minute rate limit was exceeded. Wait retry_after seconds.',
+          '`upstream.rate_limit` — the provider throttled the gateway itself. Back off and retry; Janus never retries generative calls for you, because a retry is a second charge.',
+        ],
+      },
+      {
+        heading: 'I got a 5xx: the model did not answer',
+        body: [
+          '`upstream.unavailable` (503) — the provider could not be reached or timed out. Retry shortly; an administrator can check the upstream under Admin → Settings → System status.',
+          '`policy.managed_model_unavailable` (503) — the managed model (alias) you called points at a missing or disabled model. Your request is fine; call another model until an administrator repairs the alias.',
+          '`policy.managed_model_fallback_exhausted` (503) — the alias target is down and its configured fallback cannot take over either. Retry later or report the request_id.',
+          '`policy.response_too_large` (500) — the answer grew past the gateway response cap (JANUS_MAX_RESPONSE_BYTES). Ask for a shorter answer.',
+          '`server_error` (500) — an unexpected gateway fault. Retry once; if it recurs, quote the request_id to whoever runs the gateway.',
+        ],
+      },
+      {
+        heading: 'My stream stopped early',
+        body: [
+          'Read the last frame. `upstream.stream_interrupted` means the provider dropped the connection or closed the stream without finishing; the text you received is incomplete, so retry. `policy.response_too_large` means the response cap cut it. `policy.security_blocked` means a guardrail withheld the rest. `policy.quota_exceeded` means a hard-kill quota ran out mid-answer.',
+          'If there is no error frame at all, check your own client and proxies for read timeouts shorter than the answer takes.',
+        ],
+      },
+      {
+        heading: 'I got a 400, 404, 409 or 413',
+        body: [
+          '`invalid_request_error` — the body was malformed or a required field such as model was missing (400); the body is too large for the provider adapter to rewrite (413); or an admin change conflicts with things that depend on it (409). The message and param field say what to fix.',
+          '`not_found_error` (404) — the path or the item does not exist, or is not visible to you. For model calls the base URL must end in /v1.',
+        ],
+      },
+      {
+        heading: 'Administrators: I got a 402',
+        body: [
+          '`license.required` — creating something new needs a valid license; existing configuration keeps running. Install or renew the key under Admin → System.',
+          '`license.feature_not_licensed` — the feature is not in the installed edition. Install a key that includes it, or leave it off.',
         ],
       },
       {
@@ -1084,9 +1305,9 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
         ],
       },
       {
-        heading: 'My stream stopped early',
+        heading: 'A model is slow',
         body: [
-          'Check the request in the log. If quota_violated is set and a hard-kill quota applies, the stream was cut on purpose. Otherwise look at the response size against JANUS_MAX_RESPONSE_BYTES, and at the upstream timeout settings.',
+          'The Models page shows each model’s typical speed (tokens per second over the last 7 days) and how busy it is (jobs per day, with a trend arrow). Pick a faster model for interactive work. A long wait before the first word usually means a long prompt or a busy server rather than a slow model.',
         ],
       },
       {
@@ -1098,7 +1319,7 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
       {
         heading: 'I am burning quota faster than expected',
         body: [
-          'Open the request log and look at token_accounting_method. Requests marked “estimated from byte count” were priced from a byte-length approximation because the provider reported no usage block — most often on the catch-all route. Cached input tokens are also counted in tokens_in.',
+          'Open the request log and look at token_accounting_method. Requests marked “estimated from byte count” were priced from the generated text because the provider reported no usage block — most often on the catch-all route or on a stream the provider cut off. Cached input tokens are also counted in tokens_in.',
         ],
       },
     ],
@@ -1213,6 +1434,9 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
         heading: 'Proxy behaviour and retention',
         body: [
           'JANUS_UPSTREAM_CONNECT_TIMEOUT_SECONDS, JANUS_UPSTREAM_TTFB_TIMEOUT_SECONDS, and JANUS_UPSTREAM_TOTAL_TIMEOUT_SECONDS set the default bound for each hop. An administrator can override any of them at runtime from Admin → Settings → General → Upstream timeouts (PATCH /api/v1/admin/system/upstream-timeouts): the override is stored in the database, survives restarts, applies to the next request on every replica without a redeploy, and is audit-logged. Raise the time-to-first-byte bound when a busy provider queues requests and callers see 503s. JANUS_MAX_RESPONSE_BYTES caps buffered responses. JANUS_DISCOVERY_INTERVAL_MINUTES (default 2) sets the model-discovery cadence — each run also records whether every upstream is reachable, so it doubles as the availability probe — and an administrator can override it at runtime from Admin → Settings → General → Model discovery (PATCH /api/v1/admin/system/discovery-interval), stored in the database, applied immediately without a restart, and audit-logged.',
+          'JANUS_DB_MAX_CONNS (default 25) caps each replica\u2019s PostgreSQL connection pool. Keep replicas \u00d7 this value well under the database\u2019s max_connections, with headroom for maintenance tools: when the database runs out of connections, requests fail.',
+          'JANUS_PERFORMANCE_MODE (default false; Business edition) raises the request rate one replica can meter. Usage records are written in batches every 100 ms and committed without waiting for the database\u2019s disk flush. The trade: a database crash can lose about the last 0.5 s of usage records, and a replica that is killed without a graceful shutdown (out of memory, SIGKILL) can lose up to 100 ms of them. A graceful shutdown or rollout loses nothing. Quota counters trail by at most one batch. The mode is decided at startup: without a valid Business or Enterprise license the gateway logs why and runs normally, and Admin \u2192 System shows the mode in force. Leave it off unless one replica is approaching its request ceiling (several hundred requests per second); adding replicas is the other answer.',
+          'Usage figures on console lists and dashboards come from hourly totals that each replica\u2019s background job keeps up to date about once a minute (one replica at a time), combined with the last few minutes of the request log, so they always match the request log exactly and stay fast however much history the gateway holds. Purging usage and moving a token\u2019s history to another team update the totals in the same step. After an upgrade the first start fills them from existing history in the background, at roughly 4 seconds per million requests.',
           'JANUS_USAGE_RETENTION_DAYS and JANUS_AUDIT_RETENTION_DAYS control purging, run daily at JANUS_PURGE_JOB_TIME_UTC. JANUS_QUOTA_CHECKPOINT_INTERVAL_HOURS bounds quota-counter recovery time. JANUS_SMTP_HOST/PORT/USER/PASSWORD/FROM configure alert email. JANUS_ENV labels the deployment; JANUS_LOG_LEVEL is debug, info, warn, or error.',
         ],
       },

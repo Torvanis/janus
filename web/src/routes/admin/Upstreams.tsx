@@ -19,6 +19,18 @@ interface UpstreamsResponse {
   adapter_types: string[];
 }
 
+/**
+ * Self-hosted engines whose server flags decide how good Janus's figures are.
+ * The add-upstream drawer shows a one-line setup note and a link to the
+ * matching section of the Self-hosted engines guide.
+ */
+const ENGINE_SETUP: Record<string, { note: MessageKey; anchor: string }> = {
+  vlm: { note: 'adminUpstreams.engineSetup.vlm', anchor: 'vllm' },
+  llama_cpp: { note: 'adminUpstreams.engineSetup.llamaCpp', anchor: 'llama-cpp-llama-server' },
+  ollama: { note: 'adminUpstreams.engineSetup.ollama', anchor: 'ollama' },
+  tei: { note: 'adminUpstreams.engineSetup.tei', anchor: 'hugging-face-tei' },
+};
+
 const ADAPTER_HELP_KEYS: Record<string, MessageKey> = {
   openai_compatible: 'adminUpstreams.adapterHelp.openaiCompatible',
   anthropic: 'adminUpstreams.adapterHelp.anthropic',
@@ -221,7 +233,9 @@ export function UpstreamsPage(): ReactNode {
                               <IconButton icon="edit" label={t('adminModels.edit')} onClick={() => openEdit(upstream)} />
                               <IconButton
                                 icon="rotate"
-                                label={refreshing === upstream.id ? t('adminUpstreams.discovering') : t('adminUpstreams.refreshModels')}
+                                label={
+                                  refreshing === upstream.id ? t('adminUpstreams.discovering') : t('adminUpstreams.refreshModels')
+                                }
                                 onClick={() => {
                                   setRefreshing(upstream.id);
                                   refresh.mutate(upstream.id);
@@ -553,6 +567,15 @@ function UpstreamDrawer({
           ))}
         </select>
       </Field>
+
+      {ENGINE_SETUP[adapterType] ? (
+        <p className="engine-setup-note small" data-testid="engine-setup-note">
+          {t(ENGINE_SETUP[adapterType].note)}{' '}
+          <Link to={`/docs/admin/self-hosted-engines#${ENGINE_SETUP[adapterType].anchor}`} target="_blank" rel="noreferrer">
+            {t('adminUpstreams.engineSetupLink')}
+          </Link>
+        </p>
+      ) : null}
 
       <Field label={t('adminUpstreams.colBaseUrl')} required error={urlError} hint={t('adminUpstreams.baseUrlHint')}>
         <input

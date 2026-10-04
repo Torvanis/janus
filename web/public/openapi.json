@@ -559,7 +559,7 @@
             "description": "Invalid name, target, or fallback (unknown model, a managed model, or the target itself). Nothing is created."
           }
         },
-        "description": "Defines an alias (for example current-best) pointing at a real model. Names share a namespace with model names and display names so routing stays unambiguous. Optionally names a fallback_model_id with fallback_triggers; when the target is unavailable for one of those reasons the alias serves the fallback instead of failing, and the response carries X-Janus-Fallback-Reason.",
+        "description": "Defines an alias (for example current-best) pointing at a real model. Names share a namespace with model names and display names so routing stays unambiguous. Optionally names a fallback_model_id with fallback_triggers; when the target is unavailable for one of those reasons the alias serves the fallback instead of failing, and the response carries X-Janus-Fallback-Reason. Optionally takes pool to create a load-balanced alias over several models (see PATCH); target_model_id may then be omitted. Pooled responses carry X-Janus-Pool-Member and X-Janus-Pool-Reason.",
         "requestBody": {
           "required": true,
           "content": {
@@ -605,6 +605,28 @@
         }
       }
     },
+    "/api/v1/admin/managed-models/{id}/pool-health": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Live health of a managed model's pool members",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pool configuration and, per member: state (serving, ejected, probe_failing, disabled, unwatched), load source (live from the server's /metrics, or estimated from this gateway's in-flight count), running/waiting requests, KV-cache use, context held vs capacity, prompt-cache hit rate, last probe and any ejection."
+          },
+          "404": {
+            "description": "No such managed model."
+          }
+        },
+        "description": "Answered by whichever gateway replica receives the request. Server load figures come from the members themselves and match on every replica; in-flight counts and local circuit breakers are per replica."
+      }
+    },
     "/api/v1/admin/managed-models/{id}": {
       "get": {
         "tags": [
@@ -641,7 +663,7 @@
             "description": "Invalid target or fallback (unknown model, a managed model, the target itself, or repointing the target onto its own fallback), or an unknown fallback trigger."
           }
         },
-        "description": "Changes name, description, status, and/or target_model_id. Repointing is the core operation: callers keep using the same name while the underlying model changes. Each repoint is audited with the old and new target named. fallback_model_id and fallback_triggers configure the automatic fallback: send fallback_model_id \"\" to remove it, or fallback_triggers alone to change which failure modes trigger the current fallback. Changes are audited as managed_model_fallback_changed.",
+        "description": "Changes name, description, status, and/or target_model_id. Repointing is the core operation: callers keep using the same name while the underlying model changes. Each repoint is audited with the old and new target named. fallback_model_id and fallback_triggers configure the automatic fallback: send fallback_model_id \"\" to remove it, or fallback_triggers alone to change which failure modes trigger the current fallback. Changes are audited as managed_model_fallback_changed. pool replaces the alias's load-balancing configuration (policy failover|round_robin|least_loaded|context, affinity bounded|strict|off, spill_pct, members[{model_id, weight, priority, enabled, context_capacity}]); a pool with more than one enabled member or a non-failover policy requires the Business load_balancing feature (402 otherwise), except edits that only shrink or re-weight an existing pool. Send either target_model_id or pool, not both. Audited as managed_model_pool_changed.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2699,6 +2721,403 @@
         }
       }
     },
+    "/api/v1/me/subscriptions": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "List personal subscriptions",
+        "description": "Providers the caller may connect (enabled by an administrator) and the caller's own connection to each. Token material is never returned. Connected models are called through /v1 as my/<provider>/<model> with the caller's normal Janus token.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "providers[] with the caller's connection (or null) and model_prefix."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{provider}/connect": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Start connecting a subscription",
+        "description": "Starts the provider's OAuth device sign-in. Returns user_code and the provider's verification URL; the user approves there while the client polls the pending sign-in.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Provider id, for example xai."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "pending_id, user_code, verification_uri(_complete), interval_seconds, expires_at."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/connect/{pendingID}/poll": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Poll a pending subscription sign-in",
+        "description": "Advances the device sign-in by at most one provider call, honouring the provider's polling interval across replicas. status is pending, connected, expired, denied, or failed.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "pendingID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "pending_id from the connect response."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "status, optional message/interval_seconds, and connection once connected."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}/models": {
+      "put": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Choose which subscription models to use",
+        "description": "Stores the subset of the connected plan's models the owner wants Janus to offer. Only selected models appear in /v1/models and are accepted by the proxy. Every name must be one the plan lists.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "selected"
+                ],
+                "properties": {
+                  "selected": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "grok-4.3"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated connection."
+          },
+          "400": {
+            "description": "A name is not one of the plan's models."
+          },
+          "403": {
+            "description": "Personal subscriptions are turned off, or the instance is offline."
+          },
+          "404": {
+            "description": "No such connection for this user."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{provider}/key": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Connect a key-based subscription",
+        "description": "For providers that connect with a key the user creates at the vendor (Mistral Vibe). Janus verifies the key with the vendor, then stores it encrypted; the key is never returned. Answers {status: connected|failed, message?, connection?}.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connected, or failed with the vendor's reason."
+          },
+          "403": {
+            "description": "Personal subscriptions or this provider are turned off."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}/check": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Verify a subscription now",
+        "description": "Renews the sign-in if it has expired, confirms the vendor still accepts it, and reads the plan's usage where the vendor publishes it. A credential the vendor no longer accepts comes back with status reauth_required.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated connection."
+          },
+          "403": {
+            "description": "Personal subscriptions or this provider are turned off."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}/refresh-models": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Refresh a subscription's model list",
+        "description": "Re-reads the models the connected plan can call.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated connection."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}": {
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Disconnect a subscription",
+        "description": "Revokes the sign-in at the provider (best effort) and deletes the stored credential. Past usage keeps its subscription attribution.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Personal subscriptions overview",
+        "description": "Per-provider enablement and every user's connection.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "providers[] and connections[]."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/feature": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turn personal subscriptions on or off",
+        "description": "Organization-wide switch. Off hides the Subscriptions page, stops every my/* model and removes the personal_subscription policy scope from the editor; connections are kept. Refused on an offline installation.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new state."
+          },
+          "403": {
+            "description": "Offline installation."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/providers": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Enable or disable subscription providers",
+        "description": "Turns personal subscriptions on or off per provider (all off by default). Disabling stops personal traffic to that provider immediately; connections are kept.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "boolean"
+                    },
+                    "example": {
+                      "xai": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The full enablement map after the change."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/subscriptions/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Disconnect a user's subscription",
+        "description": "Revokes and deletes another user's connection.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected."
+          }
+        }
+      }
+    },
     "/api/v1/notifications/read": {
       "post": {
         "tags": [
@@ -2730,6 +3149,12 @@
           }
         ],
         "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "organization excludes requests served by a user's own connected subscription; subscription keeps only those.",
+            "schema": { "type": "string", "enum": ["organization", "subscription"] }
+          },
           {
             "name": "token_id",
             "in": "query",
@@ -2895,6 +3320,12 @@
           }
         ],
         "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "organization excludes requests served by a user's own connected subscription; subscription keeps only those.",
+            "schema": { "type": "string", "enum": ["organization", "subscription"] }
+          },
           {
             "name": "token_id",
             "in": "query",

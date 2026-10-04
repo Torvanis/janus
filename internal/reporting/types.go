@@ -344,7 +344,7 @@ func safeOperationalNotices(in []string) []string {
 			safe = body
 		}
 		for _, pattern := range [][2]string{
-			{"Coverage marker retention_before: ", ""}, {"Coverage marker usage_snapshots: ", ""},
+			{"Coverage marker retention_before: ", ""},
 			{"Earliest matching retained event: ", ""},
 			{"Requested period precedes retention_before ", "; retained records cannot establish complete coverage."},
 			{"Previous period precedes retention_before ", "; retained records cannot establish complete comparison coverage."},

@@ -88,6 +88,24 @@ func TestOpenAIUsageReadsLlamaCppTimings(t *testing.T) {
 	}
 }
 
+// vLLM --enable-per-request-metrics: decode speed from generation_time_ms
+// (first to last token, so tokens-1 intervals), prefill speed from
+// time_to_first_token_ms over uncached prompt tokens. vLLM's own
+// tokens_per_second includes prefill and must not be used.
+func TestOpenAIUsageReadsVLLMPerRequestMetrics(t *testing.T) {
+	body := []byte(`{"usage":{"prompt_tokens":4800,"completion_tokens":101,"prompt_tokens_details":{"cached_tokens":800}},` +
+		`"metrics":{"time_to_first_token_ms":2000,"generation_time_ms":10000,"queue_time_ms":5,"mean_itl_ms":100,"tokens_per_second":8.4}}`)
+	u, ok := parseOpenAIUsage(body)
+	if !ok || !u.ThroughputReported || !approx(u.TokensOutPerSecond, 10) || !approx(u.TokensInPerSecond, 2000) {
+		t.Fatalf("usage = %+v, want reported 10 out tok/s and 2000 in tok/s", u)
+	}
+	// metrics:null (flag off) leaves the gateway to calculate.
+	u, _ = parseOpenAIUsage([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":20},"metrics":null}`))
+	if u.ThroughputReported {
+		t.Fatalf("metrics:null must not count as reported: %+v", u)
+	}
+}
+
 func TestOllamaUsageDerivesThroughputFromDurations(t *testing.T) {
 	a := &Ollama{}
 	body := []byte(`{"done":true,"done_reason":"stop","prompt_eval_count":10,"prompt_eval_duration":500000000,"eval_count":40,"eval_duration":2000000000}`)

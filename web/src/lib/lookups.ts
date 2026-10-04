@@ -161,11 +161,13 @@ const ERROR_CODES: LookupOption[] = [
   },
   { id: 'upstream.unavailable', label: 'upstream.unavailable', detail: 'Provider down or timed out' },
   { id: 'upstream.rate_limit', label: 'upstream.rate_limit', detail: 'Provider returned 429' },
+  { id: 'upstream.stream_interrupted', label: 'upstream.stream_interrupted', detail: 'Provider ended a stream early' },
   { id: 'invalid_request_error', label: 'invalid_request_error', detail: 'Malformed request' },
   { id: 'authentication_error', label: 'authentication_error', detail: 'Not signed in' },
   { id: 'permission_error', label: 'permission_error', detail: 'Forbidden' },
   { id: 'not_found_error', label: 'not_found_error', detail: 'Unknown route or model' },
   { id: 'server_error', label: 'server_error', detail: 'Gateway fault' },
+  { id: 'policy.subscription_reauth_required', label: 'policy.subscription_reauth_required', detail: 'Subscription needs reconnecting' },
 ];
 
 export const errorCodeLookup = {

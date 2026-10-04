@@ -7,7 +7,7 @@
  * (aria-label) and appears as a tooltip on hover and keyboard focus, so
  * nothing is lost for screen readers or tests that query by role + name.
  */
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 type IconName =
   | 'edit'
@@ -20,7 +20,9 @@ type IconName =
   | 'rates'
   | 'rotate'
   | 'send'
-  | 'more';
+  | 'more'
+  | 'copy'
+  | 'check';
 
 const PATHS: Record<IconName, ReactNode> = {
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" />,
@@ -70,6 +72,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   send: <path d="M4 12l16-8-6 16-2.5-6.5L4 12zM11.5 13.5L20 4" />,
+  copy: (
+    <>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+      <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   more: (
     <>
       <circle cx="6" cy="12" r="1.2" />
@@ -129,6 +138,43 @@ export function IconButton({
       disabled={disabled}
     >
       <Icon name={icon} />
+    </button>
+  );
+}
+
+/**
+ * The standard copy icon. It turns into a check mark for a moment after a
+ * copy; the tooltip and accessible name say what gets copied.
+ */
+export function CopyIconButton({ value, label, copiedLabel }: { value: string; label: string; copiedLabel: string }): ReactNode {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // Clipboard access can be blocked; fall back to a selection copy.
+      const area = document.createElement('textarea');
+      area.value = value;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    }
+    setCopied(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(false), 1500);
+  }, [value]);
+  return (
+    <button
+      type="button"
+      className="icon-btn icon-btn-sm"
+      aria-label={copied ? copiedLabel : label}
+      data-tooltip={copied ? copiedLabel : label}
+      onClick={() => void copy()}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
     </button>
   );
 }

@@ -111,7 +111,7 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(h.upstream.Close)
 
 	ctx := context.Background()
-	db, err := store.Open(ctx, "sqlite://"+filepath.Join(t.TempDir(), "janus.db"))
+	db, err := store.OpenMigratedSQLite(ctx, filepath.Join(t.TempDir(), "janus.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

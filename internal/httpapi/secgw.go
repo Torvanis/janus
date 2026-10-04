@@ -174,15 +174,7 @@ func (s *Server) meterClassifierCall(model *store.Model, upstream *store.Upstrea
 			event.HTTPStatus = http.StatusBadGateway
 			event.ErrorCode = CodeUpstreamDown
 		}
-		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		s.pending.Add(1)
-		go func() {
-			defer s.pending.Done()
-			defer cancel()
-			if err := s.Store.InsertUsageEvent(bg, event); err != nil {
-				s.Logger.ErrorContext(bg, "secgw: write classifier usage event", "error", err.Error())
-			}
-		}()
+		s.writeUsage(ctx, event, "secgw: write classifier usage event", nil)
 	}
 }
 
@@ -196,6 +188,11 @@ func secgwSubject(event *store.UsageEvent, groupIDs []string, resolved store.Res
 	}
 	if resolved.Managed != nil {
 		sub.ManagedModelID = resolved.Managed.ID
+	}
+	if event.SubscriptionID != "" {
+		// Personal traffic: the synthetic model/upstream ids match no
+		// catalog binding; the personal_subscription scope covers it.
+		sub.PersonalProvider = event.ModelProvider
 	}
 	return sub
 }
@@ -272,17 +269,10 @@ func (s *Server) writeSecgwBlock(w http.ResponseWriter, r *http.Request, event *
 		WriteJSON(w, http.StatusOK, body)
 	}
 	s.Metrics.ObserveGateway("/v1/*", event.Modality, "", r.Method, http.StatusOK, time.Since(started))
-	bg, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-	s.pending.Add(1)
-	go func() {
-		defer s.pending.Done()
-		defer cancel()
-		if err := s.Store.InsertUsageEvent(bg, event); err != nil {
-			s.Logger.ErrorContext(bg, "write blocked usage event", "error", err.Error())
-		}
+	s.writeUsage(r.Context(), event, "write blocked usage event", func(bg context.Context) {
 		event.RunAfterInsert(bg)
 		s.finishCapture(bg, event)
-	}()
+	})
 }
 
 // writeStreamSecurityError emits the in-band SSE error frame when egress

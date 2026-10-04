@@ -8,7 +8,7 @@ import (
 )
 
 func TestReportingFactAtomicFailure(t *testing.T) {
-	for _, table := range []string{"reporting_usage_snapshot", "reporting_coverage"} {
+	for _, table := range []string{"reporting_usage_snapshot"} {
 		for _, team := range []string{"", "selected-team"} {
 			t.Run(table+team, func(t *testing.T) {
 				s := newReportingFactStore(t)
@@ -129,7 +129,9 @@ func TestReportingFactLegacyMissingRemainsMissing(t *testing.T) {
 	}
 }
 
-func TestReportingFactCoverage(t *testing.T) {
+// Usage writes must not touch a shared row: the old 'usage_snapshots' marker
+// serialized every metering transaction on one reporting_coverage row.
+func TestReportingFactNoSharedCoverageWrite(t *testing.T) {
 	s := newReportingFactStore(t)
 	ctx := context.Background()
 	early := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -138,12 +140,12 @@ func TestReportingFactCoverage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var start string
-	if err := s.queryRow(ctx, `SELECT started_at FROM reporting_coverage WHERE key='usage_snapshots'`).Scan(&start); err != nil {
+	var n int
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM reporting_coverage`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if start != FormatTime(early) {
-		t.Fatalf("coverage=%s", start)
+	if n != 0 {
+		t.Fatalf("usage writes created %d reporting_coverage rows", n)
 	}
 }
 

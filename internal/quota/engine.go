@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,6 +86,67 @@ type Engine struct {
 
 	mu    sync.Mutex
 	cache map[string]*cacheEntry
+
+	// Rule definitions are configuration, not consumption: they are cached
+	// for ruleTTL like other hot-path config (JANUS_CONFIG_CACHE_TTL_SECONDS).
+	// Counters are never cached by this. A replica that writes a rule calls
+	// InvalidateRules; other replicas converge within ruleTTL.
+	ruleTTL   time.Duration
+	ruleMu    sync.Mutex
+	ruleCache map[string]ruleCacheEntry
+	ruleGen   uint64
+}
+
+type ruleCacheEntry struct {
+	quotas   []*store.Quota
+	loadedAt time.Time
+	gen      uint64
+}
+
+// SetRuleCacheTTL sets how long quota rule lists are reused (0 disables).
+// Call once at startup, before serving.
+func (e *Engine) SetRuleCacheTTL(d time.Duration) { e.ruleTTL = d }
+
+// InvalidateRules drops every cached rule list on this replica. Call after any
+// quota create, update or delete.
+func (e *Engine) InvalidateRules() {
+	e.ruleMu.Lock()
+	e.ruleCache = nil
+	e.ruleGen++
+	e.ruleMu.Unlock()
+}
+
+func (e *Engine) rulesFor(ctx context.Context, subject Subject) ([]*store.Quota, error) {
+	load := func() ([]*store.Quota, error) {
+		if subject.IsServiceToken() {
+			return e.store.QuotasForServiceToken(ctx, subject.ServiceTokenID)
+		}
+		return e.store.QuotasForSubject(ctx, subject.UserID, subject.TeamIDs)
+	}
+	if e.ruleTTL <= 0 {
+		return load()
+	}
+	key := subject.ServiceTokenID + "|" + subject.UserID + "|" + strings.Join(subject.TeamIDs, ",")
+	e.ruleMu.Lock()
+	entry, ok := e.ruleCache[key]
+	gen := e.ruleGen
+	e.ruleMu.Unlock()
+	if ok && entry.gen == gen && time.Since(entry.loadedAt) < e.ruleTTL {
+		return entry.quotas, nil
+	}
+	quotas, err := load()
+	if err != nil {
+		return nil, err
+	}
+	e.ruleMu.Lock()
+	// A load that raced an invalidation keeps its old generation and is
+	// discarded on the next read rather than pinning a stale rule list.
+	if e.ruleCache == nil {
+		e.ruleCache = map[string]ruleCacheEntry{}
+	}
+	e.ruleCache[key] = ruleCacheEntry{quotas: quotas, loadedAt: time.Now(), gen: gen}
+	e.ruleMu.Unlock()
+	return quotas, nil
 }
 
 type cacheEntry struct {
@@ -133,13 +195,7 @@ func (s Subject) IsServiceToken() bool { return s.ServiceTokenID != "" }
 // Applicable returns the quotas governing a subject (including team-inherited
 // rules for users), narrowed to those that cover the requested model.
 func (e *Engine) Applicable(ctx context.Context, subject Subject, modelID string) ([]*store.Quota, error) {
-	var quotas []*store.Quota
-	var err error
-	if subject.IsServiceToken() {
-		quotas, err = e.store.QuotasForServiceToken(ctx, subject.ServiceTokenID)
-	} else {
-		quotas, err = e.store.QuotasForSubject(ctx, subject.UserID, subject.TeamIDs)
-	}
+	quotas, err := e.rulesFor(ctx, subject)
 	if err != nil {
 		return nil, err
 	}

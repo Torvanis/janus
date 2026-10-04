@@ -173,12 +173,30 @@
   z-index: var(--janus-z-sticky);
 }
 
-.active-team-context { min-width: 0; max-width: 360px; }
-.active-team-context select { min-width: 0; max-width: 240px; }
+.active-team-context {
+  min-width: 0;
+  max-width: 360px;
+}
+.active-team-context select {
+  min-width: 0;
+  max-width: 240px;
+}
 @media (max-width: 767px) {
-  .topbar { flex-wrap: wrap; height: auto; min-height: var(--janus-topbar-height); padding-block: 8px; }
-  .active-team-context { order: 2; flex: 1 1 100%; max-width: 100%; }
-  .active-team-context select { flex: 1; max-width: 100%; }
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--janus-topbar-height);
+    padding-block: 8px;
+  }
+  .active-team-context {
+    order: 2;
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  .active-team-context select {
+    flex: 1;
+    max-width: 100%;
+  }
 }
 
 .breadcrumb {

@@ -264,6 +264,7 @@ func (s *Server) handleLeadCreateQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_created", "quota", q.ID, nil, map[string]any{
 		"subject_type": q.SubjectType, "subject_id": q.SubjectID, "metric": q.Metric,
 		"limit": *body.Limit, "window": q.Window, "breach_behavior": q.BreachBehavior,
@@ -342,6 +343,7 @@ func (s *Server) handleLeadUpdateQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_updated", "quota", existing.ID,
 		map[string]any{"limit": existing.Limit, "window": existing.Window, "breach_behavior": existing.BreachBehavior},
 		map[string]any{"limit": limit, "window": window, "breach_behavior": behavior, "via": "team_lead_delegation"})
@@ -363,6 +365,7 @@ func (s *Server) handleLeadDeleteQuota(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	s.invalidateQuotaRules()
 	s.audit(r, "quota_deleted", "quota", existing.ID,
 		map[string]any{"id": existing.ID, "via": "team_lead_delegation"}, nil)
 	WriteJSON(w, http.StatusOK, map[string]any{"id": existing.ID, "deleted": true})

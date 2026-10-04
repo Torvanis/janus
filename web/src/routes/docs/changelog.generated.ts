@@ -17,6 +17,41 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: '2026.10.1',
+    date: '2026-10-04',
+    categories: [
+      {
+        name: 'Added',
+        items: [
+          'Load-balanced model pools (Business). A managed model can put several servers running the same model behind one name. Balancing can be failover, round robin by weight, least loaded (queue length read from each vLLM or llama.cpp server\'s /metrics every 2 seconds) or context aware (share of each server\'s context capacity in use, from vLLM KV-cache figures or llama.cpp /slots). Every turn of a conversation goes to the server that already holds its prompt cache, recognised from a session header, prompt_cache_key, or the conversation\'s opening when the client sends neither. A server that refuses a request before answering is skipped within the same call; repeated failures take it out on every replica together. Responses carry X-Janus-Pool-Member and X-Janus-Pool-Reason, and the editor shows each server\'s queue, context use and prompt-cache hit rate live.',
+          'Personal subscriptions. People can connect a provider plan they already pay for (OpenAI ChatGPT Plus or Pro, GitHub Copilot, xAI SuperGrok or X Premium+, Mistral) on the new Subscriptions page and call its models as my/<provider>/<model> with their own Janus token. Calls are metered, logged and covered by security policies like any other. Administrators turn the feature on organization-wide; it is off in offline mode. Reasoning effort is fitted to what each plan\'s model accepts, and a sign-in that stops working returns policy.subscription_reauth_required.',
+          'Model speed and activity. Model cards show tokens per second and jobs per day with a trend; the admin Overview has a Model performance card charting each model\'s concurrency, speed and input size over time; the live readout adds a per-second line. Engine-measured speeds (including vLLM per-request metrics) are preferred over Janus\'s own estimates.',
+          'A Self-hosted engines guide covering the vLLM, llama.cpp, Ollama and TEI flags that give Janus exact token counts, speeds, context windows and live pool load.',
+          'Performance mode (Business, JANUS_PERFORMANCE_MODE=true) writes usage in 100 ms batches and commits without waiting for the database\'s disk flush, for the busiest gateways. A database crash can lose about the last 0.5 s of usage records and a replica killed without a graceful shutdown up to 100 ms of them; graceful shutdowns lose nothing. The state is shown on Admin → System.',
+          'JANUS_DB_MAX_CONNS (default 25) caps each replica\'s PostgreSQL connection pool. The previous fixed ceiling was 50.',
+        ],
+      },
+      {
+        name: 'Changed',
+        items: [
+          'Built for large networks. Usage is recorded without locking shared rows, which roughly tripled per-replica throughput in testing and lets throughput grow with replicas. Console pages that show 30-day usage per row (API tokens, Service tokens, Managed models, the admin Overview) read hourly totals that a background job keeps current, so they load in well under a second after millions of requests instead of tens of seconds. The figures still match the request log exactly. The first start after upgrading fills the totals from existing history in the background (about 4 seconds per million requests); pages work normally meanwhile.',
+          'Usage keeps the team it was admitted with. Joining, leaving or switching teams no longer moves recorded usage, including a person\'s first team. To move a token\'s history, use Change team on the token and choose to move its recorded usage.',
+          'The Subscriptions page has a tab per provider, lists the models you use first, and adds models from a side panel; removing a model can be undone.',
+          'Managed models open in a side panel, and Model grants is one dense table like the other admin pages.',
+          'The Troubleshooting page covers every error code Janus can return.',
+          'Quota rules are cached for the configuration cache interval and refreshed on every quota change, and last_used_at on tokens is written at most every 30 seconds per token.',
+        ],
+      },
+      {
+        name: 'Fixed',
+        items: [
+          'A stream the provider ends early is recorded as a failure, and streams without a usage block are estimated from the text they carried instead of being metered as zero.',
+          'Writing a usage record no longer clears the model and rate-card caches.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2026.9.5',
     date: '2026-09-26',
     categories: [

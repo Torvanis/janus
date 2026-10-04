@@ -74,6 +74,8 @@ export interface Me {
    * surface may render. Optional for wire compatibility with older servers.
    */
   local_only?: boolean;
+  /** Personal subscriptions are on for this organization (never offline). */
+  personal_subscriptions?: boolean;
   /**
    * License banner state. edition community|business|enterprise; status
    * valid|expiring|grace|expired|invalid; restricted true when creating
@@ -237,6 +239,46 @@ export interface ModelMetadataField {
   automatic_value: number | null;
   automatic_source: MetadataSource;
 }
+/**
+ * A model's last-7-day figures (server: store.ModelActivity). Jobs exclude
+ * gateway refusals; speed is output tokens ÷ time after the first token over
+ * successful streamed answers of 16+ tokens, so tiny replies and errors do not
+ * skew it.
+ */
+export interface ModelActivity {
+  jobs_per_day_7d: number;
+  jobs_per_day_prev_7d: number;
+  /** up/down: ±10% or more vs the previous 7 days; new: no traffic before. */
+  jobs_trend: 'up' | 'down' | 'flat' | 'new';
+  jobs_change_percent: number;
+  /** 0 when no request qualified. */
+  tokens_per_second_7d: number;
+  speed_samples_7d: number;
+}
+
+/** One model's line on the admin Overview performance charts. */
+export interface ModelPerformance {
+  key: string;
+  model_name: string;
+  upstream_id?: string;
+  /** Shown in the legend only when two plotted models share a name. */
+  upstream_name?: string;
+  requests: number;
+  avg_concurrency: number;
+  tokens_per_second: number;
+  avg_input_tokens: number;
+  concurrency: number[];
+  /** null where the bucket had nothing to measure (a gap, not a zero). */
+  tokens_per_second_series: (number | null)[];
+  input_tokens_series: (number | null)[];
+}
+
+export interface ModelPerformanceSeries {
+  buckets: string[];
+  bucket_seconds: number;
+  models: ModelPerformance[];
+}
+
 export interface Model {
   metadata?: Record<string, ModelMetadataField>;
   metadata_warnings?: string[];
@@ -282,6 +324,8 @@ export interface Model {
   upstream_last_latency_ms?: number;
   /** Gateway-derived verdict; see modelHealth() for the client-side fallback. */
   health?: ModelHealth;
+  /** 7-day jobs/day trend and generation speed (web catalog only). */
+  activity?: ModelActivity;
   /** Security gateway: 'text_classification' when the model is reserved as a classifier. Absent/empty otherwise. */
   classifier_role?: string;
 }
@@ -393,6 +437,11 @@ export interface UsageEvent {
   throughput_source?: string;
   /** Failure mode that sent a managed-model request to its fallback (model is then the fallback); absent when the target served. */
   fallback_reason?: string;
+  /** How Janus fitted the requested reasoning effort, e.g. "medium->omitted". */
+  reasoning_adjustment?: string;
+  /** Why a pooled alias sent the request to the member that served. */
+  pool_reason?: string;
+  pool_attempts?: number;
   client_user_agent: string;
   client_ip: string;
   x_forwarded_for: string;
@@ -516,6 +565,61 @@ export const ALL_FALLBACK_TRIGGERS: FallbackTrigger[] = [
 /** What the server applies when a fallback is set and no triggers are chosen. */
 export const DEFAULT_FALLBACK_TRIGGERS: FallbackTrigger[] = ['target_unavailable', 'upstream_unreachable', 'model_down'];
 
+/** Load-balancing policy of a managed-model pool (mirrors store.PoolPolicy*). */
+export type PoolPolicy = 'failover' | 'round_robin' | 'least_loaded' | 'context';
+export const POOL_POLICIES: PoolPolicy[] = ['failover', 'round_robin', 'least_loaded', 'context'];
+/** Session affinity mode (mirrors store.PoolAffinity*). */
+export type PoolAffinity = 'bounded' | 'strict' | 'off';
+export const POOL_AFFINITIES: PoolAffinity[] = ['bounded', 'strict', 'off'];
+
+export interface PoolMember {
+  model_id: string;
+  weight: number;
+  priority: number;
+  enabled: boolean;
+  /** Context tokens the member holds at once; 0 = read from the server. */
+  context_capacity: number;
+  position?: number;
+  model_name?: string;
+  public_name?: string;
+  model_status?: string;
+  upstream_id?: string;
+  upstream_name?: string;
+  adapter_type?: string;
+  context_window?: number;
+  missing?: boolean;
+}
+
+export interface ManagedModelPool {
+  policy: PoolPolicy;
+  affinity: PoolAffinity;
+  spill_pct: number;
+  members: PoolMember[];
+}
+
+export type PoolMemberState = 'serving' | 'ejected' | 'probe_failing' | 'disabled' | 'unwatched';
+
+export interface PoolMemberHealth {
+  model_id: string;
+  public_name: string;
+  upstream_name: string;
+  enabled: boolean;
+  state: PoolMemberState;
+  load: 'live' | 'estimated';
+  engine?: string;
+  running: number;
+  waiting: number;
+  in_flight: number;
+  kv_usage: number;
+  context_used: number;
+  context_capacity: number;
+  prefix_hit_rate?: number;
+  probed_at?: string;
+  probe_error?: string;
+  ejected_until?: string;
+  ejected_reason?: string;
+}
+
 /**
  * An admin-defined stable alias for a real catalog model.
  *
@@ -540,6 +644,8 @@ export interface ManagedModel {
   context_window: number;
   /** True when the alias is enabled AND its target can actually serve. */
   servable: boolean;
+  /** The current target's 7-day figures (web catalog only). */
+  activity?: ModelActivity;
   /** True when the target is missing or not enabled — needs admin repair. */
   broken: boolean;
   broken_reason?: string;
@@ -558,6 +664,8 @@ export interface ManagedModel {
   /** The configured fallback is itself missing or disabled. */
   fallback_broken: boolean;
   fallback_broken_reason?: string;
+  /** Balancing configuration; every alias has at least one member. */
+  pool?: ManagedModelPool;
   grant_count: number;
   created_by_user_id: string;
   created_at: string;
@@ -784,6 +892,11 @@ export interface SystemStatus {
   /** True when the gateway runs in local-only mode (JANUS_LOCAL_ONLY): cost tracking disabled. */
   local_only?: boolean;
   /**
+   * Performance mode (JANUS_PERFORMANCE_MODE, Business edition), decided at
+   * startup. reason explains a request that was not honoured.
+   */
+  performance_mode?: { requested: boolean; active: boolean; reason?: string };
+  /**
    * Per-hop upstream timeouts in force right now, with provenance. Same
    * document as GET /api/v1/admin/system/upstream-timeouts; the System page
    * edits it through PATCH/DELETE on that endpoint.
@@ -995,7 +1108,7 @@ export interface SecgwPolicy {
   binding_count: number;
 }
 
-export type SecgwScopeType = 'org' | 'group' | 'upstream' | 'service_token' | 'model' | 'managed_model';
+export type SecgwScopeType = 'org' | 'group' | 'upstream' | 'service_token' | 'model' | 'managed_model' | 'personal_subscription';
 
 export interface SecgwBinding {
   id: string;
@@ -1113,7 +1226,7 @@ export interface SecgwDryRunResult {
 }
 
 export interface SecgwRulesCatalog {
-  secret_rules: Array<{ ID: string; Description: string; Severity: string; Enabled: boolean }>;
+  secret_rules: Array<{ id: string; description: string; severity: string; enabled: boolean }>;
   pii_classes: string[];
 }
 
@@ -1138,4 +1251,103 @@ export interface RequestSecurity {
   violations_scanned: number;
   violations_scope_available: boolean;
   action?: string;
+}
+
+/** A user's connected provider plan (personal subscription). */
+export interface SubscriptionConnection {
+  id: string;
+  user_id: string;
+  user_email?: string;
+  provider: string;
+  account_email: string;
+  account_name: string;
+  models: string[];
+  /** The subset of models the owner chose to use; only these are callable. */
+  selected_models: string[];
+  status: 'active' | 'reauth_required';
+  last_error: string;
+  last_used_at: string;
+  created_at: string;
+  updated_at: string;
+  /** When the current sign-in stops working; absent = no timed expiry. */
+  access_expires_at?: string;
+  /** Janus holds a refresh token and renews the sign-in itself. */
+  auto_renews: boolean;
+  /** Last background verification, and its transient failure if any. */
+  checked_at?: string;
+  check_error?: string;
+  /** The vendor's own plan-usage snapshot, when it publishes one. */
+  plan_usage?: SubscriptionPlanUsage;
+  usage_at?: string;
+  /** Janus's own count of traffic through this connection. Owner view only. */
+  activity?: Partial<Record<'day' | 'week', SubscriptionActivity>>;
+  /** Accepted reasoning_effort values per model ([] = takes none); absent = unknown. */
+  reasoning_efforts?: Record<string, string[]>;
+}
+
+export interface SubscriptionActivity {
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export interface SubscriptionPlanUsage {
+  plan?: string;
+  windows: SubscriptionUsageWindow[];
+  notes?: string[];
+}
+
+export interface SubscriptionUsageWindow {
+  label: string;
+  used_percent: number;
+  used?: number;
+  limit?: number;
+  unlimited?: boolean;
+  resets_at?: string;
+}
+
+export interface SubscriptionProvider {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  /** "device": sign in at the vendor with a code; "key": paste a vendor key. */
+  auth: 'device' | 'key';
+  key_help?: string;
+  key_url?: string;
+  connection: SubscriptionConnection | null;
+}
+
+/** Admin view of one provider: switch state and the vendor-terms note. */
+export interface AdminSubscriptionProvider {
+  id: string;
+  name: string;
+  description: string;
+  admin_note: string;
+  enabled: boolean;
+  connections: number;
+}
+
+export interface AdminSubscriptions {
+  offline: boolean;
+  enabled: boolean;
+  providers: AdminSubscriptionProvider[];
+  connections: SubscriptionConnection[];
+}
+
+export interface SubscriptionDeviceStart {
+  pending_id: string;
+  provider: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  interval_seconds: number;
+  expires_at: string;
+}
+
+export interface SubscriptionPollResult {
+  status: 'pending' | 'connected' | 'expired' | 'denied' | 'failed';
+  message?: string;
+  interval_seconds?: number;
+  connection?: SubscriptionConnection;
 }

@@ -44,8 +44,15 @@ export function LicenseBanner(): ReactNode {
   }
   const isAdmin = me?.role === 'admin';
   return (
-    <div className={`banner ${license.status === 'expired' || license.status === 'invalid' ? 'banner-danger' : 'banner-warning'} license-banner`} role="status">
-      <span>{message}{message && attention ? ' ' : ''}{attention}</span>
+    <div
+      className={`banner ${license.status === 'expired' || license.status === 'invalid' ? 'banner-danger' : 'banner-warning'} license-banner`}
+      role="status"
+    >
+      <span>
+        {message}
+        {message && attention ? ' ' : ''}
+        {attention}
+      </span>
       <span className="row" style={{ gap: 'var(--janus-space-2)', marginLeft: 'auto' }}>
         {isAdmin ? (
           <Link className="btn btn-sm" to="/admin/settings/license">

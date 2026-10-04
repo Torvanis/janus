@@ -156,7 +156,7 @@ func (m *Metrics) initZeroSeries() {
 	policyCodes := []string{
 		"policy.quota_exceeded", "policy.user_disabled", "policy.model_not_granted",
 		"policy.endpoint_blocked", "policy.token_invalid", "policy.rate_limit",
-		"upstream.unavailable", "upstream.rate_limit", "invalid_request_error", "server_error",
+		"upstream.unavailable", "upstream.rate_limit", "upstream.stream_interrupted", "invalid_request_error", "server_error",
 	}
 	for _, code := range policyCodes {
 		m.PolicyRejections.WithLabelValues(code)

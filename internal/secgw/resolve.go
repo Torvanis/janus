@@ -28,6 +28,9 @@ type Subject struct {
 	// UpstreamID is the provider the resolved model belongs to, so one
 	// binding can cover every model from that provider.
 	UpstreamID string
+	// PersonalProvider is set when the request goes through the caller's
+	// own connected vendor plan ("xai"); empty for organization traffic.
+	PersonalProvider string
 }
 
 // ResolvedCheck is a check plus its provenance.
@@ -97,7 +100,13 @@ func Resolve(snap *store.SecgwSnapshot, sub Subject) *Effective {
 		}
 	}
 	sort.SliceStable(applicable, func(i, j int) bool {
-		return store.SecgwScopeRank[applicable[i].ScopeType] < store.SecgwScopeRank[applicable[j].ScopeType]
+		ri, rj := store.SecgwScopeRank[applicable[i].ScopeType], store.SecgwScopeRank[applicable[j].ScopeType]
+		if ri != rj {
+			return ri < rj
+		}
+		// Within personal subscriptions, one provider is more specific
+		// than every provider, so it applies later and wins.
+		return applicable[i].ScopeID == store.SecgwScopeAnyProvider && applicable[j].ScopeID != store.SecgwScopeAnyProvider
 	})
 	for _, b := range applicable {
 		p := snap.Policies[b.PolicyID]
@@ -159,6 +168,8 @@ func bindingApplies(b *store.SecgwBinding, sub Subject) bool {
 		return sub.ModelID != "" && sub.ModelID == b.ScopeID
 	case store.SecgwScopeManagedModel:
 		return sub.ManagedModelID != "" && sub.ManagedModelID == b.ScopeID
+	case store.SecgwScopePersonalSubscription:
+		return sub.PersonalProvider != "" && (b.ScopeID == store.SecgwScopeAnyProvider || b.ScopeID == sub.PersonalProvider)
 	}
 	return false
 }

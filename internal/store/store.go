@@ -84,6 +84,20 @@ func (s *Store) logger() *slog.Logger {
 // Accepted forms: postgres://…, postgresql://…, sqlite:///abs/path.db, file:…,
 // or a bare filesystem path.
 func Open(ctx context.Context, url string) (*Store, error) {
+	return OpenWithPool(ctx, url, 0)
+}
+
+// DefaultMaxConns is the per-process PostgreSQL pool ceiling when
+// JANUS_DB_MAX_CONNS is unset. Keep replicas x this well under the server's
+// max_connections: at 50 two replicas exhausted a 100-connection server.
+const DefaultMaxConns = 25
+
+// OpenWithPool is Open with an explicit PostgreSQL pool ceiling (<= 0 uses
+// DefaultMaxConns). SQLite always uses a single writer connection.
+func OpenWithPool(ctx context.Context, url string, maxConns int) (*Store, error) {
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConns
+	}
 	driver, dsn, dialect, err := resolveDSN(url)
 	if err != nil {
 		return nil, err
@@ -96,8 +110,8 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		// One writer avoids SQLITE_BUSY under concurrent proxy metering.
 		db.SetMaxOpenConns(1)
 	} else {
-		db.SetMaxOpenConns(50)
-		db.SetMaxIdleConns(10)
+		db.SetMaxOpenConns(maxConns)
+		db.SetMaxIdleConns(min(10, maxConns))
 		db.SetConnMaxLifetime(time.Hour)
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -246,6 +260,17 @@ func (s *Store) ModelRevision() uint64 {
 	}
 	return s.modelRevision.Load()
 }
+
+// writeTx runs fn in a transaction WITHOUT bumping the model revision. Use it
+// for hot-path writes (metering) that cannot change the model catalog: a bump
+// there flushed every revision-tagged proxy cache on every request.
+func (s *Store) writeTx(ctx context.Context, fn func(*Store) error) error {
+	if s.tx != nil {
+		return fn(s)
+	}
+	return s.InTx(ctx, func(tx *sql.Tx) error { copy := *s; copy.tx = tx; return fn(&copy) })
+}
+
 func (s *Store) modelTx(ctx context.Context, fn func(*Store) error) error {
 	if s.tx != nil {
 		return fn(s)

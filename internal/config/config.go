@@ -98,6 +98,16 @@ type Config struct {
 	// unaffected. Default false: behavior is identical to a billed deployment.
 	LocalOnly bool
 
+	// PerformanceMode (JANUS_PERFORMANCE_MODE, Business edition) batches
+	// usage writes and commits them without waiting for the WAL flush. It
+	// trades a bounded metering-loss window for throughput; see
+	// httpapi/performance_mode.go. Default false.
+	PerformanceMode bool
+	// DBMaxConns caps this process's PostgreSQL pool (JANUS_DB_MAX_CONNS,
+	// default 25). Keep replicas x DBMaxConns under the server's
+	// max_connections with headroom for admin tools and the operator.
+	DBMaxConns int
+
 	// Sessions
 	SessionTTL         time.Duration
 	SessionIdleTimeout time.Duration
@@ -232,6 +242,8 @@ func (c *Config) Redacted() map[string]any {
 		"oidc_secret_configured": c.OIDCClientSecret != "",
 		"dev_auth_enabled":       c.DevAuthEnabled,
 		"local_only":             c.LocalOnly,
+		"performance_mode":       c.PerformanceMode,
+		"db_max_conns":           c.DBMaxConns,
 		"smtp_configured":        c.SMTPHost != "",
 		"tls_configured":         c.TLSCertPath != "",
 		"ca_bundle_configured":   c.CABundlePath != "",
@@ -283,6 +295,7 @@ func Load() (*Config, error) {
 		OIDCGroupsClaim:      envOr("JANUS_OIDC_GROUPS_CLAIM", "groups"),
 		DevAuthEnabled:       envBool("JANUS_DEV_AUTH", false),
 		LocalOnly:            envBool("JANUS_LOCAL_ONLY", false),
+		PerformanceMode:      envBool("JANUS_PERFORMANCE_MODE", false),
 		SMTPHost:             os.Getenv("JANUS_SMTP_HOST"),
 		SMTPUser:             os.Getenv("JANUS_SMTP_USER"),
 		SMTPPass:             os.Getenv("JANUS_SMTP_PASSWORD"),
@@ -332,6 +345,12 @@ func Load() (*Config, error) {
 	}
 	if c.ConfigCacheTTL, err = envSeconds("JANUS_CONFIG_CACHE_TTL_SECONDS", 5); err != nil {
 		return nil, err
+	}
+	if c.DBMaxConns, err = envInt("JANUS_DB_MAX_CONNS", 25); err != nil {
+		return nil, err
+	}
+	if c.DBMaxConns < 1 {
+		return nil, fmt.Errorf("JANUS_DB_MAX_CONNS must be at least 1")
 	}
 	if c.QuotaCheckpointEvery, err = envHours("JANUS_QUOTA_CHECKPOINT_INTERVAL_HOURS", 24); err != nil {
 		return nil, err

@@ -122,7 +122,11 @@ export function headSizeForTokens(tokensOut: number): number {
  * quiet first paint to real traffic on page load — read as a band of stars
  * sweeping across the sky.
  */
-export function arrivingStarPosition(width: number, height: number, random: () => number = Math.random): { x: number; y: number } {
+export function arrivingStarPosition(
+  width: number,
+  height: number,
+  random: () => number = Math.random,
+): { x: number; y: number } {
   return { x: random() * width, y: random() * height };
 }
 

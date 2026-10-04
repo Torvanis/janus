@@ -30,6 +30,7 @@ export default function AdminRoutes(): ReactNode {
       <Route path="grants" element={<GrantsPage />} />
       <Route path="service-tokens" element={<ServiceTokensPage />} />
       <Route path="service-tokens/:id" element={<ServiceTokensPage />} />
+      <Route path="subscriptions" element={<LegacyWorkspaceRedirect />} />
       <Route path="users" element={<PeoplePage />} />
       <Route path="teams" element={<PeopleTeamsPage />} />
       <Route path="teams/import" element={<TeamImportPage />} />

@@ -460,3 +460,16 @@ stopwords = ["nope"]
 		}
 	}
 }
+
+// The admin API serves RuleInfo as JSON; keep it snake_case like the rest of
+// the API (it was PascalCase before tags were added).
+func TestRuleInfoJSONShape(t *testing.T) {
+	b, err := json.Marshal(RuleInfo{ID: "aws-access-key", Description: "AWS access key", Severity: "high", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":"aws-access-key","description":"AWS access key","severity":"high","enabled":true}`
+	if string(b) != want {
+		t.Fatalf("RuleInfo JSON = %s, want %s", b, want)
+	}
+}

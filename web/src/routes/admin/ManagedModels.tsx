@@ -11,12 +11,13 @@ import {
   type Model,
 } from '../../lib/types';
 import { formatNumber, formatRelative, formatUSD } from '../../lib/format';
-import { AsyncSection, Badge, ConfirmDialog, EmptyState, Field, Modal, useToast } from '../../components/ui';
+import { AsyncSection, Badge, ConfirmDialog, Drawer, EmptyState, Field, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { FilterSelect, SearchInput } from '../shared';
 import { useLicensed, useLocalOnly } from '../../app/session';
 import { t } from '../../lib/i18n';
+import { PoolEditor, PoolHealthPanel, isLoadBalanced, poolDraftFrom, type PoolDraft } from './PoolEditor';
 
 type ManagedSortField = 'name' | 'created' | 'spend' | 'requests' | 'tokens' | 'users' | 'grants';
 
@@ -267,7 +268,15 @@ export function ManagedModelsPage(): ReactNode {
                             </td>
                             <td className="small">
                               <span className="mono">{m.target_public_name}</span>
-                              <div className="small muted">{m.target_upstream_name}</div>
+                              <div className="small muted">
+                                {(m.pool?.members.length ?? 1) > 1 ? (
+                                  <Badge tone="info">
+                                    {t('adminManagedModels.poolBadge', { count: m.pool?.members.length ?? 1 })}
+                                  </Badge>
+                                ) : (
+                                  m.target_upstream_name
+                                )}
+                              </div>
                             </td>
                             <td className="small">
                               {m.fallback_model_id ? (
@@ -303,10 +312,17 @@ export function ManagedModelsPage(): ReactNode {
                                 <IconButton icon="edit" label={t('adminManagedModels.edit')} onClick={() => setEditing(m)} />
                                 <IconButton
                                   icon={m.status === 'enabled' ? 'disable' : 'enable'}
-                                  label={m.status === 'enabled' ? t('adminManagedModels.disable') : t('adminManagedModels.enable')}
+                                  label={
+                                    m.status === 'enabled' ? t('adminManagedModels.disable') : t('adminManagedModels.enable')
+                                  }
                                   onClick={() => setToggling(m)}
                                 />
-                                <IconButton icon="delete" label={t('adminManagedModels.delete')} danger onClick={() => setDeleting(m)} />
+                                <IconButton
+                                  icon="delete"
+                                  label={t('adminManagedModels.delete')}
+                                  danger
+                                  onClick={() => setDeleting(m)}
+                                />
                               </RowActions>
                             </td>
                           </tr>
@@ -388,6 +404,7 @@ function ManagedModelDialog({
   onSaved: () => void;
 }): ReactNode {
   const fallbacksLicensed = useLicensed('model_fallbacks');
+  const poolsLicensed = useLicensed('load_balancing');
   const toast = useToast();
   const editing = Boolean(model);
   const [name, setName] = useState('');
@@ -396,6 +413,9 @@ function ManagedModelDialog({
   const [fallbackId, setFallbackId] = useState<string | null>(null);
   const [triggers, setTriggers] = useState<FallbackTrigger[] | null>(null);
   const [confirmRepoint, setConfirmRepoint] = useState(false);
+  // Pool draft is "null until touched" like the fallback, so saving an
+  // untouched pool never rewrites it.
+  const [poolDraft, setPoolDraft] = useState<PoolDraft | null>(null);
 
   const models = useQuery({
     queryKey: ['admin', 'models', 'for-managed'],
@@ -407,8 +427,20 @@ function ManagedModelDialog({
   const targets = useMemo(() => (models.data?.models ?? []).filter((m) => m.status === 'enabled'), [models.data]);
 
   const effectiveName = editing ? ((name || model?.name) ?? '') : name;
-  const effectiveTarget = editing ? targetId || model?.target_model_id || '' : targetId;
-  const targetChanged = editing && effectiveTarget !== model?.target_model_id;
+  const storedPool = model?.pool;
+  const wasBalanced = Boolean(
+    storedPool && (storedPool.members.filter((m) => m.enabled).length > 1 || storedPool.policy !== 'failover'),
+  );
+  const pool: PoolDraft = poolDraft ?? poolDraftFrom(storedPool, editing ? targetId || model?.target_model_id || '' : targetId);
+  // Once the pool has more than one model the single "target" picker is
+  // replaced by the member list; the first member is the target.
+  const pooled = pool.members.length > 1;
+  const effectiveTarget = pooled
+    ? (pool.members.find((m) => m.enabled)?.model_id ?? '')
+    : editing
+      ? targetId || model?.target_model_id || ''
+      : targetId;
+  const targetChanged = !pooled && !wasBalanced && editing && effectiveTarget !== model?.target_model_id;
   // Fallback state is "null until touched" so an edit that never opens the
   // section leaves the stored configuration exactly as it was.
   const effectiveFallback = fallbackId ?? model?.fallback_model_id ?? '';
@@ -416,7 +448,10 @@ function ManagedModelDialog({
     triggers ?? (model?.fallback_triggers?.length ? model.fallback_triggers : DEFAULT_FALLBACK_TRIGGERS);
   // The fallback can be any enabled model except the one it would replace; a
   // fallback that IS the target is refused server-side too.
-  const fallbackChoices = useMemo(() => targets.filter((m) => m.id !== effectiveTarget), [targets, effectiveTarget]);
+  const fallbackChoices = useMemo(
+    () => targets.filter((m) => m.id !== effectiveTarget && !pool.members.some((p) => p.model_id === m.id)),
+    [targets, effectiveTarget, pool.members],
+  );
   const toggleTrigger = (trigger: FallbackTrigger) => {
     const next = effectiveTriggers.includes(trigger)
       ? effectiveTriggers.filter((x) => x !== trigger)
@@ -443,14 +478,17 @@ function ManagedModelDialog({
         ? api.patch(`/api/v1/admin/managed-models/${model?.id}`, {
             name: effectiveName,
             description: description || model?.description || '',
-            target_model_id: effectiveTarget,
+            // A pool edit carries the whole member list; a classic alias
+            // still repoints through target_model_id.
+            ...(poolDraft && (pooled || wasBalanced) ? { pool: poolDraft } : { target_model_id: effectiveTarget }),
             fallback_model_id: effectiveFallback,
             fallback_triggers: effectiveFallback ? effectiveTriggers : [],
           })
         : api.post('/api/v1/admin/managed-models', {
             name,
             description,
-            target_model_id: targetId,
+            target_model_id: effectiveTarget,
+            ...(pooled ? { pool } : {}),
             fallback_model_id: effectiveFallback,
             fallback_triggers: effectiveFallback ? effectiveTriggers : [],
           }),
@@ -461,13 +499,15 @@ function ManagedModelDialog({
       setTargetId('');
       setFallbackId(null);
       setTriggers(null);
+      setPoolDraft(null);
       onSaved();
     },
     onError: (error: Error) => toast(error.message, 'danger'),
   });
 
   const triggersMissing = Boolean(effectiveFallback) && effectiveTriggers.length === 0;
-  const valid = Boolean(effectiveName.trim()) && Boolean(effectiveTarget) && !triggersMissing;
+  const poolNeedsLicense = pooled && isLoadBalanced(pool) && !poolsLicensed && !wasBalanced;
+  const valid = Boolean(effectiveName.trim()) && Boolean(effectiveTarget) && !triggersMissing && !poolNeedsLicense;
 
   const submit = () => {
     if (!valid) return;
@@ -484,8 +524,9 @@ function ManagedModelDialog({
 
   return (
     <>
-      <Modal
+      <Drawer
         open={open}
+        wide
         onClose={onClose}
         title={editing ? t('adminManagedModels.editTitle', { name: model?.name ?? '' }) : t('adminManagedModels.createTitle')}
         description={editing ? t('adminManagedModels.editDescription') : t('adminManagedModels.createDescription')}
@@ -514,20 +555,37 @@ function ManagedModelDialog({
             onChange={(event) => setDescription(event.target.value)}
           />
         </Field>
-        <Field label={t('adminManagedModels.targetLabel')} required hint={t('adminManagedModels.targetHint')}>
-          <select
-            className="select"
-            defaultValue={model?.target_model_id ?? ''}
-            onChange={(event) => setTargetId(event.target.value)}
-          >
-            <option value="">{t('adminManagedModels.chooseTarget')}</option>
-            {targets.map((m) => (
-              <option key={m.id} value={m.id}>
-                {publicModelName(m)} · {m.upstream_name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {pooled ? null : (
+          <Field label={t('adminManagedModels.targetLabel')} required hint={t('adminManagedModels.targetHint')}>
+            <select
+              className="select"
+              defaultValue={model?.target_model_id ?? ''}
+              onChange={(event) => {
+                setTargetId(event.target.value);
+                setPoolDraft(null);
+              }}
+            >
+              <option value="">{t('adminManagedModels.chooseTarget')}</option>
+              {targets.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {publicModelName(m)} · {m.upstream_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {effectiveTarget || pooled ? (
+          <PoolEditor
+            draft={pool}
+            onChange={setPoolDraft}
+            models={targets}
+            licensed={poolsLicensed}
+            wasBalanced={wasBalanced}
+            fallbackId={effectiveFallback}
+          />
+        ) : null}
+        {editing && model && wasBalanced ? <PoolHealthPanel managedModelId={model.id} /> : null}
 
         <section className="card stack" aria-labelledby="managed-model-fallback-heading">
           <div>
@@ -585,7 +643,7 @@ function ManagedModelDialog({
             </Field>
           ) : null}
         </section>
-      </Modal>
+      </Drawer>
 
       <ConfirmDialog
         open={confirmRepoint}

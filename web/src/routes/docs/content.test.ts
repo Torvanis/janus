@@ -14,8 +14,19 @@ const CODES_EMITTED_BY_GATEWAY = [
   'policy.endpoint_blocked',
   'policy.token_invalid',
   'policy.rate_limit',
+  'policy.security_blocked',
+  'policy.response_too_large',
+  'policy.service_token_scope',
+  'policy.service_token_expired',
+  'policy.managed_model_unavailable',
+  'policy.managed_model_fallback_exhausted',
+  'policy.subscription_reauth_required',
+  'license.required',
+  'license.feature_not_licensed',
+  'not_found_error',
   'upstream.unavailable',
   'upstream.rate_limit',
+  'upstream.stream_interrupted',
   'invalid_request_error',
   'authentication_error',
   'permission_error',
@@ -36,6 +47,14 @@ describe('error catalog', () => {
       expect(entry.when.length, `${entry.code} has no cause`).toBeGreaterThan(20);
       expect(entry.status).toBeGreaterThanOrEqual(400);
       expect(entry.status).toBeLessThan(600);
+    }
+  });
+
+  it('names every documented code on the Troubleshooting page', () => {
+    const page = pageBySlug('troubleshooting');
+    const text = (page?.sections ?? []).map((section) => section.body.join(' ')).join(' ');
+    for (const entry of ERROR_CATALOG) {
+      expect(text.includes(`\`${entry.code}\``), `troubleshooting does not mention ${entry.code}`).toBe(true);
     }
   });
 
@@ -154,6 +173,27 @@ describe('glossary', () => {
     const terms = GLOSSARY.map((entry) => entry.term.toLowerCase());
     for (const required of ['adapter', 'upstream', 'grant', 'rate card', 'modality', 'cached tokens']) {
       expect(terms, `glossary is missing "${required}"`).toContain(required);
+    }
+  });
+});
+
+describe('troubleshooting page', () => {
+  it('covers every gateway-originated code, symptom first', () => {
+    const page = pageBySlug('troubleshooting');
+    const headings = (page?.sections ?? []).map((section) => section.heading);
+    expect(headings).toEqual(
+      expect.arrayContaining([
+        'Start with the error code',
+        'I got a 401: my key is not accepted',
+        'I got a 403: I am not allowed',
+        'I got a 429: too many requests or quota used up',
+        'I got a 5xx: the model did not answer',
+        'My stream stopped early',
+      ]),
+    );
+    for (const code of CODES_EMITTED_BY_GATEWAY) {
+      const text = (page?.sections ?? []).map((section) => section.body.join(' ')).join(' ');
+      expect(text, `troubleshooting is missing ${code}`).toContain(`\`${code}\``);
     }
   });
 });

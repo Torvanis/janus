@@ -112,8 +112,6 @@ describe('compact people table', () => {
     expect((size as HTMLSelectElement).value).toBe('50');
     const { fireEvent, waitFor } = await import('@testing-library/react');
     fireEvent.change(size, { target: { value: '200' } });
-    await waitFor(() =>
-      expect(mocked.get.mock.calls.some(([path]) => String(path).includes('limit=200'))).toBe(true),
-    );
+    await waitFor(() => expect(mocked.get.mock.calls.some(([path]) => String(path).includes('limit=200'))).toBe(true));
   });
 });

@@ -413,9 +413,28 @@ export function RequestDetail({
               </span>
             </DetailRow>
           ) : null}
+          {event.pool_reason ? (
+            <DetailRow label={t('requests.poolRouting')}>
+              <span className="small">
+                {{
+                  policy: t('requests.poolReasonPolicy'),
+                  affinity: t('requests.poolReasonAffinity'),
+                  spill: t('requests.poolReasonSpill'),
+                  moved: t('requests.poolReasonMoved'),
+                  retry: t('requests.poolReasonRetry', { count: event.pool_attempts ?? 2 }),
+                  only: t('requests.poolReasonOnly'),
+                }[event.pool_reason] ?? event.pool_reason}
+              </span>
+            </DetailRow>
+          ) : null}
           {event.fallback_reason ? (
             <DetailRow label={t('requests.servedByFallback')}>
               <Badge tone="warning">{event.fallback_reason}</Badge>
+            </DetailRow>
+          ) : null}
+          {event.reasoning_adjustment ? (
+            <DetailRow label={t('requests.reasoningAdjusted')}>
+              <span className="mono small">{event.reasoning_adjustment.replace('->', ' → ')}</span>
             </DetailRow>
           ) : null}
           <DetailRow label={t('requests.finishReason')}>{event.finish_reason || '—'}</DetailRow>

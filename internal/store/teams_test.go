@@ -61,7 +61,7 @@ func TestTeamSourcesAndLeader(t *testing.T) {
 	}
 }
 
-func TestTeamBackfillTransitions(t *testing.T) {
+func TestTeamJoinLeavesUsageAttribution(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	teamTestUser(t, s, "u")
@@ -94,26 +94,17 @@ func TestTeamBackfillTransitions(t *testing.T) {
 	if err := s.AddTeamMember(ctx, a.ID, "u", "member", "manual", ""); err != nil {
 		t.Fatal(err)
 	}
-	check("old", a.ID)
+	check("old", "")
 	check("assigned", "historic,other")
-	addUsage("unassigned-while-member", "")
-	if err := s.AddTeamMember(ctx, b.ID, "u", "member", "manual", ""); err != nil {
-		t.Fatal(err)
-	}
-	check("unassigned-while-member", "")
-	check("old", a.ID)
-	for _, id := range []string{a.ID, b.ID} {
-		if err := s.RemoveTeamMemberSource(ctx, id, "u", "manual", ""); err != nil {
-			t.Fatal(err)
-		}
-	}
-	addUsage("later", "")
+	addUsage("later", b.ID)
 	if err := s.AddTeamMember(ctx, b.ID, "u", "member", "group", "g"); err != nil {
 		t.Fatal(err)
 	}
+	check("old", "")
 	check("later", b.ID)
-	check("unassigned-while-member", b.ID)
-	check("old", a.ID)
+	if err := s.RemoveTeamMemberSource(ctx, a.ID, "u", "manual", ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.DeleteTeam(ctx, b.ID); err != nil {
 		t.Fatal(err)
 	}

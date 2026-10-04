@@ -83,7 +83,8 @@ export function Collection<T>({
           {filtered.length} of {rows.length} {scope === 'frozen-report' ? 'snapshot rows' : 'rows'}
         </span>
         {((!hideSearch && search) || (!children && sort)) && (
-          <button type="button"
+          <button
+            type="button"
             className="btn btn-sm"
             onClick={() => batch({ [`${name}.q`]: null, [`${name}.sort`]: null, [`${name}.page`]: null })}
           >

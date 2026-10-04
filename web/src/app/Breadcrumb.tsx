@@ -19,6 +19,16 @@ function TeamName({ id, administration }: { id: string; administration: boolean 
   return <>{match?.name ?? 'Team'}</>;
 }
 
+/** A subscription provider's name from the page's own (already cached) list. */
+function SubscriptionProviderName({ id }: { id: string }) {
+  const list = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: () => api.get<{ providers: { id: string; name: string }[] }>('/api/v1/me/subscriptions'),
+    staleTime: 30000,
+  });
+  return <>{list.data?.providers.find((p) => p.id === id)?.name ?? id.replace(/-/g, ' ')}</>;
+}
+
 export function Breadcrumb({ path }: { path: string }): ReactNode {
   let segments = path.split('/').filter(Boolean);
   const administration = segments[0] === 'admin' && segments[1] === 'teams';
@@ -35,6 +45,8 @@ export function Breadcrumb({ path }: { path: string }): ReactNode {
           <span>
             {index === teamIndex && segment !== 'import' ? (
               <TeamName id={segment} administration={administration} />
+            ) : index === 1 && segments[0] === 'subscriptions' ? (
+              <SubscriptionProviderName id={segment} />
             ) : (
               ({
                 admin: 'Administration',

@@ -16,11 +16,11 @@ const usageColumns = `id, created_at, user_id, service_token_id, token_id, team_
 	finish_reason, http_status, latency_ms, ttfb_ms,
 	upstream_latency_ms, client_user_agent, client_ip, x_forwarded_for, referer, client_app, error_code, quota_violated,
 	blocking_rule_id, request_id, tokens_in_per_second, tokens_out_per_second, throughput_source, fallback_reason,
-	secgw_action, secgw_violations`
+	secgw_action, secgw_violations, subscription_id, reasoning_adjustment, pool_reason, pool_attempts`
 
-// InsertUsageEvent appends a metering record, preserving explicit team snapshots.
-// Empty snapshots may be attributed by a recorded zero-to-one transition after
-// admission; the current roster is never used to infer request context.
+// InsertUsageEvent appends a metering record with the team context admitted
+// for the request (empty = Personal). The current roster is never consulted,
+// and the write takes no row lock shared with other requests.
 // CostNano is stored unchanged, including in local-only mode.
 func (s *Store) InsertUsageEvent(ctx context.Context, e *UsageEvent) error {
 	if e.ID == "" {
@@ -29,38 +29,80 @@ func (s *Store) InsertUsageEvent(ctx context.Context, e *UsageEvent) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = nowUTC()
 	}
-	if e.TeamIDs == "" && e.UserID != "" {
-		return s.modelTx(ctx, func(s *Store) error {
-			if err := s.lockTeamAttributionUser(ctx, e.UserID); err != nil {
-				return err
-			}
-			teamID, err := s.lateUsageTeam(ctx, e.UserID, e.CreatedAt)
-			if err != nil {
-				return err
-			}
-			// Do not mutate the caller's snapshot, including on transaction failure.
-			record := *e
-			record.TeamIDs = teamID
-			return s.insertUsageEvent(ctx, &record)
-		})
-	}
 	return s.insertUsageEvent(ctx, e)
 }
 
+func usageArgs(e *UsageEvent) []any {
+	return []any{e.ID, FormatTime(e.CreatedAt), e.UserID, e.ServiceTokenID, e.TokenID, e.TeamIDs, e.UpstreamID, e.ModelID, e.ModelName,
+		e.RequestedModelName, e.EndpointPath, e.HTTPMethod, e.Modality, boolInt(e.Streaming), e.RequestBytes, e.ResponseBytes,
+		e.AttachmentCount, e.TokensIn, e.TokensOut, e.TokensCached, e.TokensCacheWrite5m, e.TokensCacheWrite1h,
+		e.AccountingMode, e.CostNano, e.FinishReason,
+		e.HTTPStatus, e.LatencyMs, e.TTFBMs, e.UpstreamMs, e.UserAgent, e.ClientIP, e.XForwardedFor, e.Referer,
+		e.ClientApp, e.ErrorCode, boolInt(e.QuotaViolated), e.BlockingRuleID, e.RequestID,
+		e.TokensInPerSecond, e.TokensOutPerSecond, e.ThroughputSource, e.FallbackReason,
+		e.SecgwAction, e.SecgwViolations, e.SubscriptionID, e.ReasoningAdjustment, e.PoolReason, e.PoolAttempts}
+}
+
 func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
-	return s.modelTx(ctx, func(s *Store) error {
-		if err := s.exec(ctx, `INSERT INTO usage_event (`+usageColumns+`) VALUES (`+placeholders(44)+`)`,
-			e.ID, FormatTime(e.CreatedAt), e.UserID, e.ServiceTokenID, e.TokenID, e.TeamIDs, e.UpstreamID, e.ModelID, e.ModelName,
-			e.RequestedModelName, e.EndpointPath, e.HTTPMethod, e.Modality, boolInt(e.Streaming), e.RequestBytes, e.ResponseBytes,
-			e.AttachmentCount, e.TokensIn, e.TokensOut, e.TokensCached, e.TokensCacheWrite5m, e.TokensCacheWrite1h,
-			e.AccountingMode, e.CostNano, e.FinishReason,
-			e.HTTPStatus, e.LatencyMs, e.TTFBMs, e.UpstreamMs, e.UserAgent, e.ClientIP, e.XForwardedFor, e.Referer,
-			e.ClientApp, e.ErrorCode, boolInt(e.QuotaViolated), e.BlockingRuleID, e.RequestID,
-			e.TokensInPerSecond, e.TokensOutPerSecond, e.ThroughputSource, e.FallbackReason,
-			e.SecgwAction, e.SecgwViolations); err != nil {
+	return s.writeTx(ctx, func(s *Store) error {
+		args := usageArgs(e)
+		if err := s.exec(ctx, `INSERT INTO usage_event (`+usageColumns+`) VALUES (`+placeholders(len(args))+`)`, args...); err != nil {
 			return err
 		}
 		return s.insertReportingFact(ctx, e)
+	})
+}
+
+// usageBatchRows bounds one multi-row INSERT: 44 columns x 200 rows stays far
+// below PostgreSQL's 65535 and SQLite's 32766 bind-parameter limits.
+const usageBatchRows = 200
+
+// InsertUsageEvents writes many metering records in one transaction with
+// multi-row INSERTs, for performance mode's batched writer. asyncCommit asks
+// PostgreSQL not to wait for the WAL flush (SET LOCAL synchronous_commit=off):
+// a database crash can lose the last ~0.5 s of committed rows, never corrupt
+// them. All-or-nothing: on error nothing in the batch is written.
+func (s *Store) InsertUsageEvents(ctx context.Context, events []*UsageEvent, asyncCommit bool) error {
+	if len(events) == 0 {
+		return nil
+	}
+	for _, e := range events {
+		if e.ID == "" {
+			e.ID = NewID()
+		}
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = nowUTC()
+		}
+	}
+	return s.writeTx(ctx, func(s *Store) error {
+		if asyncCommit && s.dialect == DialectPostgres {
+			if err := s.exec(ctx, `SET LOCAL synchronous_commit TO OFF`); err != nil {
+				return err
+			}
+		}
+		for start := 0; start < len(events); start += usageBatchRows {
+			chunk := events[start:min(start+usageBatchRows, len(events))]
+			var usage, facts []any
+			var usageRows, factRows []string
+			for _, e := range chunk {
+				a := usageArgs(e)
+				usage = append(usage, a...)
+				usageRows = append(usageRows, "("+placeholders(len(a))+")")
+				f, err := reportingFactArgs(e)
+				if err != nil {
+					return err
+				}
+				facts = append(facts, f...)
+				factRows = append(factRows, "("+placeholders(len(f))+")")
+			}
+			if err := s.exec(ctx, `INSERT INTO usage_event (`+usageColumns+`) VALUES `+strings.Join(usageRows, ","), usage...); err != nil {
+				return err
+			}
+			if err := s.exec(ctx, `INSERT INTO reporting_usage_snapshot (`+reportingFactColumns+`) VALUES `+strings.Join(factRows, ","), facts...); err != nil {
+				return fmt.Errorf("insert reporting snapshot: %w", err)
+			}
+		}
+		return nil
 	})
 }
 
@@ -75,7 +117,7 @@ func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 		&e.FinishReason, &e.HTTPStatus, &e.LatencyMs, &e.TTFBMs, &e.UpstreamMs, &e.UserAgent, &e.ClientIP,
 		&e.XForwardedFor, &e.Referer, &e.ClientApp, &e.ErrorCode, &violated, &e.BlockingRuleID, &e.RequestID,
 		&e.TokensInPerSecond, &e.TokensOutPerSecond, &e.ThroughputSource, &e.FallbackReason,
-		&e.SecgwAction, &e.SecgwViolations); err != nil {
+		&e.SecgwAction, &e.SecgwViolations, &e.SubscriptionID, &e.ReasoningAdjustment, &e.PoolReason, &e.PoolAttempts); err != nil {
 		return nil, err
 	}
 	e.CreatedAt = ParseTime(created)
@@ -153,6 +195,9 @@ type RequestFilter struct {
 	// page exposes a "show gateway internals" toggle rather than hiding them
 	// outright, and a request's drawer always shows its own classifier runs.
 	IncludeInternal bool
+	// Source narrows by who paid: "subscription" keeps only requests served
+	// by a user's own connected plan, "organization" excludes them.
+	Source string
 }
 
 // InternalClientApp marks usage events the gateway generated for itself
@@ -241,6 +286,12 @@ func (f RequestFilter) clause() (string, []any) {
 	if !f.IncludeInternal {
 		where = append(where, "(client_app IS NULL OR client_app <> ?)")
 		args = append(args, InternalClientApp)
+	}
+	switch f.Source {
+	case "subscription":
+		where = append(where, "subscription_id <> ''")
+	case "organization":
+		where = append(where, "subscription_id = ''")
 	}
 	if f.Accounting != "" {
 		where = append(where, "token_accounting_method = ?")
@@ -393,6 +444,22 @@ type UsageScope struct {
 }
 
 func (u UsageScope) clause() (string, []any) {
+	where, args := u.dimClause()
+	parts := []string{where}
+	if !u.Start.IsZero() {
+		parts = append(parts, "created_at >= ?")
+		args = append(args, FormatTime(u.Start))
+	}
+	if !u.End.IsZero() {
+		parts = append(parts, "created_at <= ?")
+		args = append(args, FormatTime(u.End))
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// dimClause is clause without the time window. Every column it filters on
+// is carried by usage_rollup as well as usage_event.
+func (u UsageScope) dimClause() (string, []any) {
 	where := []string{"1=1"}
 	args := []any{}
 	if clause, teamArgs := usageTeamClause(u.TeamIDs); clause != "" {
@@ -422,14 +489,6 @@ func (u UsageScope) clause() (string, []any) {
 		where = append(where, "user_id IN ("+placeholders(len(u.UserIDs))+")")
 		args = append(args, toArgs(u.UserIDs)...)
 	}
-	if !u.Start.IsZero() {
-		where = append(where, "created_at >= ?")
-		args = append(args, FormatTime(u.Start))
-	}
-	if !u.End.IsZero() {
-		where = append(where, "created_at <= ?")
-		args = append(args, FormatTime(u.End))
-	}
 	return strings.Join(where, " AND "), args
 }
 
@@ -443,12 +502,15 @@ const totalsExpr = `COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0), COA
 // values of each column and summing them yields "how many separate callers",
 // whether they are people, integrations, or both.
 func (s *Store) CountDistinctPrincipals(ctx context.Context, scope UsageScope) (int64, error) {
-	clause, args := scope.clause()
+	src, args, err := s.usageSource(ctx, scope, false)
+	if err != nil {
+		return 0, err
+	}
 	var users, tokens int64
-	err := s.queryRow(ctx, `SELECT
+	err = s.queryRow(ctx, `SELECT
 		COUNT(DISTINCT CASE WHEN user_id <> '' THEN user_id END),
 		COUNT(DISTINCT CASE WHEN service_token_id <> '' THEN service_token_id END)
-		FROM usage_event WHERE `+clause, args...).Scan(&users, &tokens)
+		FROM `+src, args...).Scan(&users, &tokens)
 	if err != nil {
 		return 0, fmt.Errorf("count distinct principals: %w", err)
 	}
@@ -457,9 +519,12 @@ func (s *Store) CountDistinctPrincipals(ctx context.Context, scope UsageScope) (
 
 // AggregateUsage computes headline totals for a scope.
 func (s *Store) AggregateUsage(ctx context.Context, scope UsageScope) (Totals, error) {
-	clause, args := scope.clause()
 	var t Totals
-	err := s.queryRow(ctx, `SELECT `+totalsExpr+` FROM usage_event WHERE `+clause, args...).
+	src, args, err := s.usageSource(ctx, scope, false)
+	if err != nil {
+		return t, err
+	}
+	err = s.queryRow(ctx, `SELECT `+srcTotalsExpr+` FROM `+src, args...).
 		Scan(&t.TokensIn, &t.TokensOut, &t.TokensCached, &t.TokensCacheWrite5m, &t.TokensCacheWrite1h,
 			&t.CostNano, &t.Requests, &t.ErrorCount)
 	if err != nil {
@@ -507,17 +572,34 @@ func (s *Store) BreakdownUsage(ctx context.Context, scope UsageScope, dimension 
 	if len(metric) > 0 && metric[0] != "" {
 		rank = metric[0]
 	}
+	_, rolled := rollupDimension[dimension]
+	countExpr := "COUNT(*)"
+	if rolled {
+		countExpr = "SUM(request_count)"
+	}
 	orderExpr := map[string]string{
 		BreakdownMetricTokensOut: "SUM(tokens_out)",
 		BreakdownMetricCost:      "SUM(cost_nanousd)",
-		BreakdownMetricRequests:  "COUNT(*)",
+		BreakdownMetricRequests:  countExpr,
 	}[rank]
 	if orderExpr == "" {
 		return nil, fmt.Errorf("unsupported breakdown metric %q", rank)
 	}
-	clause, args := scope.clause()
-	rows, err := s.query(ctx, `SELECT `+column+`, `+totalsExpr+` FROM usage_event WHERE `+clause+
-		` GROUP BY `+column+` ORDER BY `+orderExpr+` DESC, COUNT(*) DESC LIMIT 50`, args...)
+	var rows *sql.Rows
+	var err error
+	if rolled {
+		// The rollup carries this dimension: aggregate settled hours from it.
+		src, args, serr := s.usageSource(ctx, scope, false)
+		if serr != nil {
+			return nil, serr
+		}
+		rows, err = s.query(ctx, `SELECT `+column+`, `+srcTotalsExpr+` FROM `+src+
+			` GROUP BY `+column+` ORDER BY `+orderExpr+` DESC, `+countExpr+` DESC LIMIT 50`, args...)
+	} else {
+		clause, args := scope.clause()
+		rows, err = s.query(ctx, `SELECT `+column+`, `+totalsExpr+` FROM usage_event WHERE `+clause+
+			` GROUP BY `+column+` ORDER BY `+orderExpr+` DESC, COUNT(*) DESC LIMIT 50`, args...)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -636,6 +718,25 @@ func (s *Store) catalogModelNames(ctx context.Context) (map[string]struct{}, err
 	for name := range managed {
 		names[name] = struct{}{}
 	}
+	// Personal-subscription models (my/<provider>/<model>) have no catalog
+	// row; they are legitimate exactly when a request was served through a
+	// connected subscription, which is what subscription_id records. Typos
+	// of the prefix still carry no subscription_id and are still dropped.
+	personal, err := s.query(ctx, `SELECT DISTINCT model_name FROM usage_event WHERE subscription_id <> ''`)
+	if err != nil {
+		return nil, fmt.Errorf("load personal subscription model names: %w", err)
+	}
+	defer func() { _ = personal.Close() }()
+	for personal.Next() {
+		var name string
+		if err := personal.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan personal subscription model name: %w", err)
+		}
+		names[name] = struct{}{}
+	}
+	if err := personal.Err(); err != nil {
+		return nil, err
+	}
 	return names, nil
 }
 
@@ -701,16 +802,26 @@ func (s *Store) UsageSeries(ctx context.Context, scope UsageScope, bucket time.D
 	if end.IsZero() {
 		end = nowUTC()
 	}
-	start := end.Add(-bucket * time.Duration(buckets))
+	// Hour-multiple buckets end on an hour boundary so whole rollup hours fall
+	// in exactly one bucket; the window itself still ends at end.
+	grid := end
+	hourly := bucket >= time.Hour && bucket%time.Hour == 0
+	if hourly {
+		grid = ceilHour(end)
+	}
+	start := grid.Add(-bucket * time.Duration(buckets))
 	if scope.Start.After(start) {
 		start = scope.Start
 	}
 	sc := scope
 	sc.Start, sc.End = start, end
-	clause, args := sc.clause()
-	rows, err := s.query(ctx, `SELECT created_at, tokens_in, tokens_out, tokens_cached,
-		tokens_cache_write_5m, tokens_cache_write_1h, cost_nanousd, http_status
-		FROM usage_event WHERE `+clause+` ORDER BY created_at ASC`, args...)
+	src, args, err := s.usageSource(ctx, sc, !hourly)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.query(ctx, `SELECT t, SUM(tokens_in), SUM(tokens_out), SUM(tokens_cached),
+		SUM(tokens_cache_write_5m), SUM(tokens_cache_write_1h), SUM(cost_nanousd), SUM(request_count), SUM(error_count)
+		FROM `+src+` GROUP BY t`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -718,17 +829,21 @@ func (s *Store) UsageSeries(ctx context.Context, scope UsageScope, bucket time.D
 
 	series := make([]TimePoint, buckets)
 	for i := range series {
-		series[i].Bucket = FormatTime(end.Add(-bucket * time.Duration(buckets-i-1)).Truncate(time.Second))
+		series[i].Bucket = FormatTime(grid.Add(-bucket * time.Duration(buckets-i-1)).Truncate(time.Second))
 	}
 	for rows.Next() {
 		var created string
-		var in, out, cached, cacheWrite5m, cacheWrite1h, cost int64
-		var status int
-		if err := rows.Scan(&created, &in, &out, &cached, &cacheWrite5m, &cacheWrite1h, &cost, &status); err != nil {
+		var in, out, cached, cacheWrite5m, cacheWrite1h, cost, requests, errs int64
+		if err := rows.Scan(&created, &in, &out, &cached, &cacheWrite5m, &cacheWrite1h, &cost, &requests, &errs); err != nil {
 			return nil, fmt.Errorf("scan series row: %w", err)
 		}
 		ts := ParseTime(created)
-		idx := buckets - 1 - int(end.Sub(ts)/bucket)
+		if hourly && ts.Equal(floorHour(ts)) {
+			// A rollup hour [h, h+1) (or an event exactly on the hour) lies
+			// wholly inside one bucket on the hour-aligned grid.
+			ts = ts.Add(time.Nanosecond)
+		}
+		idx := buckets - 1 - int(grid.Sub(ts)/bucket)
 		if idx < 0 || idx >= buckets {
 			continue
 		}
@@ -739,10 +854,8 @@ func (s *Store) UsageSeries(ctx context.Context, scope UsageScope, bucket time.D
 		p.TokensCacheWrite5m += cacheWrite5m
 		p.TokensCacheWrite1h += cacheWrite1h
 		p.CostNano += cost
-		p.Requests++
-		if status >= 400 {
-			p.ErrorCount++
-		}
+		p.Requests += requests
+		p.ErrorCount += errs
 	}
 	return series, rows.Err()
 }
@@ -806,6 +919,9 @@ func (s *Store) PurgeUsageEvents(ctx context.Context, before time.Time) (int64, 
 			return err
 		}
 		if err := s.exec(ctx, `DELETE FROM reporting_usage_snapshot WHERE NOT EXISTS (SELECT 1 FROM usage_event WHERE usage_event.id = reporting_usage_snapshot.usage_id)`); err != nil {
+			return err
+		}
+		if err := s.purgeRollupBefore(ctx, before); err != nil {
 			return err
 		}
 		return s.exec(ctx, `INSERT INTO reporting_coverage (key, started_at) VALUES ('retention_before', ?)

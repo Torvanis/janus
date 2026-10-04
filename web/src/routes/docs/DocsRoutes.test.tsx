@@ -73,3 +73,26 @@ describe('Pricing by modality', () => {
     expect(image.textContent).not.toContain('40.00');
   });
 });
+
+describe('section deep links', () => {
+  it('scrolls to the section named in the hash', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    };
+    try {
+      render(
+        <MemoryRouter initialEntries={['/docs/admin/self-hosted-engines#ollama']}>
+          <Routes>
+            <Route path="/docs/*" element={<DocsRoutes />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await screen.findByRole('heading', { name: 'Self-hosted engines', level: 1 });
+      expect(scrolled).toContain('ollama');
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});

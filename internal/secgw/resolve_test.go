@@ -169,3 +169,35 @@ func TestResolveUpstreamScopeCoversEveryModelFromProvider(t *testing.T) {
 		t.Fatalf("other provider must fall through to group: %+v", c)
 	}
 }
+
+// Personal-subscription bindings apply only to traffic through a user's own
+// plan; one provider beats "every provider"; a mandatory org floor still
+// holds.
+func TestResolvePersonalSubscriptionScope(t *testing.T) {
+	floor := &store.SecgwPolicy{ID: "floor", Enabled: true, Mandatory: true, Checks: []store.SecgwCheck{check(store.SecgwCheckSecrets, store.SecgwModeRedact)}}
+	observe := &store.SecgwPolicy{ID: "obs", Enabled: true, Checks: []store.SecgwCheck{check(store.SecgwCheckPII, store.SecgwModeObserve)}}
+	block := &store.SecgwPolicy{ID: "blk", Enabled: true, Checks: []store.SecgwCheck{
+		check(store.SecgwCheckPII, store.SecgwModeBlock), check(store.SecgwCheckSecrets, store.SecgwModeObserve)}}
+	// Specific binding listed first: order in the snapshot must not matter.
+	snap := snapWith([]*store.SecgwPolicy{floor, observe, block}, []*store.SecgwBinding{
+		{ID: "b-xai", PolicyID: "blk", ScopeType: store.SecgwScopePersonalSubscription, ScopeID: "xai"},
+		{ID: "b-any", PolicyID: "obs", ScopeType: store.SecgwScopePersonalSubscription, ScopeID: store.SecgwScopeAnyProvider},
+		{ID: "b-org", PolicyID: "floor", ScopeType: store.SecgwScopeOrg},
+	})
+
+	eff := Resolve(snap, Subject{UserID: "u"})
+	if _, ok := eff.Has(store.SecgwCheckPII, store.SecgwDirectionIngress); ok {
+		t.Fatal("organization traffic must not pick up personal bindings")
+	}
+	eff = Resolve(snap, Subject{UserID: "u", PersonalProvider: "openai"})
+	if c, ok := eff.Has(store.SecgwCheckPII, store.SecgwDirectionIngress); !ok || c.BindingID != "b-any" {
+		t.Fatalf("every-provider binding: %+v", c)
+	}
+	eff = Resolve(snap, Subject{UserID: "u", PersonalProvider: "xai"})
+	if c, ok := eff.Has(store.SecgwCheckPII, store.SecgwDirectionIngress); !ok || c.BindingID != "b-xai" || c.Mode != store.SecgwModeBlock {
+		t.Fatalf("provider binding must beat every-provider: %+v", c)
+	}
+	if c, _ := eff.Has(store.SecgwCheckSecrets, store.SecgwDirectionIngress); c.Mode != store.SecgwModeRedact {
+		t.Fatalf("mandatory floor relaxed by a personal binding: %+v", c)
+	}
+}

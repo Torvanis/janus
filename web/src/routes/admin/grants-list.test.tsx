@@ -99,7 +99,14 @@ describe('GrantsPage — the same model on two upstreams', () => {
     // must not merge into one card that hides which copy a grant covers.
     const fleet = [
       grant({ id: 'old', model_name: 'llama-3', model_id: 'm-old', upstream_name: 'vllm-node-a', grantee_name: 'Ada Lovelace' }),
-      grant({ id: 'new', model_name: 'llama-3', model_id: 'm-new', upstream_name: 'vllm-node-b', grantee_id: 'u-2', grantee_name: 'Bob Byte' }),
+      grant({
+        id: 'new',
+        model_name: 'llama-3',
+        model_id: 'm-new',
+        upstream_name: 'vllm-node-b',
+        grantee_id: 'u-2',
+        grantee_name: 'Bob Byte',
+      }),
       grant({ id: 'solo', model_name: 'solo-model', model_id: 'm-solo', upstream_name: 'openai' }),
     ];
     vi.stubGlobal('fetch', mockFetch(fleet));
@@ -116,9 +123,9 @@ describe('GrantsPage — the same model on two upstreams', () => {
 });
 
 describe('GrantsPage — scalable list', () => {
-  it('pages model cards twelve at a time and collapses them to a preview', async () => {
+  it('pages model rows (here twelve at a time) and collapses them to a preview', async () => {
     vi.stubGlobal('fetch', mockFetch(bigFleet()));
-    renderPage();
+    renderPage('/admin/grants?size=12');
     const user = userEvent.setup();
 
     expect((await screen.findByTestId('grants-group-count')).textContent).toBe('12 of 15 models');
@@ -127,7 +134,7 @@ describe('GrantsPage — scalable list', () => {
     // With many cards each one is collapsed: a preview of who has access, a
     // "+N more" tail, and no Revoke buttons until it is opened.
     const first = screen.getAllByTestId('grants-group')[0]!;
-    expect(within(first).getByRole('heading', { name: /model-01/ })).toBeTruthy();
+    expect(within(first).getByRole('rowheader', { name: /model-01/ })).toBeTruthy();
     expect(within(first).getByText('5 grants')).toBeTruthy();
     expect(within(first).getByText('+1 more')).toBeTruthy();
     expect(within(first).queryByRole('button', { name: 'Revoke' })).toBeNull();
@@ -150,8 +157,9 @@ describe('GrantsPage — scalable list', () => {
     // Page two holds the remaining three models and is in the URL.
     await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByTestId('grants-group-count').textContent).toBe('3 of 15 models');
-    expect(screen.getByRole('heading', { name: /model-15/ })).toBeTruthy();
+    expect(screen.getByRole('rowheader', { name: /model-15/ })).toBeTruthy();
     expect(screen.getByTestId('location').textContent).toContain('page=12');
+    expect(screen.getByTestId('location').textContent).toContain('size=12');
   });
 
   it('answers "what can this person call?" via the grantee filter and grantee view', async () => {
@@ -174,14 +182,14 @@ describe('GrantsPage — scalable list', () => {
     expect(screen.getByText('Everything Bob Byte can call')).toBeTruthy();
     expect(screen.getByTestId('grants-group-count').textContent).toBe('7 of 7 models');
     expect(screen.getAllByRole('button', { name: 'Revoke' })).toHaveLength(7);
-    expect(screen.queryByRole('heading', { name: /model-01/ })).toBeNull();
+    expect(screen.queryByRole('rowheader', { name: /model-01/ })).toBeNull();
     expect(screen.getByTestId('location').textContent).toContain('grantee=user%3Au-2');
 
     // Regroup by grantee: one card for Bob listing his models.
     await user.click(screen.getByRole('button', { name: 'By grantee' }));
     expect(screen.getByTestId('grants-group-count').textContent).toBe('1 of 1 grantees');
     const card = screen.getByTestId('grants-group');
-    expect(within(card).getByRole('heading', { name: /Bob Byte/ })).toBeTruthy();
+    expect(within(card).getByRole('rowheader', { name: /Bob Byte/ })).toBeTruthy();
     expect(within(card).getByText('7 models')).toBeTruthy();
     expect(within(card).getByText('model-02')).toBeTruthy();
     expect(screen.getByTestId('location').textContent).toContain('view=grantee');
@@ -194,7 +202,7 @@ describe('GrantsPage — scalable list', () => {
     // The grantee-type filter narrows to one kind; the URL carries it.
     await user.selectOptions(screen.getByRole('combobox', { name: 'Grantee type' }), 'service_token');
     expect(screen.getByTestId('grants-group-count').textContent).toBe('1 of 1 grantees');
-    expect(screen.getByRole('heading', { name: /nightly-job/ })).toBeTruthy();
+    expect(screen.getByRole('rowheader', { name: /nightly-job/ })).toBeTruthy();
     expect(screen.getByTestId('location').textContent).toContain('type=service_token');
   });
 
@@ -204,7 +212,7 @@ describe('GrantsPage — scalable list', () => {
     const user = userEvent.setup();
 
     expect((await screen.findByTestId('grants-group-count')).textContent).toBe('1 of 1 grantees');
-    expect(screen.getByRole('heading', { name: /Research/ })).toBeTruthy();
+    expect(screen.getByRole('rowheader', { name: /Research/ })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'By grantee' }) as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true');
     expect((screen.getByRole('combobox', { name: 'Grantee' }) as HTMLSelectElement).value).toBe('group:g-1');
 

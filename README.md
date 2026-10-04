@@ -23,15 +23,15 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.9.5
+## Release 2026.10.1
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.9.5`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.1`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.9.5` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.9.5): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.10.1` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.1): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.1.4](https://github.com/Torvanis/janus/releases/download/v2026.9.5/janus-0.1.4.tgz)
+- [Download Helm chart 0.1.5](https://github.com/Torvanis/janus/releases/download/v2026.10.1/janus-0.1.5.tgz)
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -42,7 +42,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.9.5/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.1/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -60,11 +60,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.9.5` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.1` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.9.5 .
+docker build -t janus:2026.10.1 .
 ```
 
 This starts a **local evaluation** instance;
@@ -83,7 +83,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.9.5
+  janus:2026.10.1
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -115,10 +115,21 @@ Janus reads configuration from environment variables. Common settings:
 | `JANUS_LICENSE_FILE` | Optional path to a signed license file. |
 | `JANUS_OFFLINE` | Disables update checks when set to `true`. |
 | `JANUS_UPDATE_CHECK` | Opt-in version checking; disabled by default. |
+| `JANUS_PERFORMANCE_MODE` | Business: batch usage writes for the busiest gateways (see below). Defaults to `false`. |
+| `JANUS_DB_MAX_CONNS` | PostgreSQL connections per replica; defaults to 25. Keep replicas × this well under the server's `max_connections`. |
 
 See the built-in documentation for additional identity, policy, retention,
 notification, and operational settings. Never place credentials in source
 control or distribute them inside an image.
+
+**Performance mode (Business).** One replica meters several hundred requests
+per second in normal mode. `JANUS_PERFORMANCE_MODE=true` raises that by
+writing usage in 100 ms batches and committing without waiting for the
+database's disk flush. The trade is a bounded loss window: a database crash
+can lose about the last 0.5 s of usage records, and a replica killed without a
+graceful shutdown up to 100 ms of them. Graceful shutdowns and rollouts lose
+nothing. It needs a valid Business or Enterprise license (otherwise the
+gateway logs why and runs normally) and is shown on Admin → System.
 
 ## Production deployment
 
@@ -152,7 +163,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.9.5
+git checkout v2026.10.1
 make web-deps
 make verify
 make build

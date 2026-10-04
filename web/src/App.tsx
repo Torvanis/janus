@@ -17,6 +17,7 @@ import { ReportClassifications } from './routes/ReportClassifications';
 import { ExplorePage } from './routes/Explore';
 import { HelpPage } from './routes/Help';
 import { NotificationsPage } from './routes/Notifications';
+import { SubscriptionsPage } from './routes/Subscriptions';
 import { SettingsPage } from './routes/Settings';
 import { ForbiddenPage, NotFoundPage } from './routes/Errors';
 
@@ -75,6 +76,8 @@ function AppRoutes(): ReactNode {
                 <Route path="/explore" element={<ExplorePage />} />
                 <Route path="/help" element={<HelpPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/subscriptions" element={<SubscriptionsPage />} />
+                <Route path="/subscriptions/:provider" element={<SubscriptionsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route
                   path="/admin/*"

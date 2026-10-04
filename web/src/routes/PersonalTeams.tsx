@@ -35,70 +35,71 @@ export default function PersonalTeams() {
   const [search, setSearch] = useUrlState('q', '');
   return (
     <AsyncSection query={teams}>
-        {(data) => {
-          const selected = requested
-            ? data.teams.find((team) => team.id === requested)
-            : params.get('view') !== 'browse'
-              ? (data.teams.find((team) => team.id === me?.active_team_id) ??
-                (data.teams.length === 1 ? data.teams[0] : undefined))
-              : undefined;
-          if (requested && !selected)
-            return (
-              <div className="page">
-                <p role="alert">This team is not one of your memberships.</p>
-              </div>
-            );
-          return selected ? (
-            <PersonalTeamDetail key={selected.id} team={selected} />
-          ) : (
-            <div className="page stack team-directory">
-              <header className="page-header">
-                <div>
-                  <h1 className="page-title">My teams</h1>
-                  <p className="page-subtitle">Your team memberships, members, usage, and quotas. This workspace is informational.</p>
-                </div>
-              </header>
-              {data.teams.length > 6 ? (
-                <Field label="Search my teams">
-                  <input
-                    className="input"
-                    value={search}
-                    onChange={(event) => {
-                      setSearch(event.target.value);
-                    }}
-                  />
-                </Field>
-              ) : null}
-              <section className="team-cards" aria-label="My team memberships">
-                {!data.teams.length && <p>You are not a member of any teams.</p>}
-                {data.teams
-                  .filter((team) => team.name.toLowerCase().includes(search.toLowerCase()))
-                  .map((team) => (
-                    <Link className="team-card" key={team.id} to={`/teams/${encodeURIComponent(team.id)}`}>
-                      <span className="team-card-mark" aria-hidden="true">
-                        {team.name
-                          .split(/\s+/)
-                          .map((w) => w[0])
-                          .join('')
-                          .slice(0, 2)
-                          .toUpperCase()}
-                      </span>
-                      <span className="team-card-body">
-                        <span className="team-card-name">{team.name}</span>
-                        <span className="team-card-meta">
-                          {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
-                        </span>
-                      </span>
-                      <Badge>{team.my_role}</Badge>
-                    </Link>
-                  ))}
-                {!!data.teams.length && !data.teams.some((team) => team.name.toLowerCase().includes(search.toLowerCase())) && (
-                  <p>No memberships match your search.</p>
-                )}
-              </section>
+      {(data) => {
+        const selected = requested
+          ? data.teams.find((team) => team.id === requested)
+          : params.get('view') !== 'browse'
+            ? (data.teams.find((team) => team.id === me?.active_team_id) ?? (data.teams.length === 1 ? data.teams[0] : undefined))
+            : undefined;
+        if (requested && !selected)
+          return (
+            <div className="page">
+              <p role="alert">This team is not one of your memberships.</p>
             </div>
           );
-        }}
+        return selected ? (
+          <PersonalTeamDetail key={selected.id} team={selected} />
+        ) : (
+          <div className="page stack team-directory">
+            <header className="page-header">
+              <div>
+                <h1 className="page-title">My teams</h1>
+                <p className="page-subtitle">
+                  Your team memberships, members, usage, and quotas. This workspace is informational.
+                </p>
+              </div>
+            </header>
+            {data.teams.length > 6 ? (
+              <Field label="Search my teams">
+                <input
+                  className="input"
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                  }}
+                />
+              </Field>
+            ) : null}
+            <section className="team-cards" aria-label="My team memberships">
+              {!data.teams.length && <p>You are not a member of any teams.</p>}
+              {data.teams
+                .filter((team) => team.name.toLowerCase().includes(search.toLowerCase()))
+                .map((team) => (
+                  <Link className="team-card" key={team.id} to={`/teams/${encodeURIComponent(team.id)}`}>
+                    <span className="team-card-mark" aria-hidden="true">
+                      {team.name
+                        .split(/\s+/)
+                        .map((w) => w[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase()}
+                    </span>
+                    <span className="team-card-body">
+                      <span className="team-card-name">{team.name}</span>
+                      <span className="team-card-meta">
+                        {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
+                      </span>
+                    </span>
+                    <Badge>{team.my_role}</Badge>
+                  </Link>
+                ))}
+              {!!data.teams.length && !data.teams.some((team) => team.name.toLowerCase().includes(search.toLowerCase())) && (
+                <p>No memberships match your search.</p>
+              )}
+            </section>
+          </div>
+        );
+      }}
     </AsyncSection>
   );
 }

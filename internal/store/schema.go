@@ -831,6 +831,13 @@ var migrations = []migration{
 	identityProviderMigration,
 	pendingLoginMigration,
 	upstreamLiveNameMigration,
+	subscriptionMigration,
+	subscriptionSelectionMigration,
+	subscriptionHealthMigration,
+	subscriptionReasoningMigration,
+	poolMigration,
+	dropTeamAttributionMigration,
+	usageRollupMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serialises

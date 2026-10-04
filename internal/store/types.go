@@ -219,6 +219,10 @@ type Model struct {
 	// Health is the derived verdict (ModelHealth* constants) so every
 	// consumer agrees on what "down" means. Empty until SetHealth runs.
 	Health string `json:"health,omitempty"`
+	// Activity is the 7-day jobs/day trend and generation speed shown on the
+	// user's model card (see ModelActivityStats). Resolved at read time for
+	// the web catalog only; nil elsewhere.
+	Activity *ModelActivity `json:"activity,omitempty"`
 }
 
 // Model health verdicts, from best to worst. "unknown" means the upstream has
@@ -536,6 +540,10 @@ const (
 	FallbackTriggerUpstreamUnreachable = "upstream_unreachable"
 	FallbackTriggerModelDown           = "model_down"
 	FallbackTriggerModelDegraded       = "model_degraded"
+	// FallbackTriggerPoolExhausted: every member of a load-balanced pool is
+	// out of service. Not admin-selectable: a pool with a fallback always
+	// uses it in that case, because there is nothing else to serve from.
+	FallbackTriggerPoolExhausted = "pool_exhausted"
 )
 
 // AllFallbackTriggers is every recognised trigger, in display order.
@@ -597,6 +605,9 @@ type ManagedModel struct {
 	// as "unavailable" for THIS alias. Defaults to DefaultFallbackTriggers
 	// when a fallback is set and none are chosen. Empty when no fallback.
 	FallbackTriggers []string `json:"fallback_triggers"`
+	// Pool is the alias's balancing configuration and its member models
+	// (always at least one; TargetModelID mirrors the primary member).
+	Pool ManagedModelPool `json:"pool"`
 	// The remaining fields are resolved from the target at read time and are
 	// never persisted on the managed_model row. They are what the SPA needs
 	// to render a transparent model card.
@@ -635,6 +646,9 @@ type ManagedModel struct {
 	// service tokens", …), mirroring Model.GrantSource. It is set only on
 	// caller-scoped catalog responses.
 	GrantSource string `json:"grant_source,omitempty"`
+	// Activity is the current target's 7-day figures (alias traffic is
+	// recorded against the target model). Web catalog only; nil elsewhere.
+	Activity *ModelActivity `json:"activity,omitempty"`
 }
 
 // Quota metrics and windows.
@@ -707,9 +721,14 @@ type UsageEvent struct {
 	// CostStatus is an explicit admission-time signal: known_free, priced,
 	// unpriced, disabled, or unknown. Zero recorded cost alone proves nothing.
 	CostStatus string `json:"cost_status,omitempty"`
-	UpstreamID string `json:"upstream_id"`
-	ModelID    string `json:"model_id"`
-	ModelName  string `json:"model"`
+	// SubscriptionID names the user's own connected provider plan that
+	// served the request (subscription_connection.id). Empty for every
+	// request served by an organization upstream. The organization pays
+	// nothing for these requests, so they record zero cost.
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	UpstreamID     string `json:"upstream_id"`
+	ModelID        string `json:"model_id"`
+	ModelName      string `json:"model"`
 	// RequestedModelName records the managed-model alias the caller actually
 	// asked for, when the request was addressed to one. ModelName always
 	// carries the UNDERLYING model, so model reporting keeps reflecting real
@@ -774,6 +793,15 @@ type UsageEvent struct {
 	// managed alias's fallback model (ModelName is then the fallback,
 	// RequestedModelName the alias). Empty when the target served.
 	FallbackReason string `json:"fallback_reason,omitempty"`
+	// ReasoningAdjustment says how Janus changed the requested reasoning
+	// effort to fit a personal-subscription model ("medium→omitted: model
+	// takes no reasoning setting"); empty when it went out unchanged.
+	ReasoningAdjustment string `json:"reasoning_adjustment,omitempty"`
+	// PoolReason says why a load-balanced alias sent this request to the
+	// member that served it (policy, affinity, spill, moved, retry, only);
+	// PoolAttempts counts members tried (>1 = pre-byte retry).
+	PoolReason   string `json:"pool_reason,omitempty"`
+	PoolAttempts int    `json:"pool_attempts,omitempty"`
 	// SecgwAction summarises what the Security Gateway did to this
 	// request ('' = no policy applied / nothing matched; observed,
 	// redacted, blocked, stream_cut). SecgwViolations counts the matched

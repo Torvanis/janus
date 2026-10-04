@@ -85,6 +85,14 @@ func (s *Server) InvalidateConfigCache() {
 	s.configCache.invalidate()
 }
 
+// invalidateQuotaRules drops this replica's cached quota rule lists after a
+// rule write; other replicas converge within the config cache TTL.
+func (s *Server) invalidateQuotaRules() {
+	if s.Quota != nil {
+		s.Quota.InvalidateRules()
+	}
+}
+
 // --- cached hot-path reads ----------------------------------------------------
 //
 // These wrappers exist for the proxy hot path only. Admin and dashboard

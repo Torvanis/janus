@@ -108,7 +108,7 @@ function routeGets(extra: Record<string, unknown> = {}) {
     if (path.endsWith('/secgw/classifiers')) return { classifiers: [], protocols: [] };
     if (path.endsWith('/secgw/rules')) {
       return {
-        secret_rules: [{ ID: 'aws-access-key', Description: 'AWS access key', Severity: 'high', Enabled: true }],
+        secret_rules: [{ id: 'aws-access-key', description: 'AWS access key', severity: 'high', enabled: true }],
         pii_classes: ['ssn', 'email'],
       };
     }
