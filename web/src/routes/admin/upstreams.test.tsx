@@ -235,4 +235,58 @@ describe('Add upstream: self-hosted engine setup note', () => {
     fireEvent.change(select, { target: { value: 'anthropic' } });
     expect(screen.queryByTestId('engine-setup-note')).toBeNull();
   });
+
+  it('fills in the chosen provider’s base URL and name, and keeps what the admin typed', async () => {
+    mocked.get.mockImplementation((path: string) =>
+      path === '/api/v1/admin/upstreams'
+        ? Promise.resolve({ upstreams: [upstreamFixture], adapter_types: ['anthropic', 'gemini', 'openai_compatible', 'vlm'] })
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    mocked.post.mockImplementation(() => Promise.resolve({ upstream: upstreamFixture }));
+    renderDetail();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Add upstream' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Add upstream' });
+    const select = within(drawer).getByRole('combobox') as HTMLSelectElement;
+    const nameInput = within(drawer).getByPlaceholderText('OpenAI production') as HTMLInputElement;
+    const urlInput = within(drawer).getByLabelText(/Base URL/) as HTMLInputElement;
+    // The first offered provider is prefilled.
+    expect(select.value).toBe('openai');
+    expect(urlInput.value).toBe('https://api.openai.com/v1');
+    expect(nameInput.value).toBe('OpenAI');
+
+    fireEvent.change(select, { target: { value: 'gemini' } });
+    expect(urlInput.value).toBe('https://generativelanguage.googleapis.com/v1beta/openai');
+    expect(nameInput.value).toBe('Google Gemini');
+
+    // A name the admin typed survives switching provider; the untouched URL follows.
+    fireEvent.change(nameInput, { target: { value: 'Gemini prod' } });
+    fireEvent.change(select, { target: { value: 'anthropic' } });
+    expect(nameInput.value).toBe('Gemini prod');
+    expect(urlInput.value).toBe('https://api.anthropic.com/v1');
+
+    // A URL the admin typed survives too.
+    fireEvent.change(urlInput, { target: { value: 'https://llm-proxy.internal/gemini/v1beta/openai' } });
+    fireEvent.change(select, { target: { value: 'gemini' } });
+    expect(urlInput.value).toBe('https://llm-proxy.internal/gemini/v1beta/openai');
+
+    // Self-hosted engines have no fixed address: nothing prefilled, a port hint instead.
+    fireEvent.change(urlInput, { target: { value: '' } });
+    fireEvent.change(select, { target: { value: 'vlm' } });
+    expect(urlInput.value).toBe('');
+    expect(urlInput.placeholder).toBe('http://vllm-host:8000/v1');
+
+    // Providers whose adapter the server does not offer are not listed.
+    expect(within(select).queryByRole('option', { name: 'AWS Bedrock' })).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'gemini' } });
+    fireEvent.change(within(drawer).getByLabelText(/Credential/), { target: { value: 'AIza-test' } });
+    await user.click(within(drawer).getByRole('button', { name: 'Create and discover models' }));
+    expect(mocked.post).toHaveBeenCalledWith('/api/v1/admin/upstreams', {
+      name: 'Gemini prod',
+      adapter_type: 'gemini',
+      base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      api_key: 'AIza-test',
+    });
+  });
 });

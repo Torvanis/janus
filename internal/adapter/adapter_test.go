@@ -29,6 +29,19 @@ func TestJoinURL(t *testing.T) {
 		// A base URL that already carries /v1 must not double it.
 		{"http://host:8000/v1", "/v1/chat/completions", "http://host:8000/v1/chat/completions"},
 		{"http://host", "v1/models", "http://host/v1/models"},
+		// Base URLs that carry their own version path are the API root.
+		{"https://generativelanguage.googleapis.com/v1beta/openai", "/v1/chat/completions", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
+		{"https://generativelanguage.googleapis.com/v1beta/openai/", "/v1/models", "https://generativelanguage.googleapis.com/v1beta/openai/models"},
+		{"https://api.groq.com/openai/v1", "/v1/chat/completions", "https://api.groq.com/openai/v1/chat/completions"},
+		{"https://api.fireworks.ai/inference/v1", "/v1/models", "https://api.fireworks.ai/inference/v1/models"},
+		// No version in the base: /v1 is appended as before.
+		{"https://openrouter.ai/api", "/v1/models", "https://openrouter.ai/api/v1/models"},
+		{"https://api.openai.com", "/v1/embeddings", "https://api.openai.com/v1/embeddings"},
+		// A host or path merely containing "v1" letters is not a version.
+		{"https://v1.example.com/proxy", "/v1/models", "https://v1.example.com/proxy/v1/models"},
+		{"https://example.com/dev1", "/v1/models", "https://example.com/dev1/v1/models"},
+		// Non-/v1 paths are never rewritten.
+		{"https://api.example.com/v1", "/api/tags", "https://api.example.com/v1/api/tags"},
 	}
 	for _, c := range cases {
 		if got := joinURL(c.base, c.path); got != c.want {

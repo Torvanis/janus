@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=${VERSION:-2026.10.1}
+VERSION=${VERSION:-2026.10.2}
 BUILD_DATE=${BUILD_DATE:-2026-10-04}
 GO=${GO:-go}
 OUTPUT=${OUTPUT:-bin/janus}

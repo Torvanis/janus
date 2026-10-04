@@ -134,7 +134,8 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     code: 'policy.response_too_large',
     status: 500,
     when: "The provider's response grew past the gateway's response size cap (JANUS_MAX_RESPONSE_BYTES). On a stream the text before this point was delivered and this arrives as a final in-band error frame.",
-    action: 'Ask for a shorter answer (lower max_tokens, or split the task). If large responses are expected, an administrator can raise JANUS_MAX_RESPONSE_BYTES.',
+    action:
+      'Ask for a shorter answer (lower max_tokens, or split the task). If large responses are expected, an administrator can raise JANUS_MAX_RESPONSE_BYTES.',
     retryable: false,
   },
   {
@@ -162,7 +163,8 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     code: 'policy.managed_model_fallback_exhausted',
     status: 503,
     when: "The managed model's target is unavailable and the fallback configured for exactly that case cannot take over either. The message names both reasons.",
-    action: 'Retry in a few minutes; if it persists, contact a Janus administrator with the request_id so they can fix the target or the fallback.',
+    action:
+      'Retry in a few minutes; if it persists, contact a Janus administrator with the request_id so they can fix the target or the fallback.',
     retryable: true,
   },
   {
@@ -183,7 +185,8 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     code: 'upstream.stream_interrupted',
     status: 502,
     when: 'The provider ended a streaming response early: its connection dropped, or it closed the stream without a [DONE], finish_reason or usage block. The HTTP status was already 200, so this arrives as a final in-band error frame and the text before it is incomplete.',
-    action: 'Retry the request. If it keeps happening, an administrator should check the upstream server (restarts, out-of-memory kills, proxies with short idle timeouts). The request log shows these with this code.',
+    action:
+      'Retry the request. If it keeps happening, an administrator should check the upstream server (restarts, out-of-memory kills, proxies with short idle timeouts). The request log shows these with this code.',
     retryable: true,
   },
   {
@@ -197,7 +200,8 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     code: 'invalid_request_error',
     status: 400,
     when: 'The request body was malformed, or a required field such as `model` was missing. The same code is used, with HTTP 413, when a body is too large for the provider adapter to rewrite, and with HTTP 409 when an admin change conflicts with things that depend on it.',
-    action: 'Read the message and param field, fix the request, and send it again. For 413, send a smaller payload; for 409, deal with the dependents the message names first.',
+    action:
+      'Read the message and param field, fix the request, and send it again. For 413, send a smaller payload; for 409, deal with the dependents the message names first.',
     retryable: false,
   },
   {
@@ -231,7 +235,7 @@ export const ERROR_CATALOG: ErrorEntry[] = [
   {
     code: 'license.feature_not_licensed',
     status: 402,
-    when: "An administrator tried to switch on a feature the installed edition does not include (for example load balancing or guardrail enforcement).",
+    when: 'An administrator tried to switch on a feature the installed edition does not include (for example load balancing or guardrail enforcement).',
     action: 'Install a key for an edition that includes the feature under Admin → System, or leave the feature off.',
     retryable: false,
   },
@@ -487,6 +491,8 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         body: [
           'You need the provider base URL and a credential. Credentials are encrypted with AES-256-GCM using JANUS_ENCRYPTION_KEY before they touch the database, and only the first and last four characters are ever displayed again.',
           'AWS Bedrock and Google Vertex are paid cloud services: you supply your own account. Bedrock credentials are stored as ACCESS_KEY_ID:SECRET_ACCESS_KEY; Vertex takes the service-account JSON key.',
+          'Choosing a provider fills in its documented base URL and a suggested name. Both stay editable: change the URL for a proxy or a regional endpoint, and name the upstream whatever you like. Self-hosted engines have no fixed address, so their field shows the engine’s default port as an example.',
+          'A base URL that ends in an API version (…/v1, Google’s …/v1beta/openai) is used as the API root, the way the provider documents it for OpenAI clients; Janus appends /chat/completions or /models without adding another /v1. A base without one, such as https://openrouter.ai/api, gets /v1 added.',
         ],
       },
       {
@@ -502,7 +508,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Pricing from the bundled reference seed',
         body: [
-          'Rate cards are always per million tokens; see “Pricing by modality” for how speech, transcription, image and realtime models — which providers quote per minute, per character or per tier — translate into that unit. Janus ships a reference rate-card seed for common OpenAI, Anthropic, and Mistral models so a fresh install does not need every price typed by hand. GET /api/v1/admin/ratecards/reference lists it; POST /api/v1/admin/ratecards/apply prices every discovered model that matches the seed by name and has no rate card yet. Models you already priced are never touched, and re-applying is a no-op.',
+          'Rate cards are always per million tokens; see “Pricing by modality” for how speech, transcription, image and realtime models — which providers quote per minute, per character or per tier — translate into that unit. Janus ships a reference rate-card seed for common OpenAI, Anthropic, Mistral and Google Gemini models so a fresh install does not need every price typed by hand. GET /api/v1/admin/ratecards/reference lists it; POST /api/v1/admin/ratecards/apply prices every discovered model that matches the seed by name and has no rate card yet. Models you already priced are never touched, and re-applying is a no-op.',
           'The seed reflects public list prices at the time it was authored — it is a starting point, not a live price feed. Verify against the provider’s current pricing before relying on cost attribution, and adjust any figure per model afterwards.',
           'The seed also carries each model’s context window (context_window_tokens). Applying it fills in the context window for every matching model that does not have one yet — including models you already priced by hand — but never overwrites a value that is already set.',
         ],
@@ -510,6 +516,16 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           language: 'bash',
           code: 'curl -X POST ${JANUS_PUBLIC_URL}/api/v1/admin/ratecards/apply \\\n  -H "Cookie: janus_session=…" -H "X-Janus-CSRF: …"',
         },
+      },
+      {
+        heading: 'Google Gemini',
+        body: [
+          'Choose Google Gemini (AI Studio key) and paste an API key from Google AI Studio. Janus talks to Google’s OpenAI-compatible endpoint, https://generativelanguage.googleapis.com/v1beta/openai, so chat, streaming, function calling, image input and embeddings use the OpenAI request format unchanged.',
+          'Discovery lists the models the key can call, with their context windows. Live-API (realtime voice) models are left out because the OpenAI-compatible endpoint cannot call them.',
+          'Gemini reports thinking tokens only in its total, and Google bills them at the output rate, so Janus meters output as total minus prompt: the request log and quotas match the bill. Implicit prompt-cache hits are recorded as cached input.',
+          'Prices for Gemini 2.5 Flash and Flash-Lite, 3 Flash Preview, 3.1 Flash-Lite, 3.5 Flash and Flash-Lite and Embedding 2 come from the bundled reference. Models priced by prompt size (2.5 Pro, 3.1 Pro) or with a scheduled price change (3.6 to 3.8 Flash, which double on 1 January 2027) arrive unpriced: enter the price yourself.',
+          'For a Google Cloud project with a service account instead of an AI Studio key, use Google Vertex AI.',
+        ],
       },
       {
         heading: 'The same model on more than one upstream',
@@ -550,7 +566,8 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
   {
     slug: 'admin/self-hosted-engines',
     title: 'Self-hosted engines',
-    summary: 'Server flags that give Janus exact usage, real speed, the right context size and live load for vLLM, llama.cpp, Ollama and TEI.',
+    summary:
+      'Server flags that give Janus exact usage, real speed, the right context size and live load for vLLM, llama.cpp, Ollama and TEI.',
     group: 'Admin guide',
     sections: [
       {

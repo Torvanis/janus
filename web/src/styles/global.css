@@ -1333,6 +1333,11 @@ table.data tbody tr[data-selected='true'] {
   background: var(--janus-color-bg-surface-raised);
   font-size: var(--janus-text-sm);
 }
+/* A banner's content may hold a table (the upstream discovery-problems list):
+   let it shrink to the banner so its .table-wrap scrolls instead of the page. */
+.banner > * {
+  min-width: 0;
+}
 .banner-warning {
   background: var(--janus-color-warning-bg);
   border-color: var(--janus-color-warning-border);

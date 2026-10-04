@@ -13,6 +13,7 @@ import { useDebounced, useUnsavedGuard, useUrlState } from '../../lib/hooks';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useLocalOnly } from '../../app/session';
 import { SearchInput, SortHeader, useTableSort } from '../shared';
+import { availablePresets, presetForUpstream, type ProviderPreset } from './providerPresets';
 
 interface UpstreamsResponse {
   upstreams: Upstream[];
@@ -33,6 +34,7 @@ const ENGINE_SETUP: Record<string, { note: MessageKey; anchor: string }> = {
 
 const ADAPTER_HELP_KEYS: Record<string, MessageKey> = {
   openai_compatible: 'adminUpstreams.adapterHelp.openaiCompatible',
+  gemini: 'adminUpstreams.adapterHelp.gemini',
   anthropic: 'adminUpstreams.adapterHelp.anthropic',
   bedrock: 'adminUpstreams.adapterHelp.bedrock',
   vertex: 'adminUpstreams.adapterHelp.vertex',
@@ -481,7 +483,9 @@ function UpstreamDrawer({
     enabled: Boolean(existing),
   });
 
+  const presets = availablePresets(adapterTypes, titleCase);
   const [name, setName] = useState('');
+  const [presetId, setPresetId] = useState('');
   const [adapterType, setAdapterType] = useState('openai_compatible');
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -493,15 +497,39 @@ function UpstreamDrawer({
   const key = existing?.id ?? (isNew ? 'new' : '');
   if (value && initialised !== key) {
     setInitialised(key);
-    setName(existing?.name ?? '');
-    setAdapterType(existing?.adapter_type ?? adapterTypes[0] ?? 'openai_compatible');
-    setBaseURL(existing?.base_url ?? '');
+    const first = presets[0];
+    setName(existing?.name ?? first?.name ?? '');
+    setPresetId(existing ? '' : (first?.id ?? ''));
+    setAdapterType(existing?.adapter_type ?? first?.adapterType ?? 'openai_compatible');
+    setBaseURL(existing?.base_url ?? first?.baseURL ?? '');
     setApiKey('');
     setEnabled(existing?.enabled ?? true);
     setTouched(false);
   }
 
-  const dirty = Boolean(value) && (name !== (existing?.name ?? '') || baseURL !== (existing?.base_url ?? '') || apiKey !== '');
+  const preset: ProviderPreset | undefined = isNew
+    ? presets.find((p) => p.id === presetId)
+    : existing
+      ? presetForUpstream(existing.adapter_type, existing.base_url)
+      : undefined;
+  // Picking a provider fills in its documented base URL and a suggested name.
+  // A value the admin typed themselves is kept: only a field that is empty or
+  // still holds the previous provider's suggestion is replaced.
+  const choosePreset = (id: string) => {
+    const next = presets.find((p) => p.id === id);
+    if (!next) return;
+    const previous = presets.find((p) => p.id === presetId);
+    setPresetId(id);
+    setAdapterType(next.adapterType);
+    if (!baseURL.trim() || baseURL === previous?.baseURL) setBaseURL(next.baseURL);
+    if (!name.trim() || name === previous?.name) setName(next.name);
+  };
+
+  const dirty =
+    Boolean(value) &&
+    (isNew
+      ? apiKey !== '' || name !== (preset?.name ?? '') || baseURL !== (preset?.baseURL ?? '')
+      : name !== (existing?.name ?? '') || baseURL !== (existing?.base_url ?? '') || apiKey !== '');
   useUnsavedGuard(dirty);
 
   const nameError = touched && !name.trim() ? t('adminUpstreams.nameError') : undefined;
@@ -559,13 +587,26 @@ function UpstreamDrawer({
             : t('adminUpstreams.providerHintLocked')
         }
       >
-        <select className="select" value={adapterType} onChange={(event) => setAdapterType(event.target.value)} disabled={!isNew}>
-          {adapterTypes.map((type) => (
-            <option key={type} value={type}>
-              {titleCase(type)}
-            </option>
-          ))}
-        </select>
+        {isNew ? (
+          <select className="select" value={presetId} onChange={(event) => choosePreset(event.target.value)}>
+            {(['cloud', 'selfHosted', 'other'] as const).map((group) => {
+              const items = presets.filter((p) => p.group === group);
+              return items.length ? (
+                <optgroup key={group} label={t(`adminUpstreams.presetGroup.${group}`)}>
+                  {items.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null;
+            })}
+          </select>
+        ) : (
+          <select className="select" value={adapterType} disabled>
+            <option value={adapterType}>{preset?.label ?? titleCase(adapterType)}</option>
+          </select>
+        )}
       </Field>
 
       {ENGINE_SETUP[adapterType] ? (
@@ -577,14 +618,19 @@ function UpstreamDrawer({
         </p>
       ) : null}
 
-      <Field label={t('adminUpstreams.colBaseUrl')} required error={urlError} hint={t('adminUpstreams.baseUrlHint')}>
+      <Field
+        label={t('adminUpstreams.colBaseUrl')}
+        required
+        error={urlError}
+        hint={isNew && preset?.baseURL ? t('adminUpstreams.baseUrlHintPreset') : t('adminUpstreams.baseUrlHint')}
+      >
         <input
           className="input"
           value={baseURL}
           onChange={(event) => setBaseURL(event.target.value)}
           onBlur={() => setTouched(true)}
           aria-invalid={Boolean(urlError)}
-          placeholder="https://api.openai.com"
+          placeholder={preset?.placeholder ?? preset?.baseURL ?? 'https://api.openai.com/v1'}
           inputMode="url"
         />
       </Field>

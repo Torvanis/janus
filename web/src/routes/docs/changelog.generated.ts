@@ -17,6 +17,27 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: '2026.10.2',
+    date: '2026-10-04',
+    categories: [
+      {
+        name: 'Added',
+        items: [
+          'Google Gemini as a provider: choose Google Gemini (AI Studio key) and paste an API key from Google AI Studio. Janus uses Google\'s OpenAI-compatible endpoint, lists the models the key can call with their context windows (Live-API models, which that endpoint cannot call, are left out), meters thinking tokens as output as Google bills them, and records implicit prompt-cache hits as cached input. The bundled reference prices Gemini 2.5 Flash and Flash-Lite, 3 Flash Preview, 3.1 Flash-Lite, 3.5 Flash and Flash-Lite, and Embedding 2.',
+          'Adding an upstream starts from a provider list: OpenAI, Anthropic, Google Gemini, Google Vertex AI, AWS Bedrock, xAI, Mistral, OpenRouter, Groq, DeepSeek, Together AI, Fireworks AI, Cerebras, Moonshot AI, the self-hosted engines, and any other OpenAI-compatible endpoint. Choosing one fills in its documented base URL and a suggested name. Both stay editable, and a value you typed is kept when you switch provider.',
+        ],
+      },
+      {
+        name: 'Fixed',
+        items: [
+          'A base URL that ends in an API version (…/v1, …/openai/v1, Google\'s …/v1beta/openai) is used as the API root, the way providers document it for OpenAI clients. Before, only a trailing /v1 was recognised, so …/v1beta/openai was called as …/v1beta/openai/v1/… and failed.',
+          'Streamed output speed for providers that generate reasoning without streaming it (Gemini) is measured over the whole call; it was divided by the few milliseconds after the first byte and reported thousands of tokens per second.',
+          'On a phone, the Upstreams page no longer scrolls sideways when an upstream has a discovery error.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2026.10.1',
     date: '2026-10-04',
     categories: [

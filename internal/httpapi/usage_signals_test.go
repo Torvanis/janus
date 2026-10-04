@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/torvanis/janus/internal/adapter"
+	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/usage"
+	"math"
 )
 
 // An X.ai-style image response carries no token counts, only
@@ -215,5 +218,29 @@ func TestProxyCalculatedInputThroughputExcludesCachedTokens(t *testing.T) {
 	}
 	if r := event.TokensInPerSecond / event.TokensOutPerSecond; r < 9.9 || r > 10.1 {
 		t.Fatalf("recorded input/output rate ratio = %.2f, want 10", r)
+	}
+}
+
+// Gemini streams no thinking: on gemini-2.5-flash, 39 visible output tokens
+// followed 640 ms of hidden thinking (12 visible + 39 thinking tokens metered
+// as output; first byte at 642 ms of a 665 ms call). Splitting at TTFB
+// credited the thinking to prompt processing and divided all 51 output tokens
+// by the last 23 ms: 13,360 tokens/s recorded in testing. With hidden
+// reasoning both phases share the whole call.
+func TestCalculatedThroughputWithHiddenReasoningUsesWholeCall(t *testing.T) {
+	elapsed, ttfb := 665*time.Millisecond, 642*time.Millisecond
+	event := &store.UsageEvent{Streaming: true, TokensIn: 12, TokensOut: 51}
+	applyThroughput(event, adapter.Usage{HiddenReasoning: true}, elapsed, ttfb)
+	if want := 51 / elapsed.Seconds(); math.Abs(event.TokensOutPerSecond-want) > 0.01 {
+		t.Fatalf("output rate = %.1f tok/s, want %.1f (51 tokens over the whole 665 ms)", event.TokensOutPerSecond, want)
+	}
+	if want := 12 / elapsed.Seconds(); math.Abs(event.TokensInPerSecond-want) > 0.01 {
+		t.Fatalf("input rate = %.1f tok/s, want %.1f", event.TokensInPerSecond, want)
+	}
+	// Without hidden reasoning a stream still splits at the first byte.
+	plain := &store.UsageEvent{Streaming: true, TokensIn: 12, TokensOut: 51}
+	applyThroughput(plain, adapter.Usage{}, elapsed, ttfb)
+	if want := 51 / (elapsed - ttfb).Seconds(); math.Abs(plain.TokensOutPerSecond-want) > 0.01 {
+		t.Fatalf("plain stream output rate = %.1f, want %.1f", plain.TokensOutPerSecond, want)
 	}
 }

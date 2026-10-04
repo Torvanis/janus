@@ -31,7 +31,7 @@ def archive(source, destination, epoch):
 
 
 def main():
-    version = os.environ.get("VERSION", "2026.10.1")
+    version = os.environ.get("VERSION", "2026.10.2")
     date = os.environ.get("BUILD_DATE", "2026-10-04")
     if not re.fullmatch(r"[0-9]{4}\.([1-9]|1[0-2])\.[1-9][0-9]*", version):
         raise SystemExit("Invalid YEAR.MONTH.RELEASE_NUMBER")

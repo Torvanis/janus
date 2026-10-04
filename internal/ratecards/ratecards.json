@@ -1,6 +1,6 @@
 {
-  "comment": "Bundled reference rate cards. Prices are USD per million tokens and reflect public list prices at the time this file was authored — they are a STARTING POINT for administrators, not a live price feed. Verify against the provider's current pricing before relying on attribution. Each entry carries five dimensions: input, output, cache hits, and prompt-cache writes at 5-minute and 1-hour TTL (Anthropic bills cache writes above the input rate; providers that do not bill them omit the fields, which default to 0). context_window_tokens is the model's context window size in tokens as published when the seed was authored; apply copies it onto matching models that do not have one yet. Applied via POST /api/v1/admin/ratecards/apply, which only touches models that have no rate card yet.",
-  "updated": "2026-08-23",
+  "comment": "Bundled reference rate cards. Prices are USD per million tokens and reflect public list prices at the time this file was authored — they are a STARTING POINT for administrators, not a live price feed. Verify against the provider's current pricing before relying on attribution. Each entry carries five dimensions: input, output, cache hits, and prompt-cache writes at 5-minute and 1-hour TTL (Anthropic bills cache writes above the input rate; providers that do not bill them omit the fields, which default to 0). context_window_tokens is the model's context window size in tokens as published when the seed was authored; apply copies it onto matching models that do not have one yet. Google entries are the Gemini API paid Standard tier for text input; models priced by prompt size, by date, or per audio/video unit are omitted. Applied via POST /api/v1/admin/ratecards/apply, which only touches models that have no rate card yet.",
+  "updated": "2026-10-04",
   "ratecards": [
     { "provider": "openai", "model": "gpt-4o", "in_usd_per_mtok": 2.5, "out_usd_per_mtok": 10.0, "cached_usd_per_mtok": 1.25, "context_window_tokens": 128000 },
     { "provider": "openai", "model": "gpt-4o-mini", "in_usd_per_mtok": 0.15, "out_usd_per_mtok": 0.6, "cached_usd_per_mtok": 0.075, "context_window_tokens": 128000 },
@@ -21,6 +21,13 @@
     { "provider": "anthropic", "model": "claude-sonnet-4-20250514", "aliases": ["claude-sonnet-4-0"], "in_usd_per_mtok": 3.0, "cache_write_5m_usd_per_mtok": 3.75, "cache_write_1h_usd_per_mtok": 6.0, "cached_usd_per_mtok": 0.3, "out_usd_per_mtok": 15.0, "context_window_tokens": 200000 },
     { "provider": "anthropic", "model": "claude-opus-4-20250514", "aliases": ["claude-opus-4-0"], "in_usd_per_mtok": 15.0, "cache_write_5m_usd_per_mtok": 18.75, "cache_write_1h_usd_per_mtok": 30.0, "cached_usd_per_mtok": 1.5, "out_usd_per_mtok": 75.0, "context_window_tokens": 200000 },
     { "provider": "mistral", "model": "mistral-large-latest", "in_usd_per_mtok": 2.0, "out_usd_per_mtok": 6.0, "cached_usd_per_mtok": 0.0, "context_window_tokens": 128000 },
-    { "provider": "mistral", "model": "mistral-small-latest", "in_usd_per_mtok": 0.1, "out_usd_per_mtok": 0.3, "cached_usd_per_mtok": 0.0, "context_window_tokens": 32000 }
+    { "provider": "mistral", "model": "mistral-small-latest", "in_usd_per_mtok": 0.1, "out_usd_per_mtok": 0.3, "cached_usd_per_mtok": 0.0, "context_window_tokens": 32000 },
+    { "provider": "google", "model": "gemini-2.5-flash", "in_usd_per_mtok": 0.3, "out_usd_per_mtok": 2.5, "cached_usd_per_mtok": 0.03, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-2.5-flash-lite", "in_usd_per_mtok": 0.1, "out_usd_per_mtok": 0.4, "cached_usd_per_mtok": 0.01, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-3-flash-preview", "in_usd_per_mtok": 0.5, "out_usd_per_mtok": 3.0, "cached_usd_per_mtok": 0.05, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-3.1-flash-lite", "in_usd_per_mtok": 0.25, "out_usd_per_mtok": 1.5, "cached_usd_per_mtok": 0.025, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-3.5-flash", "in_usd_per_mtok": 1.5, "out_usd_per_mtok": 9.0, "cached_usd_per_mtok": 0.15, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-3.5-flash-lite", "in_usd_per_mtok": 0.3, "out_usd_per_mtok": 2.5, "cached_usd_per_mtok": 0.03, "context_window_tokens": 1048576 },
+    { "provider": "google", "model": "gemini-embedding-2", "in_usd_per_mtok": 0.2, "out_usd_per_mtok": 0.0, "context_window_tokens": 8192 }
   ]
 }

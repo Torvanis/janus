@@ -33,6 +33,10 @@ func MetadataProvider(adapterType, baseURL string) string {
 		if adapterType == "anthropic" {
 			return "anthropic"
 		}
+	case "generativelanguage.googleapis.com":
+		if adapterType == "gemini" {
+			return "google"
+		}
 	}
 	return ""
 }

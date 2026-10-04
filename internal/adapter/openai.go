@@ -486,11 +486,39 @@ func joinURL(base, path string) string {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	// Allow base URLs that already carry the version segment.
-	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
+	// A base URL that already carries an API version (".../v1",
+	// ".../openai/v1", Gemini's ".../v1beta/openai") is the full API root, as
+	// providers document it for OpenAI clients: drop the request's own /v1
+	// instead of doubling it. A base without one (https://api.openai.com,
+	// https://openrouter.ai/api) gets the /v1 appended as before.
+	if strings.HasPrefix(path, "/v1/") && baseHasVersion(base) {
 		return base + strings.TrimPrefix(path, "/v1")
 	}
 	return base + path
+}
+
+// apiVersionSegment matches a path segment naming an API version: v1, v2,
+// v1beta, v1alpha2, v1beta1.
+var apiVersionSegment = regexp.MustCompile(`^v[0-9]+((alpha|beta)[0-9]*)?$`)
+
+// baseHasVersion reports whether the path of a base URL contains an API
+// version segment.
+func baseHasVersion(base string) bool {
+	path := base
+	if i := strings.Index(base, "://"); i >= 0 {
+		path = base[i+3:]
+		if j := strings.Index(path, "/"); j >= 0 {
+			path = path[j:]
+		} else {
+			path = ""
+		}
+	}
+	for _, seg := range strings.Split(path, "/") {
+		if apiVersionSegment.MatchString(seg) {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneHeader(h http.Header) http.Header {

@@ -1008,7 +1008,11 @@ func applyThroughput(event *store.UsageEvent, extracted adapter.Usage, upstreamE
 		return
 	}
 	inWindow, outWindow := upstreamElapsed, upstreamElapsed
-	if event.Streaming && ttfb > 0 && ttfb < upstreamElapsed {
+	// Unstreamed reasoning (Gemini thinking) is generated before the first
+	// visible byte: splitting at TTFB would credit it to prompt processing
+	// and divide all output by the last few milliseconds. Both phases then
+	// share the whole call, as for a buffered response.
+	if event.Streaming && ttfb > 0 && ttfb < upstreamElapsed && !extracted.HiddenReasoning {
 		inWindow, outWindow = ttfb, upstreamElapsed-ttfb
 	}
 	// Input speed counts only what the provider processed: cache reads are

@@ -133,6 +133,12 @@ type Usage struct {
 	TokensInPerSecond  float64
 	TokensOutPerSecond float64
 	ThroughputReported bool
+
+	// HiddenReasoning is set when TokensOut includes reasoning the provider
+	// generated but did not stream (Gemini's thinking tokens). They are
+	// produced before the first visible byte, so time-to-first-byte is not
+	// prompt processing and the generation window is the whole call.
+	HiddenReasoning bool
 }
 
 // MergeStream folds the usage parsed from one streamed frame into the running
@@ -161,6 +167,9 @@ func (u *Usage) MergeStream(frame Usage) {
 	}
 	if frame.FinishReason != "" {
 		u.FinishReason = frame.FinishReason
+	}
+	if frame.HiddenReasoning {
+		u.HiddenReasoning = true
 	}
 }
 

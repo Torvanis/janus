@@ -26,6 +26,7 @@ const PROVIDER_BILLED: Record<string, RateDimension[]> = {
   anthropic: ['cached', 'write5m', 'write1h'],
   bedrock: ['cached', 'write5m'],
   vertex: ['cached'],
+  gemini: ['cached'],
   openai_compatible: ['cached'],
   ollama: [],
 };
@@ -34,6 +35,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   anthropic: 'Anthropic',
   bedrock: 'Bedrock',
   vertex: 'Vertex AI',
+  gemini: 'Google Gemini',
   openai_compatible: 'OpenAI-compatible providers',
   ollama: 'Ollama',
 };

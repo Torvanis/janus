@@ -2487,7 +2487,13 @@ export const en = {
     providerLabel: 'Provider type',
     providerHintDefault: 'Determines how requests are translated and how models are discovered.',
     providerHintLocked: 'The provider type cannot be changed after creation — create a new upstream instead.',
-    baseUrlHint: 'For example https://api.openai.com',
+    baseUrlHint: 'For example https://api.openai.com/v1',
+    baseUrlHintPreset: 'Filled in from the provider’s documentation. Change it for a proxy or a regional endpoint.',
+    presetGroup: {
+      cloud: 'Cloud providers',
+      selfHosted: 'Self-hosted engines',
+      other: 'Other',
+    },
     baseUrlError: 'Enter an absolute URL beginning with http:// or https://.',
     credentialLabel: 'Credential',
     replaceCredentialLabel: 'Replace credential',
@@ -2509,6 +2515,8 @@ export const en = {
     editRates: 'Edit rates',
     adapterHelp: {
       openaiCompatible: 'Any endpoint speaking the OpenAI API — OpenAI itself, Azure OpenAI, or a compatible proxy.',
+      gemini:
+        'Google Gemini API with an API key from Google AI Studio, through Google’s OpenAI-compatible endpoint. Discovery adds each model’s context window, and thinking tokens are metered as output, as Google bills them. For service-account access use Google Vertex AI.',
       anthropic: 'Anthropic Messages API. Chat completions are translated in both directions.',
       bedrock: 'AWS Bedrock. Store credentials as ACCESS_KEY_ID:SECRET_ACCESS_KEY. A paid AWS account is required.',
       vertex: 'Google Vertex AI. Paste the service-account JSON key. A paid GCP project is required.',
@@ -2628,6 +2636,8 @@ export const en = {
         'Bedrock prices per model. For Claude on Bedrock use the same five columns as Anthropic (cache write is billed at the 5m rate). For other Bedrock models only Input and Output apply — leave the cache fields 0.',
       vertex:
         'Vertex / Gemini bills Input, Output and Context caching (→ Cached input). Cache storage is billed per hour, which Janus does not model; leave the cache-write fields 0. Claude on Vertex uses the Anthropic mapping.',
+      gemini:
+        'Gemini API: Input, Output (thinking tokens included, as Google bills them) and Context caching (→ Cached input). Cache storage is billed per hour, which Janus does not model; leave the cache-write fields 0. Models priced by prompt size (over 200k tokens) need the lower tier entered by hand.',
       openai_compatible:
         'OpenAI: Input, Output and Cached input; cache writes are free — leave both at 0. Other OpenAI-compatible providers vary: Kimi/Moonshot bills cache creation (→ 5m cache write); Groq, Together, Fireworks and most Llama hosts bill Input and Output only; X.ai reports the exact cost per request itself, so its image models need no rates here.',
       ollama:
