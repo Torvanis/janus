@@ -449,6 +449,8 @@ func (s *Server) requestFilter(r *http.Request, user *store.User) store.RequestF
 		// one metering outcome (the System page links here for gaps).
 		Accounting: r.URL.Query().Get("accounting"),
 		Source:     r.URL.Query().Get("source"),
+		// Usage-insights labels are an admin view of org traffic.
+		Classified: adminOnly(user, r.URL.Query().Get("classified")),
 	}
 	if r.URL.Query().Get("range") != "" {
 		f.Start, f.End = start, end
@@ -573,6 +575,35 @@ func (s *Server) attachRequestOwners(ctx context.Context, events []*store.UsageE
 	}
 }
 
+// adminOnly returns v for an administrator and "" for anyone else.
+func adminOnly(user *store.User, v string) string {
+	if user == nil || !user.IsAdmin() {
+		return ""
+	}
+	return v
+}
+
+// attachClassificationTags adds each request's Usage insights label (and
+// how it was produced: inline or background, timing, classifier) to an
+// admin request-log page.
+func (s *Server) attachClassificationTags(ctx context.Context, events []*store.UsageEvent) {
+	ids := make([]string, 0, len(events))
+	for _, e := range events {
+		ids = append(ids, e.RequestID)
+	}
+	tags, err := s.Store.ClassificationTagsForRequests(ctx, ids)
+	if err != nil {
+		s.Logger.WarnContext(ctx, "classification: request tags", "error", err.Error())
+		return
+	}
+	for _, e := range events {
+		if t, ok := tags[e.RequestID]; ok {
+			t := t
+			e.ClassificationTag = &t
+		}
+	}
+}
+
 // handleListRequests serves GET /api/v1/requests. Responses are user-scoped
 // unless an admin uses the scope=all / user_id overrides, in which case each
 // event is enriched with the owning user's identity for the admin log viewer.
@@ -586,8 +617,21 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	if isAdminCrossUserRequestQuery(r, user) {
 		s.attachRequestOwners(r.Context(), events)
 		s.attachCaptureMarkers(r.Context(), events)
+		s.attachClassificationTags(r.Context(), events)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"requests": events, "total_count": total})
+}
+
+// handleRequestFacets lists the (kind, model) pairs with request counts in
+// the caller's current request-log scope, ignoring the kind and model
+// filters themselves, so the page's filters offer only what happened.
+func (s *Server) handleRequestFacets(w http.ResponseWriter, r *http.Request) {
+	facets, err := s.Store.RequestFacets(r.Context(), s.requestFilter(r, UserFrom(r.Context())))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"facets": facets})
 }
 
 // handleExportRequests streams the current filter as CSV. Under an admin

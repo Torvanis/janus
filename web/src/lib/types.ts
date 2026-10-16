@@ -384,6 +384,21 @@ export interface UsageEvent {
    * request's payloads, so a download can be offered for the row.
    */
   has_capture?: boolean;
+  /**
+   * How long this request waited on classifiers before it was forwarded
+   * (Security Gateway guards in parallel, plus an inline Usage insights
+   * label), and how many classifier requests that took.
+   */
+  classifier_ms?: number;
+  classifier_calls?: number;
+  /** Set when the request named a managed model or an auto-routing router. */
+  managed_model_id?: string;
+  /** Auto-routing: how the router chose (matched:<route>, sticky, no_match, timeout, …). */
+  route_reason?: string;
+  /** Inline Usage insights label ("coding/rust"). */
+  classification?: string;
+  /** Admin request log: how Usage insights labelled the request (inline or background). */
+  classification_tag?: ClassificationTag;
   secgw_action?: string;
   secgw_violations?: number;
   user_id: string;
@@ -404,6 +419,8 @@ export interface UsageEvent {
    */
   client_app?: string;
   model: string;
+  /** The managed model or router name the caller asked for, when different from model. */
+  requested_model_name?: string;
   endpoint_path: string;
   http_method: string;
   modality: string;
@@ -631,6 +648,8 @@ export interface ManagedModel {
   id: string;
   name: string;
   description: string;
+  /** alias (one model or a pool) or router (Auto-routing picks per request). */
+  kind?: 'alias' | 'router';
   status: 'enabled' | 'disabled';
   target_model_id: string;
   target_model_name: string;
@@ -1070,7 +1089,7 @@ export interface TroubleshootingPut {
 /* --- Security gateway (admin) ------------------------------------------- */
 
 export type SecgwCheckKind = 'shape' | 'secrets' | 'pii' | 'terms' | 'prompt_injection' | 'content_safety';
-export type ClassifierRole = 'text_classification' | 'generative_guard';
+export type ClassifierRole = 'text_classification' | 'generative_guard' | 'decision';
 
 /** One MLCommons hazard category as Llama Guard emits it. Served by the API; never hardcoded here. */
 export interface SecgwCategory {
@@ -1350,4 +1369,258 @@ export interface SubscriptionPollResult {
   message?: string;
   interval_seconds?: number;
   connection?: SubscriptionConnection;
+}
+
+/* --- Prompt classification (Administration → Usage insights) ------------- */
+
+export interface ClassificationCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  parent_slug: string;
+  builtin: boolean;
+  enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClassificationSettings {
+  enabled: boolean;
+  mode: 'async' | 'inline';
+  protocol: 'systemone' | 'chat';
+  upstream_id: string;
+  model: string;
+  sample_rate: number;
+  timeout_ms: number;
+  text_scope: 'last_user' | 'all_user' | 'conversation';
+  include_system_prompt: boolean;
+  max_chars: number;
+  include_service_tokens: boolean;
+  concurrency: number;
+  queue_size: number;
+  subcategories: boolean;
+  retention_days: number;
+  updated_at: string;
+}
+
+export interface ClassifierUpstream {
+  id: string;
+  name: string;
+  adapter_type: string;
+  base_url: string;
+  enabled: boolean;
+  models: string[];
+  decision_models: string[];
+  systemone_url: string;
+}
+
+export interface ClassificationDocument {
+  settings: ClassificationSettings;
+  upstreams: ClassifierUpstream[];
+  running: boolean;
+  problem?: string;
+  queue_depth: number;
+  limits: { top_level: number; subcategories: number };
+}
+
+export interface ClassificationCount {
+  key: string;
+  label?: string;
+  count: number;
+  avg_confidence: number;
+}
+
+export interface ClassificationReport {
+  from: string;
+  to: string;
+  bucket: 'day' | 'hour';
+  classified: number;
+  categories: Array<{
+    category: string;
+    count: number;
+    share: number;
+    avg_confidence: number;
+    low_confidence: number;
+    subcategories: ClassificationCount[];
+    top_models: ClassificationCount[];
+    top_people: ClassificationCount[];
+  }>;
+  series: Array<{ bucket: string; counts: Record<string, number> }>;
+  by_team: Array<{ team_id: string; team: string; total: number; counts: Record<string, number> }>;
+  health: {
+    attempts: number;
+    ok: number;
+    errors: number;
+    timeouts: number;
+    dropped: number;
+    avg_ms: number;
+    p50_ms: number;
+    p95_ms: number;
+    max_ms: number;
+    avg_queue_ms: number;
+    /** Requests classifiers received (absent on older servers). */
+    calls?: number;
+    tokens_in: number;
+    tokens_out: number;
+    cost_nanousd: number;
+    by_classifier: Array<{ classifier: string; mode: string; count: number; avg_ms: number; p50_ms: number; p95_ms: number }>;
+  };
+}
+
+export interface ClassificationResult {
+  id: string;
+  created_at: string;
+  request_id: string;
+  user_id: string;
+  user_name?: string;
+  service_token_id?: string;
+  team_ids: string;
+  model_name: string;
+  category: string;
+  subcategory: string;
+  confidence: number;
+  probabilities?: Record<string, number>;
+  status: 'ok' | 'error' | 'timeout' | 'dropped';
+  error?: string;
+  mode: string;
+  protocol: string;
+  classifier: string;
+  latency_ms: number;
+  queue_ms: number;
+  input_chars: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_nanousd: number;
+  calls?: number;
+}
+
+export interface ClassificationTag {
+  category: string;
+  subcategory?: string;
+  confidence: number;
+  mode: 'inline' | 'async' | string;
+  status: string;
+  classifier: string;
+  latency_ms: number;
+  queue_ms: number;
+  calls: number;
+}
+
+/** One classifier call captured by troubleshooting mode. */
+export interface ClassifierRunTrace {
+  feature: string;
+  classifier: string;
+  protocol: string;
+  url?: string;
+  mode: string;
+  started_at: string;
+  latency_ms: number;
+  status: 'ok' | 'error' | 'timeout' | string;
+  error?: string;
+  questions?: string[];
+  request?: unknown;
+  response?: unknown;
+}
+
+export interface ClassifierProfileView {
+  upstream_id: string;
+  upstream_name: string;
+  model: string;
+  model_id?: string;
+  role: string;
+  call_style: '' | 'combined' | 'separate';
+  max_options: number;
+  wire_model: string;
+  dialect: '' | 'systemone' | 'openai';
+  effective_dialect: 'systemone' | 'openai';
+  effective_style: 'combined' | 'separate';
+  effective_max_options: number;
+  used_by: string[];
+}
+
+/** A decision model's wire format, pricing and caller access (GET /admin/decision-models). */
+export interface DecisionModelView {
+  id: string;
+  name: string;
+  upstream_id: string;
+  upstream_name: string;
+  status: string;
+  dialect: 'systemone' | 'openai';
+  dialect_source: 'detected' | 'admin';
+  wire_model: string;
+  endpoint: string;
+  cost_source: '' | 'provider' | 'card' | 'none';
+  request_fee_usd: number;
+  usd_per_mtok_in: number;
+  usd_per_mtok_out: number;
+  usd_per_mtok_cached: number;
+  provider_reports_cost: boolean;
+  grant_count: number;
+  guarding: string[];
+  grant_when_guarding: boolean;
+  grantable: boolean;
+  not_grantable_reason?: string;
+}
+
+export interface BenchmarkConfig {
+  injection_model_id: string;
+  safety_model_id: string;
+  usage_insights: boolean;
+  insights_mode: '' | 'inline' | 'async';
+  style: '' | 'combined' | 'separate';
+  levels: number[];
+  requests_per_level: number;
+  budget_ms: number;
+}
+
+export interface BenchmarkLevel {
+  concurrency: number;
+  requests: number;
+  errors: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms: number;
+  per_second: number;
+  background_p50_ms?: number;
+  background_p95_ms?: number;
+  calls_per_request: number;
+  within_budget: boolean;
+}
+
+export interface BenchmarkResult {
+  plan?: string[];
+  levels?: BenchmarkLevel[];
+  max_concurrent?: number;
+  single_ms?: number;
+  stopped?: string;
+}
+
+export interface ClassifierBenchmark {
+  id: string;
+  created_at: string;
+  finished_at?: string;
+  created_by: string;
+  status: 'running' | 'done' | 'failed';
+  error?: string;
+  config: Partial<BenchmarkConfig>;
+  result: BenchmarkResult;
+}
+
+export interface ClassificationTestResult {
+  status: string;
+  error: string;
+  category: string;
+  subcategory: string;
+  confidence: number;
+  probabilities?: Record<string, number>;
+  latency_ms: number;
+  classifier: string;
+  model: string;
+  protocol: string;
+  input_chars: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost_nanousd: number;
 }

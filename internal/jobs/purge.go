@@ -83,6 +83,22 @@ func (p *Purger) RunOnce(ctx context.Context) {
 		p.metrics.PurgeDeletedRows.WithLabelValues("oidc_state").Add(float64(n))
 		deleted += n
 	}
+	// Prompt classification results follow their own admin-set retention.
+	if settings, err := p.store.ClassificationSettings(ctx); err != nil {
+		p.logger.ErrorContext(ctx, "read classification retention", "error", err.Error())
+	} else if settings.RetentionDays > 0 {
+		if n, err := p.store.PruneClassificationResults(ctx, now.AddDate(0, 0, -settings.RetentionDays)); err != nil {
+			p.logger.ErrorContext(ctx, "purge classification results", "error", err.Error())
+		} else if n > 0 {
+			p.metrics.PurgeDeletedRows.WithLabelValues("classification_result").Add(float64(n))
+			deleted += n
+		}
+	}
+	// Auto-routing: expired sticky conversations always go; decisions and
+	// evaluation verdicts follow the router settings' "Keep decisions"
+	// (0 keeps them), and a decision never names its caller for longer
+	// than the usage log does.
+	deleted += p.pruneRouting(ctx, now)
 	if err := p.quota.Reconcile(ctx); err != nil {
 		p.logger.ErrorContext(ctx, "reconcile quota ledgers after purge", "error", err.Error())
 	}
@@ -91,6 +107,31 @@ func (p *Purger) RunOnce(ctx context.Context) {
 	p.lastRun, p.lastDeleted = now, deleted
 	p.mu.Unlock()
 	p.logger.InfoContext(ctx, "retention purge complete", "rows_deleted", deleted)
+}
+
+// pruneRouting enforces auto-routing retention and returns the rows removed.
+func (p *Purger) pruneRouting(ctx context.Context, now time.Time) int64 {
+	var history time.Time
+	if settings, err := p.store.RoutingSettings(ctx); err != nil {
+		// Without the setting, only what is certainly expired goes.
+		p.logger.ErrorContext(ctx, "read routing retention", "error", err.Error())
+	} else if settings.RetentionDays > 0 {
+		history = now.AddDate(0, 0, -settings.RetentionDays)
+	}
+	var identities time.Time
+	if p.usageDays > 0 {
+		identities = now.AddDate(0, 0, -p.usageDays)
+	}
+	n, err := p.store.PruneRouting(ctx, now, history, identities)
+	if err != nil {
+		p.logger.ErrorContext(ctx, "purge routing history", "error", err.Error())
+	}
+	for table, v := range map[string]int64{"routing_sticky": n.Sticky, "routing_decision": n.Decisions, "routing_eval_result": n.Evals} {
+		if v > 0 {
+			p.metrics.PurgeDeletedRows.WithLabelValues(table).Add(float64(v))
+		}
+	}
+	return n.Sticky + n.Decisions + n.Evals
 }
 
 // Start schedules the purge for the configured UTC time each day.

@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-const managedModelColumns = `id, name, description, target_model_id, status, created_by_user_id, created_at, updated_at, fallback_model_id, fallback_triggers, lb_policy, lb_affinity, lb_spill_pct`
+const managedModelColumns = `id, name, description, target_model_id, status, created_by_user_id, created_at, updated_at, fallback_model_id, fallback_triggers, lb_policy, lb_affinity, lb_spill_pct, kind`
 
 func scanManagedModel(scan func(...any) error) (*ManagedModel, error) {
 	var m ManagedModel
 	var created, updated, triggers string
 	if err := scan(&m.ID, &m.Name, &m.Description, &m.TargetModelID, &m.Status, &m.CreatedBy, &created, &updated,
-		&m.FallbackModelID, &triggers, &m.Pool.Policy, &m.Pool.Affinity, &m.Pool.SpillPct); err != nil {
+		&m.FallbackModelID, &triggers, &m.Pool.Policy, &m.Pool.Affinity, &m.Pool.SpillPct, &m.Kind); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = ParseTime(created)
@@ -268,15 +268,15 @@ func (s *Store) CreateManagedModel(ctx context.Context, name, description, targe
 	}
 	now := nowUTC()
 	m := &ManagedModel{
-		ID: NewID(), Name: name, Description: strings.TrimSpace(description),
+		ID: NewID(), Name: name, Description: strings.TrimSpace(description), Kind: ManagedKindAlias,
 		TargetModelID: targetModelID, Status: ManagedModelEnabled,
 		CreatedBy: createdByUserID, CreatedAt: now, UpdatedAt: now,
 	}
 	m.Pool = ManagedModelPool{Policy: PoolPolicyFailover, Affinity: PoolAffinityBounded, SpillPct: DefaultPoolSpillPct}
 	err = s.InTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO managed_model (`+managedModelColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+		if _, err := tx.ExecContext(ctx, s.rebind(`INSERT INTO managed_model (`+managedModelColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 			m.ID, m.Name, m.Description, m.TargetModelID, m.Status, m.CreatedBy, FormatTime(m.CreatedAt), FormatTime(m.UpdatedAt), "", "",
-			m.Pool.Policy, m.Pool.Affinity, m.Pool.SpillPct); err != nil {
+			m.Pool.Policy, m.Pool.Affinity, m.Pool.SpillPct, m.Kind); err != nil {
 			return err
 		}
 		return s.replaceSingleMember(ctx, tx, m.ID, m.TargetModelID)
@@ -303,6 +303,9 @@ type ManagedModelFilter struct {
 	// keeps resolving by name but can no longer be served once its target is
 	// disabled with the upstream.
 	TargetUpstreamID string
+	// Kind lists only aliases (ManagedKindAlias) or only routers
+	// (ManagedKindRouter); empty lists both.
+	Kind string
 }
 
 // ListManagedModels returns aliases with their targets resolved.
@@ -312,6 +315,10 @@ func (s *Store) ListManagedModels(ctx context.Context, f ManagedModelFilter) ([]
 	if f.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, f.Status)
+	}
+	if f.Kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, f.Kind)
 	}
 	if f.TargetModelID != "" {
 		where = append(where, "target_model_id = ?")
@@ -390,6 +397,9 @@ func (s *Store) decorateManagedModel(ctx context.Context, m *ManagedModel) (*Man
 	}
 	if err := s.loadPool(ctx, m); err != nil {
 		return nil, err
+	}
+	if m.Kind == "" {
+		m.Kind = ManagedKindAlias
 	}
 	target, err := s.ModelByID(ctx, m.TargetModelID)
 	if errors.Is(err, ErrNotFound) {
@@ -498,8 +508,10 @@ func (s *Store) UpdateManagedModel(ctx context.Context, id, name, description st
 // the admin swaps what it means. In-flight requests are unaffected — they
 // already resolved their model — and the next request uses the new target.
 func (s *Store) SetManagedModelTarget(ctx context.Context, id, targetModelID string) error {
-	if _, err := s.ManagedModelByID(ctx, id); err != nil {
+	if existing, err := s.ManagedModelByID(ctx, id); err != nil {
 		return err
+	} else if existing.Kind == ManagedKindRouter {
+		return &ValidationError{Field: "target_model_id", Message: "this is an auto-routing router; edit its routes on the Auto-routing page"}
 	}
 	if err := s.assertValidTarget(ctx, targetModelID); err != nil {
 		return err

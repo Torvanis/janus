@@ -74,8 +74,16 @@ const eventForeign = {
   throughput_source: 'calculated',
 };
 
+const facets = [
+  { modality: 'chat', model: 'gpt-4o', count: 900 },
+  { modality: 'chat', model: 'claude-3-haiku', count: 300 },
+  { modality: 'decision', model: 'typesafe/jev-router', count: 40 },
+  { modality: 'decision', model: 'gpt-6-luna:decisions', count: 12 },
+];
+
 function mockApi() {
   mocked.get.mockImplementation((path: string) => {
+    if (path.startsWith('/api/v1/requests/facets')) return Promise.resolve({ facets });
     if (path.startsWith('/api/v1/requests')) {
       return Promise.resolve({ requests: [eventMine, eventForeign], total_count: 120 });
     }
@@ -131,7 +139,9 @@ function mockApi() {
 }
 
 function requestCalls(): string[] {
-  return mocked.get.mock.calls.map(([path]) => path as string).filter((path) => path.startsWith('/api/v1/requests'));
+  return mocked.get.mock.calls
+    .map(([path]) => path as string)
+    .filter((path) => path.startsWith('/api/v1/requests') && !path.startsWith('/api/v1/requests/facets'));
 }
 
 function renderAt(initialEntry = '/admin/requests') {
@@ -255,6 +265,32 @@ describe('filters, sorting, and page reset', () => {
 
     await user.click(within(screen.getByRole('columnheader', { name: /Latency/ })).getByRole('button'));
     await waitFor(() => expect(requestCalls().at(-1)).toContain('sort=latency'));
+    // Model, kind and status sort too.
+    await user.click(within(screen.getByRole('columnheader', { name: /Kind/ })).getByRole('button'));
+    await waitFor(() => expect(requestCalls().at(-1)).toContain('sort=modality'));
+    await user.click(within(screen.getByRole('columnheader', { name: /Model/ })).getByRole('button'));
+    await waitFor(() => expect(requestCalls().at(-1)).toContain('sort=model'));
+  });
+
+  it('offers only the kinds and models seen in this view, with counts, models grouped by kind', async () => {
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole('cell', { name: 'Ada Lovelace' });
+    const kind = screen.getByRole('combobox', { name: 'Kind' }) as HTMLSelectElement;
+    await waitFor(() => expect([...kind.options].map((o) => o.text)).toEqual(['All kinds', 'Chat (1,200)', 'Decision (52)']));
+    const modelSelect = screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement;
+    expect([...modelSelect.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Chat (1,200)', 'Decision (52)']);
+    expect(within(modelSelect).getByRole('option', { name: 'typesafe/jev-router (40)' })).toBeTruthy();
+    // The facets ignore their own filters, but follow the range and the rest.
+    const facetCall = mocked.get.mock.calls.map(([p]) => p as string).find((p) => p.startsWith('/api/v1/requests/facets'))!;
+    expect(facetCall).toContain('scope=all');
+    expect(facetCall).not.toContain('modality=');
+
+    // Picking a kind narrows the model list to that kind.
+    await user.selectOptions(kind, 'decision');
+    await waitFor(() => expect(requestCalls().at(-1)).toContain('modality=decision'));
+    expect([...modelSelect.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Decision (52)']);
+    expect(within(modelSelect).queryByRole('option', { name: /gpt-4o/ })).toBeNull();
   });
 });
 

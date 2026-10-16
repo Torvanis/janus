@@ -838,6 +838,12 @@ var migrations = []migration{
 	poolMigration,
 	dropTeamAttributionMigration,
 	usageRollupMigration,
+	classificationMigration,
+	classifierGroupingMigration,
+	routingMigration,
+	decisionModelsMigration,
+	servedManagedModelMigration,
+	decisionStaleStatusMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serialises

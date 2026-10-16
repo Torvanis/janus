@@ -14,7 +14,7 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-CHART = ROOT / "charts/janus"
+CHART = ROOT / "charts/janus-helm-chart"
 HELM = os.environ.get("HELM", "helm")
 ARTIFACTS = os.environ.get("HELM_TEST_ARTIFACTS")
 BASE = {"encryptionKey": {"existingSecret": "test-key"},
@@ -265,11 +265,26 @@ class ChartTest(unittest.TestCase):
             names = {p["name"] for p in matches[0]["spec"]["template"]["spec"]["containers"][0]["ports"]}
             self.assertIn(service["spec"]["ports"][0]["targetPort"], names)
 
+    def test_rename_keeps_resource_names_for_upgrades(self):
+        # The chart was renamed janus -> janus-helm-chart in 0.2.0. Deployment and
+        # StatefulSet selectors are immutable, so rendered names and labels must
+        # stay exactly what chart 0.1.x produced or `helm upgrade` fails.
+        docs = [doc for doc in yaml.safe_load_all(self.render()) if doc]
+        names = sorted({doc["metadata"]["name"] for doc in docs})
+        self.assertIn("test-janus", names)
+        labelled = [doc for doc in docs if "helm.sh/chart" in doc["metadata"].get("labels", {})]
+        self.assertTrue(labelled)
+        for doc in labelled:
+            self.assertEqual(doc["metadata"]["labels"]["app.kubernetes.io/name"], "janus")
+            self.assertEqual(doc["metadata"]["labels"]["helm.sh/chart"], "janus-helm-chart-0.2.0")
+        for work in (d for d in docs if d["kind"] in ["Deployment", "StatefulSet"]):
+            self.assertEqual(work["spec"]["selector"]["matchLabels"]["app.kubernetes.io/name"], "janus")
+
     def test_image_digest_and_tag(self):
         image = deployment(self.render())["spec"]["template"]["spec"]["containers"][0]["image"]
         self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:6ec53a6d2d338f9c9800ccc14337f0af76aaf91b60bf0f36603896ab545ba1a1")
-        image = deployment(self.render({"image": {"digest": "", "tag": "2026.10.2"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
-        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.10.2")
+        image = deployment(self.render({"image": {"digest": "", "tag": "2026.10.3"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
+        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.10.3")
 
     def test_lint_variants(self):
         for value in [{}, {"database": {"type": "sqlite"}, "postgresql": {"enabled": False}},
@@ -284,7 +299,7 @@ class ChartTest(unittest.TestCase):
             result = subprocess.run([HELM, "package", str(CHART), "--destination", temp],
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            package = Path(temp) / "janus-0.1.6.tgz"
+            package = Path(temp) / "janus-helm-chart-0.2.0.tgz"
             self.assertTrue(package.exists())
             self.assertEqual(self.render(), self.render(chart=package))
             if ARTIFACTS:

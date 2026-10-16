@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
 import { publicModelName, type Model, type UsageEvent } from '../lib/types';
-import { formatDateTime, formatDuration, formatNumber, formatUSD, statusTone, titleCase } from '../lib/format';
+import { formatDateTime, formatDuration, formatNumber, formatUSD, modalityLabel, statusTone } from '../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../components/ui';
 import { ChargedTeam } from '../components/ChargedTeam';
 import { useUrlState, useUrlStateBatch } from '../lib/hooks';
@@ -28,6 +28,7 @@ const MODALITIES = [
   'thread',
   'file',
   'moderation',
+  'decision',
   'fine_tune',
 ];
 
@@ -126,7 +127,7 @@ export function RequestsPage(): ReactNode {
           onChange={setModality}
           options={[
             { value: '', label: t('requests.allModalities') },
-            ...MODALITIES.map((value) => ({ value, label: titleCase(value) })),
+            ...MODALITIES.map((value) => ({ value, label: modalityLabel(value) })),
           ]}
         />
         <FilterSelect
@@ -213,7 +214,7 @@ export function RequestsPage(): ReactNode {
                           <td className="small">
                             <ChargedTeam event={event} />
                           </td>
-                          <td className="small">{titleCase(event.modality)}</td>
+                          <td className="small">{modalityLabel(event.modality)}</td>
                           <td>
                             <Badge tone={statusTone(event.http_status)}>
                               {event.http_status}

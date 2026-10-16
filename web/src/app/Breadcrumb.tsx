@@ -29,6 +29,18 @@ function SubscriptionProviderName({ id }: { id: string }) {
   return <>{list.data?.providers.find((p) => p.id === id)?.name ?? id.replace(/-/g, ' ')}</>;
 }
 
+/** An auto-routing router's name from the (already cached) routers list. */
+function RouterName({ id }: { id: string }) {
+  const list = useQuery({
+    queryKey: ['admin', 'routing', 'routers'],
+    queryFn: () => api.get<{ routers: { id: string; name: string }[] }>('/api/v1/admin/routing/routers'),
+    enabled: id !== 'new',
+    staleTime: 30000,
+  });
+  if (id === 'new') return <>New router</>;
+  return <>{list.data?.routers.find((r) => r.id === id)?.name ?? 'Router'}</>;
+}
+
 export function Breadcrumb({ path }: { path: string }): ReactNode {
   let segments = path.split('/').filter(Boolean);
   const administration = segments[0] === 'admin' && segments[1] === 'teams';
@@ -47,6 +59,8 @@ export function Breadcrumb({ path }: { path: string }): ReactNode {
               <TeamName id={segment} administration={administration} />
             ) : index === 1 && segments[0] === 'subscriptions' ? (
               <SubscriptionProviderName id={segment} />
+            ) : index === 3 && segments[1] === 'routing' && segments[2] === 'routers' ? (
+              <RouterName id={segment} />
             ) : (
               ({
                 admin: 'Administration',
@@ -60,6 +74,7 @@ export function Breadcrumb({ path }: { path: string }): ReactNode {
                 troubleshooting: 'Troubleshooting',
                 status: 'System status',
                 import: 'Import teams',
+                routing: 'Auto-routing',
               }[segment] ?? segment.replace(/-/g, ' '))
             )}
           </span>

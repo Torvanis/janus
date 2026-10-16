@@ -23,8 +23,8 @@ func (s *Store) SumTeamMetricSince(ctx context.Context, teamID, modelID, metric 
 	pattern := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(teamID)
 	args := []any{FormatTime(since), "%," + pattern + ",%"}
 	if modelID != "" {
-		query += ` AND model_id=?`
-		args = append(args, modelID)
+		query += ` AND (model_id=? OR managed_model_id=? OR served_managed_model_id=?)`
+		args = append(args, modelID, modelID, modelID)
 	}
 	// Read coverage and usage in one statement so a concurrent purge cannot
 	// pair a pre-purge watermark with a post-purge (incomplete) aggregate.

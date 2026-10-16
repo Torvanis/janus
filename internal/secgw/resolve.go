@@ -25,6 +25,10 @@ type Subject struct {
 	GroupIDs       []string
 	ModelID        string
 	ManagedModelID string
+	// RouterID is the auto-routing router the caller addressed, when the
+	// request came through one. Bindings on the router apply alongside
+	// those on the alias or model its chosen route serves from.
+	RouterID string
 	// UpstreamID is the provider the resolved model belongs to, so one
 	// binding can cover every model from that provider.
 	UpstreamID string
@@ -167,7 +171,7 @@ func bindingApplies(b *store.SecgwBinding, sub Subject) bool {
 	case store.SecgwScopeModel:
 		return sub.ModelID != "" && sub.ModelID == b.ScopeID
 	case store.SecgwScopeManagedModel:
-		return sub.ManagedModelID != "" && sub.ManagedModelID == b.ScopeID
+		return (sub.ManagedModelID != "" && sub.ManagedModelID == b.ScopeID) || (sub.RouterID != "" && sub.RouterID == b.ScopeID)
 	case store.SecgwScopePersonalSubscription:
 		return sub.PersonalProvider != "" && (b.ScopeID == store.SecgwScopeAnyProvider || b.ScopeID == sub.PersonalProvider)
 	}
@@ -222,12 +226,54 @@ func tighten(prev, cand ResolvedCheck) (ResolvedCheck, string) {
 		} else {
 			out.Options = cand.Options
 		}
+		// A decision guard's wider coverage (whole conversation, whole
+		// text) is part of the floor too: a team policy cannot narrow it.
+		if merged, narrowed := floorCoverage(prev.Options, out.Options); narrowed != "" {
+			out.Options = merged
+			if relaxed == "" {
+				relaxed = narrowed
+			}
+		}
 	}
 	if cand.ClassifierModelID != "" {
 		out.ClassifierModelID = cand.ClassifierModelID
 	}
 	out.Floor = true
 	return out, relaxed
+}
+
+// floorCoverage keeps a floor's wider decision-guard coverage (judge_scope
+// conversation, long_text windows) on the merged options and reports the
+// first narrowing it refused.
+func floorCoverage(floor, merged json.RawMessage) (json.RawMessage, string) {
+	var f, m GuardCoverage
+	_ = json.Unmarshal(floor, &f)
+	_ = json.Unmarshal(merged, &m)
+	narrowed := ""
+	var set map[string]any
+	if f.JudgeScope == store.SecgwJudgeConversation && m.JudgeScope != store.SecgwJudgeConversation {
+		narrowed = "cannot narrow judge_scope from conversation"
+		set = map[string]any{"judge_scope": store.SecgwJudgeConversation}
+	}
+	if f.LongText == store.SecgwLongTextWindows && m.LongText != store.SecgwLongTextWindows {
+		if narrowed == "" {
+			narrowed = "cannot narrow long_text from windows"
+		}
+		if set == nil {
+			set = map[string]any{}
+		}
+		set["long_text"] = store.SecgwLongTextWindows
+	}
+	if set == nil {
+		return merged, ""
+	}
+	obj := map[string]any{}
+	_ = json.Unmarshal(merged, &obj)
+	for k, v := range set {
+		obj[k] = v
+	}
+	out, _ := json.Marshal(obj)
+	return out, narrowed
 }
 
 // ContentSafetyOptions is the content_safety check's kind-specific config.

@@ -528,6 +528,16 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         ],
       },
       {
+        heading: 'Thinking settings and provider limits',
+        body: [
+          'Chat clients such as Open WebUI send the same settings to every model: a reasoning effort (none, minimal, low, medium, high, xhigh), a temperature from a preset, and tools. Providers each refuse a different part of that. GPT-6 Sol and Astra take low to xhigh only; Gemini takes none to high but not minimal or xhigh; Grok refuses none; Claude 5 refuses any temperature or top_p; GPT-5 and GPT-6 take only the default temperature and refuse function tools with a reasoning effort on chat completions.',
+          'Janus fits the request instead of returning the provider’s error. When a provider refuses a setting and says what it refused, Janus changes it and sends the request again before anything reaches the caller (a refused request is not billed): a reasoning level becomes the nearest level the model takes, a refused sampling setting is left out, and a GPT-5 or GPT-6 request with tools goes through OpenAI’s Responses API and comes back as a normal chat completion. What it learns is kept per model for a day on each gateway replica, so later requests go out fitted without a refusal.',
+          'Every change is shown on the response in the X-Janus-Reasoning-Adjusted header and on the request in the request log, for example “minimal->low temperature->omitted tools->responses”. An error Janus cannot fix is passed through unchanged.',
+          'Anthropic: reasoning_effort is translated into the thinking form each Claude model takes. Claude 4.6 and later (all of Claude 5) get adaptive thinking with that effort and a summary of the thinking, which Janus returns as reasoning_content (none and minimal ask for the lowest effort, low; adaptive models cannot switch thinking off), and the output cap is raised to 32,000 tokens when the caller set none. Earlier Claude models get a thinking budget (1,024 to 63,999 tokens by level, kept within the model’s output limit) and none leaves thinking off. Thinking needs the default temperature, so a temperature is left out when thinking is on. A request that sends Anthropic’s own thinking object is passed through as it is.',
+          'Gemini: with thinking on, Gemini signs each tool call and refuses the next turn when the signature is missing, which most chat clients drop. Janus remembers each signature as it relays the tool call and puts it back when the call is replayed; a call it did not see (another replica, an older conversation) gets the placeholder Google documents for that case.',
+        ],
+      },
+      {
         heading: 'The same model on more than one upstream',
         body: [
           'Two upstreams can serve a model under the same name — the same vLLM model on two nodes, or an old and a new endpoint while a pod moves. Each copy is its own catalog entry with its own rate card and grants, and the Models page marks it “Also on N other upstream(s)”. A request for the name goes to the most recently discovered copy the caller is granted, so granting the new copy is enough to move traffic; the old copy’s grants never apply to the new one, and an ungranted copy is never used as a fallback.',
@@ -842,6 +852,239 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
     ],
   },
   {
+    slug: 'admin/insights',
+    title: 'Usage insights',
+    summary:
+      'Label requests by the kind of work they ask for (coding, legal, writing, …) and see the mix by team, model and person.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'What it does',
+        body: [
+          "A classifier reads each sampled chat request and picks a category from your taxonomy, with a subcategory when that category has any. Administration → Usage insights shows the result: categories over time, each category's share and confidence, the subcategories, models and people behind it, the category mix per team, and the classifier's own speed and failures.",
+          "Only the label, its confidence and the classifier's timing are stored. The prompt is sent to the classifier and never written anywhere by Janus. Results are deleted after the retention you set (180 days by default).",
+        ],
+      },
+      {
+        heading: 'Choosing a classifier',
+        body: [
+          'Decision model (System One API). A decision model scores every category you offer and returns calibrated probabilities without generating text, so it is fast and its confidence means something. Janus speaks the System One API used by TypeSafe Jev, Bespoke Nimble, Laya and Cloudflare Clef, wherever they are served: TypeSafe (api.typesafe.ai), OpenRouter (/api/alpha/decisions, model ~typesafe/jev-latest), Ollama 0.35 or later (/v1/systemone, model nimble), or llama.cpp. It also speaks the OpenAI Decisions API (/v1/decisions, model gpt-6-luna): Janus picks the format from the provider, and Usage insights → Performance can override it per model. Add the server as an upstream like any other, then pick it as the provider. A hosted classifier receives your prompts; a self-hosted one keeps them inside your network.',
+          'Chat model. Any chat model Janus can reach is shown the taxonomy and asked to answer in JSON. It needs no extra service, which suits small deployments, but it is slower than a decision model, costs generation tokens, and its confidence is its own estimate. A small, fast model is usually enough. An answer that is not one of your categories is recorded as an error, never guessed.',
+          'Use Classifier → Try it to classify a sample with unsaved settings and compare classifiers and their speed before switching. Nothing is stored.',
+          'One decision model can serve Usage insights and the Security Gateway (prompt injection and content safety) at once. See Classifiers: speed and accuracy for how Janus combines their questions and how to measure what your choices cost.',
+        ],
+      },
+      {
+        heading: 'Background or inline',
+        body: [
+          'Background (the default) labels requests after they are sent on, from a queue on each replica, so reporting adds no latency. When the queue is full a sample is skipped and counted as dropped.',
+          'Inline labels the request before it is forwarded and returns the label in the X-Janus-Category response header (category/subcategory). The request waits at most the classifier timeout; a timeout or error never fails the request, it proceeds unlabelled and the miss is recorded. When more inline calls are in flight than the parallel limit, extra requests are labelled in the background instead, so a slow classifier cannot pile up latency. Auto-routing does not use this label; it asks its own questions (see Auto-routing).',
+          'When a Security Gateway check already calls the same decision model and that model takes questions together, the Usage insights question is added to that call in either mode: the label then costs no extra call or wait, it is recorded as inline, and an answer Janus cannot use is recorded as a classifier error without affecting the check.',
+        ],
+      },
+      {
+        heading: 'Categories',
+        body: [
+          'Janus ships 22 general categories (Coding, Technical help, Data analysis, Extraction and formatting, Writing and editing, Creative writing, Summarization, Translation and language, Research, Learning and tutoring, Science and math, Business and strategy, Marketing and sales, Customer communication, Finance and accounting, Legal, Medical and health, HR and people, Security, Personal and lifestyle, General chat, Other). Built-ins can be renamed, re-described or disabled, not deleted. Other is always offered so a request that fits nothing is not forced into a wrong category.',
+          "Add your own top-level categories for your industry, and subcategories one level deep: languages under Coding, Reverse engineering under Security. The description is what the classifier reads, so say what belongs and, when two categories are easy to confuse, what does not. A category's subcategories are also named in its description when the classifier picks the top level, so it knows that work belongs there.",
+          'At most 26 top-level categories and 25 subcategories per category can be enabled at once. Deleting a category stops new labels; requests already labelled keep theirs.',
+          'When the classifier accepts enough choices in one question, Janus asks for the category and subcategory together, offering every category and every subcategory as its own answer ("Coding", "Coding › Rust", …). That is one call instead of two and was the most accurate way to ask on every decision model we tested. A server with a lower limit (Ollama accepts 26 choices) is asked the category first and the subcategory second. Classifier → Performance shows the limit Janus detected for each classifier.',
+        ],
+      },
+      {
+        heading: 'Sampling and what is sent',
+        body: [
+          'Requests to classify sets the share of chat requests labelled. Text to classify chooses the latest user message (default), every user message, or the whole conversation; Include the system prompt helps when applications put the task there. Only the most recent characters up to the limit are sent (Nimble reads about 8,000 tokens). Embeddings, images and audio are not classified, and neither are requests refused by quota, rate limits or the Security Gateway.',
+          "Classifier calls are reported on the Usage insights page with their tokens and cost (from the provider's reported price, or the model's rate card for chat models). They never count against the caller's quota. Prometheus: janus_classifications_total{status,mode}, janus_classification_latency_seconds{mode,protocol} and janus_classification_queue.",
+        ],
+      },
+      {
+        heading: 'In the request log',
+        body: [
+          "Administration → Requests shows each request's label in the Classified as column and can filter by category, by category › subcategory, or by whether a request was classified at all. The request drawer says whether the label was produced inline or in the background, how confident the classifier was, and how long it took.",
+          'Every request also records how long it waited on classifiers before it was forwarded and how many classifier calls that took (the Classifier wait column, hidden by default). That covers the Security Gateway guards and an inline label. Background labelling never delays a request, so it is not in that number; its own time, queue wait and call count are shown separately in the drawer.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/auto-routing',
+    title: 'Auto-routing',
+    summary:
+      'Let Janus pick the model for each request: a classifier decides what kind of work it is and how hard, and a router sends it to the model you chose for that work.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'What it does',
+        body: [
+          'A router is a model name callers use, like auto/legal or auto/smart. For each request, a decision model answers which category of work it is (from your routing categories) and, when a route needs it, how difficult it is on a 1–5 scale. The router then tries its routes top to bottom and sends the request to the first one that fits. Anything else goes to the router’s default model.',
+          'Routing never fails a request. If the classifier is unsure, slow, busy or down, no route fits, or the chosen route cannot serve (its model was removed, or every server in its pool is out of service), the default serves it and the request log says why. Grants, quotas and security policies still apply to the model that serves, as below.',
+          'Typical setups: keep legal and other sensitive specialist work on a self-hosted or fine-tuned model and send everything else to a frontier model; send easy everyday work to a cheaper model; or use one frontier model for everything and let Janus raise or lower how hard it thinks.',
+        ],
+      },
+      {
+        heading: 'Routers are managed models',
+        body: [
+          'A router is a managed model of kind router, so the rest of Janus treats it like an alias. Callers need a grant on the router (Grants). Security policies bound to the router apply to every request sent through it, and policies bound to the model a route picks apply too. A quota on the router counts everything sent to it, whichever model served; a quota on a route’s model (or on an alias the route serves through) still applies and counts the traffic the route sends it. By default a caller over that quota is refused; tick “Skip this route when the caller is over a quota on its model” and the next route or the default serves instead. A caller already over a quota on the router is refused without a classifier call.',
+          'A route can be limited to callers who are also granted its model (“only for callers also granted this model”), for example to keep an expensive model to one team while everyone else gets the default. When the router’s configuration cannot be read, the default serves and the policies bound to the default model and its upstream apply.',
+          'The request log shows the router name the caller asked for, the model that served, and the reason (matched a route, same conversation, no route fit, classifier unsure, classifier too slow, …). With “Tell callers which route served” on, responses carry X-Janus-Route, X-Janus-Route-Reason and X-Janus-Route-Model.',
+        ],
+      },
+      {
+        heading: 'Draft, shadow and live',
+        body: [
+          'Draft: not callable. Use the builder’s Test this router panel to see where prompts would go.',
+          'Shadow: callable, but always served by the default. Janus classifies in the background and records which route would have served, so the route mix and the classifier’s speed are visible before anything changes for callers. No added latency.',
+          'Live: requests are routed. The decision waits at most the router’s time budget (800 ms by default); past it the default serves.',
+        ],
+      },
+      {
+        heading: 'Routing categories',
+        body: [
+          'Routing categories are what the classifier chooses between. Fifteen are built in, with a Legal example of a custom category. Each has a name, what it includes, what it does not include, a minimum confidence, and test examples. The descriptions are what the classifier reads: say what belongs, and name the neighbours that do not and where they go. That is what stops misfiling; bare names were measurably worse in testing.',
+          'Every enabled category is offered on every request, plus “none of these”. Offering only the categories a router uses pulls borderline requests into them; offering the near neighbours lets the classifier say “this is planning advice, not research”.',
+          'A routing category can follow a Usage insights category instead of having its own description, so one definition serves both.',
+          'Below a category’s minimum confidence, the answer does not count: the request is not routed by that category.',
+        ],
+      },
+      {
+        heading: 'The classifier',
+        body: [
+          'Any decision model can classify (Administration → Models, role “decision”). In testing, hosted Jev answered in a few hundred milliseconds and was as accurate as the larger self-hosted Clef; Clef-Flash and Nimble are faster self-hosted choices that misfile more borderline requests. A hosted classifier reads every prompt sent to a router, including ones you route to self-hosted models: use a self-hosted classifier if that matters. The builder warns when this is the case.',
+          'When a security policy already calls the same decision model and it takes questions together, the routing questions join that call: no extra call, no extra wait. Otherwise they are asked in parallel with the security checks, before the request is forwarded.',
+          'Classifier → Try routing classifies a prompt with any classifier (saved or not) and shows where every router would send it. The batch test runs every category’s test examples and lists the misfiles.',
+          'Conversations stick to the route that served their first turn for 30 minutes by default, so a model does not change mid-task and prompt caches stay warm. A sticky turn makes no classifier call, but the route must still fit it: a conversation that outgrows the route model’s context window, loses the grant a restricted route needs, or goes over a quota the route skips on is decided afresh. Revoking a grant therefore takes effect on the next turn.',
+        ],
+      },
+      {
+        heading: 'Difficulty and thinking',
+        body: [
+          'A route can require a difficulty band: Easy (1–2), Medium (3), Hard (4–5), Expert (5), or a custom range. The classifier’s rating is a weighted average, so 2.5 sits between easy and moderate.',
+          'Each route and the default set thinking: As requested (the caller’s setting passes through), a fixed level (none, low, medium, high, …), or Scale with difficulty (low, medium or high from the rating). Janus fits the level to what the target model supports, as it does for any request. OpenAI-compatible upstreams (including Vertex) get reasoning_effort; Anthropic gets the thinking form the Claude model takes (adaptive thinking with that effort on Claude 4.6 and later, a thinking budget before), see Thinking settings and provider limits. Bedrock’s Converse format has no thinking setting Janus can send, so on Bedrock a route’s thinking level is not applied and the request is sent as the caller made it.',
+        ],
+      },
+      {
+        heading: 'Evaluating a route',
+        body: [
+          'Turn on “Evaluate against the default” on a route to find out whether it is as good as the default for the requests it gets. For a sample of the route’s requests (5% by default), after the caller has their answer, Janus asks the router’s default model the same question, exactly as the default would have been asked (the caller’s own request with the default’s thinking setting, not the route’s), then a judge model compares the two answers without knowing which is which, twice with the order swapped. If the two verdicts disagree, the comparison counts as a tie.',
+          'The copies sent to the default and to the judge go through the Security Gateway policies that would apply to the caller sending them there (policies on the router, the model, its provider, the caller and their groups). If a policy would block or redact a copy, the sample is skipped and counted as “not evaluated”; nothing is sent. A route that keeps work on a self-hosted model and is evaluated against an externally hosted default or judge still sends a sample of those prompts off site, so the builder and the Evaluations tab warn about it.',
+          'The Evaluations tab shows, per route: comparisons, better / tie / worse, “at least as good” (wins plus half of ties) with a 95% range, the judge’s consistency, and cost against the default. After at least 10 comparisons, a route is marked Losing when even the top of the range is below 50%, Keep when the bottom of the range is above 45% (a near-tie that saves money is worth keeping), and Needs more data otherwise.',
+          'A route’s tally covers only comparisons between the models it uses now: its model, the router’s default and the judge. Change any of them and the tally starts again; earlier comparisons stay listed as history under the card and never count towards the new verdict.',
+          'Only the verdict, scores, the judge’s one-line reason, cost and timing are stored, never the prompt or either answer. Evaluation covers chat completions without tools or images, up to 64 KB of request; a streamed answer too long to keep in full is not judged. It stops at the end date (14 days by default), at its daily count and daily budget, and pauses while the gateway is busy. The count and budget are reserved before anything is spent, at a deliberately high estimate, so a burst or several replicas cannot overshoot them. Evaluations at once per replica, the busy threshold and the default answer’s token cap are set on the Evaluations tab. Evaluation calls are platform overhead: they never count against the caller’s quota and are hidden from the request log.',
+          'Routing settings → Keep decisions (days) (90 by default; 0 keeps them) deletes decisions and evaluation verdicts older than that in the daily retention job. Remembered conversations are deleted once they expire. A decision kept longer than usage events (JANUS_USAGE_RETENTION_DAYS) no longer names the caller: its user and service token are cleared when the matching usage events are purged.',
+          'Pick a judge that is neither the route’s model nor the default: judges favour their own answers. The judge must be an enabled model that is not a classifier; a disabled default or judge is not called.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/classifiers',
+    title: 'Classifiers: speed and accuracy',
+    summary:
+      'How Janus asks decision models several questions at once, which models suit which job, and how to benchmark what your classifier choices cost each request.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'One classifier, several questions',
+        body: [
+          'A request can need several answers before it is forwarded: is it a prompt injection, is it harmful, and what kind of work is it. With a decision model (TypeSafe Jev, Bespoke Nimble) all three can come from the same classifier. Janus collects the questions bound for each classifier and asks them in the way that classifier answers best.',
+          'All checks that apply to a request run at the same time, so a request waits for its slowest classifier, not for the sum of them.',
+          "Usage insights in inline mode adds its question to the guards' call when they use the same classifier and the classifier takes questions together: the label then costs no extra call and no extra wait. Otherwise it is asked separately, before the request is forwarded (inline) or afterwards (background).",
+        ],
+      },
+      {
+        heading: 'Together or one at a time',
+        body: [
+          'Hosted decision APIs (TypeSafe, OpenRouter) answer each question in a request independently and in parallel. Several questions in one request cost about the same time as one and give the same answers as asking separately, so Janus sends them together.',
+          'Self-hosted Nimble (llama.cpp or Ollama) reads every question in the request while answering each one, so related questions influence each other: a coding request asked alongside a language question can come back labelled as data analysis. Janus therefore sends each question in its own request, all at the same time. The server reads the prompt once per question, which costs some throughput but keeps every answer as accurate as asking alone.',
+          'Janus picks the style from the provider automatically. Administration → Usage insights → Performance lists every decision classifier with the style in use, and lets you override it; run a benchmark before and after so the change is measured, not guessed.',
+        ],
+      },
+      {
+        heading: 'Which classifier for which job',
+        body: [
+          'Prompt injection: a decision model is a good alternative to Llama Prompt Guard 2. In our evaluation on public injection and jailbreak sets plus ordinary work requests, both Nimble and Jev caught more attacks than Prompt Guard 2 with fewer false alarms. Jev was the most accurate; Nimble is the one you can run yourself.',
+          'Harmful content: a decision model can replace Llama Guard 4. Both Jev and Nimble flagged more harmful requests than Llama Guard 4 while naming the right hazard category about as often. Llama Guard is more conservative: it rarely flags something harmless, but it misses more.',
+          'Usage insights: both decision models label requests accurately. Write category descriptions that say what belongs and what does not; short descriptions and bare names were measurably worse.',
+          'Choosing a model to route a request to (small vs. frontier) is not something these classifiers do reliably yet: in our tests their judgement of which requests need a stronger model was close to chance. Janus does not offer it.',
+        ],
+      },
+      {
+        heading: 'Thresholds',
+        body: [
+          'A decision model answers "is this an injection?" with a probability. Its probabilities are calibrated differently from Prompt Guard\'s scores: at Prompt Guard\'s usual 0.9 a decision model lets most attacks through. Thresholds between about 0.1 and 0.3 catch most attacks with few false alarms; Janus uses 0.3 when you bind a decision model and leave the threshold empty, and suggests it in the policy editor.',
+          'Start in observe mode, review Security → Violations for a week of real traffic, then move the threshold: lower catches more and flags more ordinary requests; higher the reverse.',
+          'Content safety with a decision model counts a request as harmful when the probability of "unsafe" is at least one half; the hazard categories you select decide which of those block. On responses (direction egress or both) the decision model is asked the same question about the assistant\'s reply; like every response verdict it is observed and logged, never blocked.',
+        ],
+      },
+      {
+        heading: 'What a decision model reads',
+        body: [
+          'Prompt Guard scans every message in overlapping windows. A decision model is asked once per check, and by default reads the new turn (what the caller added since the last assistant reply; a trailing assistant prefill is skipped) and at most its last 12,000 characters. That keeps each check to one fast call, and earlier turns were judged when they were new, provided they came through Janus.',
+          "Two options on each prompt-injection and content-safety check bound to a decision model widen this. What to judge → Whole conversation also judges the earlier user, system and tool messages the caller sends, so made-up history cannot hide an attack. Long text → Whole text, in windows judges text longer than 12,000 characters in overlapping windows, one call per window in parallel, and takes the worst answer, so an attack placed before a long filler is still seen. Text longer than 16 windows (about 180,000 characters) counts as a classifier failure and the check's fail setting applies.",
+          "Both cost time and money in proportion to the text: more characters per call, or more calls per request. On per-token hosted classifiers that is a direct cost; on a self-hosted one it is GPU time, and the slowest window decides the wait. Turn them on for blocking checks that guard sensitive applications, and keep the timeout large enough for the longest text you expect. A mandatory policy's wider setting cannot be narrowed by a more specific one.",
+          "Questions from other features (Usage insights, Auto-routing) join a security check's call only when they are about the same text and may wait as long as the check does; a check never waits longer than its own timeout because another feature shares its call.",
+        ],
+      },
+      {
+        heading: 'Hosting Nimble yourself',
+        body: [
+          "llama.cpp (a release with System One support) serves Nimble with the same accuracy as Ollama and without Ollama's limit of 26 choices per question, so a large category list is still asked in one question. Prefer it for new installations.",
+          'Cloudflare Clef and the smaller Clef-Flash (Apache 2.0) run on llama.cpp releases that include Clef support. Clef reads the whole request in one pass, so start llama-server with a physical batch at least as large as the context per slot (--batch-size and --ubatch-size); otherwise longer texts fail with "input is too large to process". In our tests Clef was as accurate as Jev on injection and work categories but is the slowest to self-host; Clef-Flash was about as accurate as Nimble and somewhat faster. Clef answers are far less affected by sibling questions than Nimble\'s, but Janus still asks them separately by default.',
+          'On consumer and workstation GPUs the Vulkan build of llama.cpp was faster than the ROCm build in our tests. A 4-bit quantisation was no faster than 8-bit: the work is reading the prompt, not generating, so keep the 8-bit model for its accuracy.',
+          'Give the server several parallel slots (llama.cpp --parallel, Ollama OLLAMA_NUM_PARALLEL). With a single slot, simultaneous requests wait in line and the wait grows with every concurrent user; with several, the GPU reads them side by side. Keep the model loaded permanently (Ollama keep-alive -1) so the first request after a quiet period does not pay for loading it.',
+          'Give each slot enough context for your longest classified text plus the questions; Usage insights sends only the most recent characters up to its limit, and the guards judge the newest turn of the conversation.',
+        ],
+      },
+      {
+        heading: 'Benchmarking your choices',
+        body: [
+          'Administration → Usage insights → Performance → Benchmark measures what your classifier choices cost: pick the prompt-injection and content-safety classifiers and whether Usage insights runs inline or in the background, set the wait you will accept, and run it. Janus sends a built-in set of sample prompts through the real classifiers exactly as live traffic would, at increasing numbers of simultaneous requests.',
+          'The result shows the wait one request pays with nothing else running, the typical and 95th-percentile wait at each level, how many classifier calls each request needs, and the highest number of simultaneous requests whose 95th-percentile wait stays within your budget. Compare runs with different classifiers or grouping to see the trade-off before you change a policy.',
+          'Nothing is forwarded to a model, nothing is written to the request log, and the benchmark uses its own circuit breakers so overloading a classifier cannot trip the breaker live traffic depends on. It does share the classifier servers with live requests, so run it when traffic is light. One benchmark runs at a time.',
+        ],
+      },
+      {
+        heading: 'Two decision formats',
+        body: [
+          'Decision models come in two wire formats. System One is spoken by TypeSafe (api.typesafe.ai), OpenRouter (/api/alpha/decisions), llama.cpp and Ollama. OpenAI Decisions (/v1/decisions) is spoken by OpenAI, for example gpt-6-luna. Janus uses either one everywhere a decision model can be used: security checks, Usage insights, Auto-routing, the Try box, benchmarks and troubleshooting captures.',
+          "Janus picks the format from the provider's address: api.openai.com speaks OpenAI Decisions, everything else System One. Override it per model under Administration → Usage insights → Performance → Decision models, for a proxy or a self-hosted server that speaks the other format.",
+          'OpenAI lists its decision models as chat models. Discovery adds a separate catalog entry for each one, named with :decisions (gpt-6-luna:decisions), because the decision API is priced differently from chat. OpenRouter decision models are found automatically and marked as decision models, with their prices.',
+        ],
+      },
+      {
+        heading: 'What decision calls cost',
+        body: [
+          'Each decision model has a rate card like any other model, a cost source and an optional fee per call. Automatic (the default) uses the charge the provider reports with each answer when it sends one (OpenRouter does), and the rate card otherwise. Provider uses only the reported charge; Rate card always uses the card; Free records no cost, for a model you host yourself. The fee is added to every call, for example to recover hosting costs.',
+          'Typical prices: OpenAI charges for decision input only ($0.10 per million tokens for gpt-6-luna); TypeSafe Jev is $0.042 per million; OpenRouter passes on the provider price. The same figure is used whether Janus calls the model for itself (security checks, insights, routing) or a person calls it, so the two always agree: cached input is charged at the cached rate, and a charge the provider reports as zero is recorded as zero. A decision model with no rate card and no reported charge is shown as unpriced in reports, not as free.',
+        ],
+      },
+      {
+        heading: 'Serving decisions to people and apps',
+        body: [
+          'People can call decision models through Janus with their own token, in either format, at /v1/decisions (OpenAI SDKs), /v1/systemone (TypeSafe SDK) or /api/alpha/decisions (OpenRouter SDK). Janus translates when the model speaks the other format and passes same-format requests through unchanged; the X-Janus-Decision-Translated header says when it translated. GET /v1/models lists decision models with janus.kind set to decision.',
+          'Calls are granted, rate-limited, checked by security policies, counted against quotas, priced and logged like any other request, with the kind of request shown as Decision. Security policies read everything the caller wrote: the evidence (input or state) and the question text (instructions, yes/no boundaries, choices and their descriptions, score levels, question names). A finding in text Janus can rewrite (instructions, descriptions, level labels) is redacted where the policy redacts; one in a question name or a choice value, which the answers refer to, blocks the request instead. Answers are probabilities, so egress checks do not apply to them.',
+          'Rate limits and blocking rules written for /v1/* or /v1/systemone also apply to /api/alpha/decisions, which takes the same requests. A managed model with a pool of decision models picks its member per request, like a chat pool.',
+          "A question the model's format cannot express is refused rather than changed: images to a text-only model, or System One criteria for a choice the OpenAI format has no place for. System One yes/no criteria are kept, written into the OpenAI question's instructions.",
+          'A decision model that blocks requests in a security policy cannot be granted: anyone who can call the judge can test what gets past it. That includes a model named in observe mode by a policy layered on a mandatory organization policy that blocks the same check, because the mandatory policy keeps the check blocking with that model as its judge. Existing grants stop working while it guards, the model is no longer listed in GET /v1/models, and callers are told only that it is reserved for security checks. An administrator can allow it per model.',
+          "If a provider's decision model list cannot be read during discovery, the decision models already known are kept as they are. A decision model that does drop out of a provider's list and comes back returns in the state it had (an enabled model stays enabled); a chat model that comes back waits for approval as before.",
+          'A managed model (alias) can point at a decision model, with a fallback; for example jev falling back to gpt-6-luna:decisions. A chat request to a decision model, or a decision request to a chat model, is refused with a message that says which endpoint to use.',
+        ],
+        code: {
+          language: 'python',
+          code: 'from openai import OpenAI\n\nclient = OpenAI(base_url="${JANUS_PUBLIC_URL}/v1", api_key="<your Janus token>")\nresult = client.decisions.create(\n    model="typesafe/jev-router",  # a System One model: Janus translates\n    input="I was charged twice for my subscription.",\n    questions=[{"type": "predicate", "name": "urgent", "instructions": "Is this urgent?"}],\n)\nprint(result.answers[0].probability)',
+        },
+      },
+      {
+        heading: 'Troubleshooting classifier decisions',
+        body: [
+          'While troubleshooting mode is capturing a request, every classifier call the request caused is captured with it: the feature that asked, the classifier, inline or background, timing, status, and, when the session captures request bodies, the exact questions sent and answers returned. A background label that finishes after the request is attached when it lands.',
+          "Open the request in Administration → Requests to read them under Classifier calls, or download the capture: classifiers.json sits next to the request and response. Captured classifier calls follow the session's encryption and retention and are deleted with their capture. Viewing them is written to the audit log.",
+        ],
+      },
+    ],
+  },
+  {
     slug: 'admin/security',
     title: 'Security Gateway',
     summary: 'Policy-driven filtering of prompts and responses: secrets, PII, codenames, request shape, and prompt injection.',
@@ -878,7 +1121,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'PII: payment cards (Luhn-checked), IBANs (mod-97), US Social Security numbers (hyphenated by default, structural checks), NPIs, e-mail addresses and phone numbers. Redact rather than block for most of these: blocking "summarise this complaint" over an e-mail address is the false positive that gets the feature switched off.',
           'Term lists: your own words — project codenames, client names, classification markings. Modes: exact (whole words), substring, regex, or fuzzy (catches Pr0j3ct H4lb3rd and confusable characters). Lists are encrypted at rest and never shown in listings; viewing or exporting a list is written to the audit log. Import a text or CSV file rather than typing four hundred names into a form.',
           'Shape: limits on message count, body size, image parts and tools, and a rule that refuses system-role messages from service tokens.',
-          'Prompt injection: a text-classification guard model (Llama Prompt Guard 2 is the reference) scores every message in overlapping windows. Unlike harmful-content filtering, nothing upstream protects you from injection — it targets the application, not the model.',
+          'Prompt injection: a text-classification guard model (Llama Prompt Guard 2 is the reference) scores every message in overlapping windows, or a decision model (Jev, Nimble) judges the newest turn (see What a decision model reads). Unlike harmful-content filtering, nothing upstream protects you from injection — it targets the application, not the model.',
         ],
       },
       {
@@ -909,8 +1152,9 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'Classifier models',
         body: [
           "Add the guard model's server as an upstream of type TEI (Hugging Face Text Embeddings Inference, the standard host for Llama Prompt Guard 2 — an encoder model that generative engines such as vLLM cannot load). Discovery reads the server's /info, finds the one model it serves, and assigns the classifier role automatically; confirm it under Admin → Security → Classifiers before referencing it in a policy.",
+          'A decision model (TypeSafe Jev, Bespoke Nimble) takes the Decision model role and can back prompt injection, content safety, or both. When both checks use the same decision model Janus asks them together; see Classifiers: speed and accuracy.',
           'A model with a classifier role is removed from /v1/models, cannot be granted, cannot be the target of a managed model, and is called only by the gateway. A caller who could invoke the judge directly would have free, unlimited oracle access to the thing judging them.',
-          "Every classifier call is metered as a usage event on a platform-overhead subject with no user or service token attached: finance can see what the security feature costs and no user's quota moves because of it. The classifier is wrapped in a circuit breaker: three consecutive failures open it for thirty seconds and raise a critical admin alert. While it is open, checks with fail=closed refuse requests and say so in the error message; checks with fail=open pass and log. Choose fail=closed for security; choose fail=open only where availability matters more, and pair it with the alert.",
+          "Every classifier call is metered as a usage event on a platform-overhead subject with no user or service token attached: finance can see what the security feature costs and no user's quota moves because of it. The classifier is wrapped in a circuit breaker: three consecutive failures of the security checks' own calls open it for thirty seconds and raise a critical admin alert. Calls made by other features on the same decision model (Auto-routing, Usage insights, policy dry runs, Try boxes) never open it, and neither does a call the caller cancelled. While it is open, blocking checks with fail=closed refuse requests and say so in the error message; checks with fail=open pass and log. Observe-mode checks never block, whatever their fail setting. Choose fail=closed for security; choose fail=open only where availability matters more, and pair it with the alert.",
           'Llama Prompt Guard 2 is distributed under the Llama 4 Community License: the download is gated, "Built with Llama" attribution applies, and any fine-tune must carry a name beginning with "Llama". If those terms are unacceptable to your organisation, any model served in the same text-classification shape can back the check instead.',
         ],
       },

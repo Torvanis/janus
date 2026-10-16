@@ -79,6 +79,9 @@ type Server struct {
 	// finished its own in-flight handlers. Without this a SIGTERM landing
 	// between the response and the async insert silently loses the event.
 	pending sync.WaitGroup
+	// benchRuns are this replica's running classifier benchmarks; Drain
+	// stops them so shutdown is not held for their ten-minute limit.
+	benchRuns benchmarkRuns
 
 	// Performance is the startup performance-mode decision; batcher is its
 	// usage writer (nil in normal mode). See performance_mode.go.
@@ -201,6 +204,7 @@ func (s *Server) buildRouter() http.Handler {
 
 			pr.Get("/models", s.handleListModels)
 			pr.Get("/requests", s.handleListRequests)
+			pr.Get("/requests/facets", s.handleRequestFacets)
 			pr.Get("/requests.csv", s.handleExportRequests)
 
 			pr.Get("/dashboard/personal", s.handlePersonalDashboard)
@@ -237,6 +241,10 @@ func (s *Server) buildRouter() http.Handler {
 			s.mountSubscriptionAdminRoutes(ar)
 		})
 	})
+
+	// Decision APIs (OpenAI Decisions and System One dialects), served
+	// before the generic proxy so they get their own pipeline.
+	s.mountDecisionRoutes(r)
 
 	// OpenAI-compatible proxy surface. /v1/* is the sole proxy namespace.
 	r.Handle("/v1/*", http.HandlerFunc(s.handleProxy))
@@ -441,10 +449,12 @@ func (s *Server) shouldTouch(key string) bool {
 }
 
 // Drain blocks until every tracked post-response writer (usage events, quota
-// ledger updates) has finished, or the context expires. main.go calls it after
+// ledger updates) has finished, or the context expires. Running classifier
+// benchmarks are stopped first (and recorded as failed). main.go calls it after
 // httpServer.Shutdown so the final requests before a SIGTERM are never lost
 // from metering.
 func (s *Server) Drain(ctx context.Context) error {
+	s.stopBenchmarks()
 	done := make(chan struct{})
 	go func() {
 		s.pending.Wait()

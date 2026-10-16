@@ -489,7 +489,12 @@ export function GrantsPage(): ReactNode {
                                 )}
                                 <td>
                                   <RowActions>
-                                    <IconButton icon="revoke" label={t('adminGrants.revoke')} danger onClick={() => setDeleting(grant)} />
+                                    <IconButton
+                                      icon="revoke"
+                                      label={t('adminGrants.revoke')}
+                                      danger
+                                      onClick={() => setDeleting(grant)}
+                                    />
                                   </RowActions>
                                 </td>
                               </tr>
@@ -517,7 +522,9 @@ export function GrantsPage(): ReactNode {
                                 <span className="grants-group-title">{group.title}</span>
                                 {group.badge ? <Badge tone={group.badge.tone}>{group.badge.label}</Badge> : null}
                               </button>
-                              {group.subtitle ? <span className="cell-sub mono grants-group-subtitle">{group.subtitle}</span> : null}
+                              {group.subtitle ? (
+                                <span className="cell-sub mono grants-group-subtitle">{group.subtitle}</span>
+                              ) : null}
                             </th>
                             <td className="num small">
                               {view === 'model'
@@ -705,7 +712,9 @@ function CreateGrantModal({
   // Likewise for aliases: a disabled or broken alias cannot serve traffic, so
   // offering it would create an inert grant.
   const grantableManaged = useMemo(
-    () => (managed.data?.managed_models ?? []).filter((m) => m.status === 'enabled' && !m.broken),
+    // Routers are offered in any state: granting a draft router before it goes
+    // live is the intended order.
+    () => (managed.data?.managed_models ?? []).filter((m) => m.kind === 'router' || (m.status === 'enabled' && !m.broken)),
     [managed.data],
   );
 
@@ -777,7 +786,10 @@ function CreateGrantModal({
               <optgroup label={t('adminGrants.managedGroupLabel')}>
                 {grantableManaged.map((m) => (
                   <option key={m.id} value={`managed:${m.id}`}>
-                    {m.name} · {t('adminGrants.managedResolvesTo', { name: m.target_public_name })}
+                    {m.name} ·{' '}
+                    {m.kind === 'router'
+                      ? t('adminGrants.routerOption')
+                      : t('adminGrants.managedResolvesTo', { name: m.target_public_name })}
                   </option>
                 ))}
               </optgroup>
@@ -787,6 +799,7 @@ function CreateGrantModal({
                 <option key={model.id} value={`model:${model.id}`}>
                   {publicModelName(model)}
                   {isRenamedModel(model) ? ` (${model.name})` : ''} · {model.upstream_name}
+                  {model.classifier_role === 'decision' ? ' · decision model' : ''}
                 </option>
               ))}
             </optgroup>

@@ -71,6 +71,11 @@ type Metrics struct {
 	LicenseSyncAttempts    *prometheus.CounterVec
 	LicenseSyncLastSuccess prometheus.Gauge
 	LicenseExpiry          prometheus.Gauge
+	// Prompt classification: calls by status and mode, the classifier's own
+	// latency, and the async backlog.
+	ClassificationsTotal  *prometheus.CounterVec
+	ClassificationLatency *prometheus.HistogramVec
+	ClassificationQueue   prometheus.Gauge
 }
 
 // New registers every instrument on a private registry.
@@ -141,6 +146,9 @@ func New(version, sha string) *Metrics {
 	m.ActiveUsers = gauge("janus_active_users", "Distinct users seen in the last 15 minutes.")
 	m.ConcurrentRequests = gauge("janus_concurrent_requests", "In-flight requests.")
 	m.StreamsActive = gauge("janus_streams_active", "In-flight streaming responses.")
+	m.ClassificationsTotal = counter("janus_classifications_total", "Prompt classifications by outcome (ok, error, timeout, dropped) and mode (async, inline).", "status", "mode")
+	m.ClassificationLatency = histogram("janus_classification_latency_seconds", "Time one prompt classification took at the classifier, excluding queue wait.", latencyBuckets, "mode", "protocol")
+	m.ClassificationQueue = gauge("janus_classification_queue", "Requests waiting for async classification on this replica.")
 
 	m.initZeroSeries()
 	return m
@@ -166,8 +174,13 @@ func (m *Metrics) initZeroSeries() {
 			m.QuotaBreaches.WithLabelValues(metric, subject)
 		}
 	}
-	for _, table := range []string{"usage_event", "audit_log", "docs_feedback", "web_session", "quota_alert_state", "oidc_state"} {
+	for _, table := range []string{"usage_event", "audit_log", "docs_feedback", "web_session", "quota_alert_state", "oidc_state", "classification_result"} {
 		m.PurgeDeletedRows.WithLabelValues(table)
+	}
+	for _, status := range []string{"ok", "error", "timeout", "dropped"} {
+		for _, mode := range []string{"async", "inline"} {
+			m.ClassificationsTotal.WithLabelValues(status, mode)
+		}
 	}
 	for _, channel := range []string{"in_app", "email", "webhook"} {
 		for _, result := range []string{"ok", "error"} {

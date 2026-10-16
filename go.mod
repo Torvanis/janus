@@ -8,7 +8,7 @@ go 1.26.3
 // release builds) to a patch release that fixes all stdlib vulnerabilities
 // currently flagged by govulncheck. Under GOTOOLCHAIN=local the toolchain
 // line is ignored, so it cannot brick the pinned pods.
-toolchain go1.26.7
+toolchain go1.26.9
 
 require (
 	github.com/go-chi/chi/v5 v5.3.1

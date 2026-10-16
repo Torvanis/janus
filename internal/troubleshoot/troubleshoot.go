@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/torvanis/janus/internal/classtrace"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -105,25 +106,37 @@ type Payload struct {
 	// Truncated reports that at least one body exceeded the capture limit
 	// and was cut.
 	Truncated bool
+	// ClassifierRuns are the classifier calls made for the request before
+	// the capture was written (guards, inline classification).
+	ClassifierRuns []classtrace.Call
 }
 
 // Capture applies the session's post-response filter to the completed event
 // and, on a match, persists a capture. It never returns an error to the
 // proxy path: failures are logged, because troubleshooting must not affect
 // the traffic it observes.
-func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSession, event *store.UsageEvent, p Payload) {
+//
+// It returns the new capture's id, or "" when nothing was stored.
+func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSession, event *store.UsageEvent, p Payload) (captureID string) {
 	if r == nil || session == nil || event == nil || event.ID == "" {
-		return
+		return ""
 	}
 	if !session.Active(time.Now().UTC()) || !session.Config.Filter.Matches(event) {
-		return
+		return ""
 	}
+	defer func() {
+		if captureID != "" {
+			for _, c := range p.ClassifierRuns {
+				r.AttachClassifierRun(ctx, session, captureID, c)
+			}
+		}
+	}()
 	cfg := session.Config
 	if cfg.Encrypt && r.Cipher == nil {
 		// The admin asked for encryption at rest; storing in the clear
 		// instead would silently violate that instruction.
 		r.Logger.ErrorContext(ctx, "troubleshooting: encryption requested but no cipher configured; capture dropped", "request_id", event.RequestID)
-		return
+		return ""
 	}
 	c := &store.TroubleshootingCapture{
 		SessionID: session.ID, UsageEventID: event.ID, RequestID: event.RequestID,
@@ -148,24 +161,24 @@ func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSe
 	encReq, err := r.encodeBody(reqBody, c.Encrypted)
 	if err != nil {
 		r.Logger.ErrorContext(ctx, "troubleshooting: encode request body", "error", err.Error(), "request_id", event.RequestID)
-		return
+		return ""
 	}
 	encResp, err := r.encodeBody(respBody, c.Encrypted)
 	if err != nil {
 		r.Logger.ErrorContext(ctx, "troubleshooting: encode response body", "error", err.Error(), "request_id", event.RequestID)
-		return
+		return ""
 	}
 	c.ID = store.NewID()
 	switch cfg.Storage {
 	case store.TroubleshootStorageDisk:
 		if !r.DiskAvailable() {
 			r.Logger.ErrorContext(ctx, "troubleshooting: disk backend selected but JANUS_TROUBLESHOOT_DIR is unset; capture dropped", "request_id", event.RequestID)
-			return
+			return ""
 		}
 		ref, err := r.writeDisk(c.ID, encReq, encResp)
 		if err != nil {
 			r.Logger.ErrorContext(ctx, "troubleshooting: write capture to disk", "error", err.Error(), "request_id", event.RequestID)
-			return
+			return ""
 		}
 		c.StorageRef = ref
 	default:
@@ -177,7 +190,56 @@ func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSe
 		if c.StorageRef != "" {
 			r.removeDisk(c.StorageRef)
 		}
+		return ""
 	}
+	return c.ID
+}
+
+// AttachClassifierRun stores one classifier call with a capture. The wire
+// request and response carry prompt text, so they are kept only when the
+// session captures request bodies, and are encrypted when it encrypts.
+func (r *Recorder) AttachClassifierRun(ctx context.Context, session *store.TroubleshootingSession, captureID string, c classtrace.Call) {
+	if r == nil || session == nil || captureID == "" {
+		return
+	}
+	if !session.Config.CaptureRequestBody {
+		c.Request, c.Response = nil, nil
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return
+	}
+	enc, err := r.encodeBody(raw, session.Config.Encrypt)
+	if err != nil {
+		r.Logger.ErrorContext(ctx, "troubleshooting: encode classifier run", "error", err.Error())
+		return
+	}
+	run := &store.TroubleshootingClassifierRun{CaptureID: captureID, CreatedAt: c.StartedAt, Feature: c.Feature, Classifier: c.Classifier,
+		Mode: c.Mode, Status: c.Status, LatencyMs: c.LatencyMs, Encrypted: session.Config.Encrypt, Data: enc}
+	if err := r.Store.InsertTroubleshootingClassifierRun(ctx, run); err != nil {
+		r.Logger.WarnContext(ctx, "troubleshooting: persist classifier run", "error", err.Error(), "capture_id", captureID)
+	}
+}
+
+// ClassifierRuns returns a capture's classifier calls, decoded.
+func (r *Recorder) ClassifierRuns(ctx context.Context, captureID string) ([]classtrace.Call, error) {
+	rows, err := r.Store.TroubleshootingClassifierRuns(ctx, captureID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]classtrace.Call, 0, len(rows))
+	for _, row := range rows {
+		raw, err := r.decodeBody(row.Data, row.Encrypted)
+		if err != nil {
+			return nil, err
+		}
+		var c classtrace.Call
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("decode classifier run: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func clampBodies(req, resp []byte, limit int64) ([]byte, []byte, bool) {

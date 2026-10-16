@@ -638,6 +638,48 @@ function PoliciesTab(): ReactNode {
   );
 }
 
+/**
+ * What a decision-model guard reads. Defaults keep the original behaviour
+ * (the new turn, its last 12,000 characters, one call); the wider settings
+ * cost latency and classifier calls in exchange for coverage.
+ */
+function DecisionCoverage({
+  check,
+  onOption,
+}: {
+  check: SecgwCheck;
+  onOption: (key: string, value: unknown) => void;
+}): ReactNode {
+  const scope = check.options?.judge_scope === 'conversation' ? 'conversation' : 'new_turn';
+  const longText = check.options?.long_text === 'windows' ? 'windows' : 'tail';
+  return (
+    <div className="secgw-gate-row">
+      <Field label={t('adminSecurity.policies.judgeScopeLabel')} hint={t('adminSecurity.policies.judgeScopeHint')}>
+        <select
+          className="select"
+          aria-label={t('adminSecurity.policies.judgeScopeLabel')}
+          value={scope}
+          onChange={(e) => onOption('judge_scope', e.target.value === 'new_turn' ? undefined : e.target.value)}
+        >
+          <option value="new_turn">{t('adminSecurity.policies.judgeScopeNewTurn')}</option>
+          <option value="conversation">{t('adminSecurity.policies.judgeScopeConversation')}</option>
+        </select>
+      </Field>
+      <Field label={t('adminSecurity.policies.longTextLabel')} hint={t('adminSecurity.policies.longTextHint')}>
+        <select
+          className="select"
+          aria-label={t('adminSecurity.policies.longTextLabel')}
+          value={longText}
+          onChange={(e) => onOption('long_text', e.target.value === 'tail' ? undefined : e.target.value)}
+        >
+          <option value="tail">{t('adminSecurity.policies.longTextTail')}</option>
+          <option value="windows">{t('adminSecurity.policies.longTextWindows')}</option>
+        </select>
+      </Field>
+    </div>
+  );
+}
+
 function defaultCheck(kind: SecgwCheckKind): SecgwCheck {
   const check: SecgwCheck = { kind, enabled: false, mode: 'observe', direction: 'ingress', options: {} };
   if (kind === 'secrets' || kind === 'pii' || kind === 'terms') check.direction = 'both';
@@ -930,11 +972,31 @@ function CheckGate({
   const bodyId = `secgw-gate-${kind}`;
   // A model-backed check may only bind a classifier speaking its protocol:
   // Prompt Guard (text_classification) for injection, Llama Guard
-  // (generative_guard) for content safety. The API refuses a mismatch;
-  // the picker simply never offers one.
+  // (generative_guard) for content safety, or a decision model for either.
+  // The API refuses a mismatch; the picker simply never offers one.
   const wantRole: ClassifierRole | null =
     kind === 'prompt_injection' ? 'text_classification' : kind === 'content_safety' ? 'generative_guard' : null;
-  const eligible = wantRole ? classifiers.filter((m) => (m.classifier_role || 'text_classification') === wantRole) : [];
+  const eligible = wantRole
+    ? classifiers.filter((m) => {
+        const role = m.classifier_role || 'text_classification';
+        return role === wantRole || role === 'decision';
+      })
+    : [];
+  const boundIsDecision = classifiers.some((m) => m.id === check.classifier_model_id && m.classifier_role === 'decision');
+  // Decision models answer with a calibrated yes-probability, not a label
+  // score: Prompt Guard's 0.9 would let most attacks through, and a
+  // self-hosted decision model needs more than Prompt Guard's 250 ms.
+  const pickClassifier = (id: string) => {
+    const picked = classifiers.find((m) => m.id === id);
+    const next: Partial<SecgwCheck> = { classifier_model_id: id || undefined };
+    if (picked?.classifier_role === 'decision') {
+      const opts = { ...(check.options ?? {}) };
+      if (kind === 'prompt_injection' && (opts.threshold === undefined || opts.threshold === 0.9)) opts.threshold = 0.3;
+      if (opts.timeout_ms === undefined || opts.timeout_ms === 250) opts.timeout_ms = 2000;
+      next.options = opts;
+    }
+    onChange(next);
+  };
 
   const sub = (() => {
     const bits: string[] = [];
@@ -960,7 +1022,11 @@ function CheckGate({
     if (kind === 'prompt_injection' || kind === 'content_safety') {
       const m = classifiers.find((c) => c.id === check.classifier_model_id);
       bits.push(m ? m.display_name || m.name : t('adminSecurity.policies.kindNoClassifier'));
-      bits.push(check.fail === 'open' ? t('adminSecurity.policies.failOpen') : t('adminSecurity.policies.failClosed'));
+      // The fail stance only matters for a blocking check: an observe-mode
+      // check never blocks, even when its classifier is down.
+      if (check.mode === 'block') {
+        bits.push(check.fail === 'open' ? t('adminSecurity.policies.failOpen') : t('adminSecurity.policies.failClosed'));
+      }
     }
     if (kind === 'content_safety') {
       const n = optStrings(check.options, 'categories').length;
@@ -1082,16 +1148,22 @@ function CheckGate({
                 />
               </Field>
             ) : null}
-            {kind === 'prompt_injection' || kind === 'content_safety' ? (
-              <Field label={t('adminSecurity.policies.failLabel')}>
+            {(kind === 'prompt_injection' || kind === 'content_safety') && check.mode === 'block' ? (
+              <Field label={t('adminSecurity.policies.failLabel')} hint={t('adminSecurity.policies.failHint')}>
                 <select
                   className="select"
+                  aria-label={t('adminSecurity.policies.failLabel')}
                   value={check.fail ?? 'closed'}
                   onChange={(e) => onChange({ fail: e.target.value as 'closed' | 'open' })}
                 >
                   <option value="closed">{t('adminSecurity.policies.failClosed')}</option>
                   <option value="open">{t('adminSecurity.policies.failOpen')}</option>
                 </select>
+              </Field>
+            ) : null}
+            {(kind === 'prompt_injection' || kind === 'content_safety') && check.mode !== 'block' ? (
+              <Field label={t('adminSecurity.policies.failLabel')} hint={t('adminSecurity.policies.failObserveHint')}>
+                <input className="input" value={t('adminSecurity.policies.failObserve')} readOnly />
               </Field>
             ) : null}
           </div>
@@ -1158,7 +1230,7 @@ function CheckGate({
                   <select
                     className="select"
                     value={check.classifier_model_id ?? ''}
-                    onChange={(e) => onChange({ classifier_model_id: e.target.value || undefined })}
+                    onChange={(e) => pickClassifier(e.target.value)}
                   >
                     <option value="">{t('adminSecurity.policies.classifierPlaceholder')}</option>
                     {eligible.map((m) => (
@@ -1169,7 +1241,12 @@ function CheckGate({
                   </select>
                 )}
               </Field>
-              <Field label={t('adminSecurity.policies.thresholdLabel')} hint={t('adminSecurity.policies.thresholdHint')}>
+              <Field
+                label={t('adminSecurity.policies.thresholdLabel')}
+                hint={
+                  boundIsDecision ? t('adminSecurity.policies.thresholdHintDecision') : t('adminSecurity.policies.thresholdHint')
+                }
+              >
                 <input
                   className="input"
                   type="number"
@@ -1177,7 +1254,7 @@ function CheckGate({
                   max={1}
                   step={0.01}
                   value={optNumber(check.options, 'threshold')}
-                  placeholder="0.9"
+                  placeholder={boundIsDecision ? '0.3' : '0.9'}
                   onChange={(e) => onOption('threshold', e.target.value === '' ? undefined : Number(e.target.value))}
                 />
               </Field>
@@ -1193,6 +1270,7 @@ function CheckGate({
               </Field>
             </div>
           ) : null}
+          {kind === 'prompt_injection' && boundIsDecision ? <DecisionCoverage check={check} onOption={onOption} /> : null}
           {kind === 'content_safety' ? (
             <>
               <div className="secgw-gate-row">
@@ -1205,7 +1283,7 @@ function CheckGate({
                     <select
                       className="select"
                       value={check.classifier_model_id ?? ''}
-                      onChange={(e) => onChange({ classifier_model_id: e.target.value || undefined })}
+                      onChange={(e) => pickClassifier(e.target.value)}
                     >
                       <option value="">{t('adminSecurity.policies.classifierPlaceholder')}</option>
                       {eligible.map((m) => (
@@ -1227,6 +1305,7 @@ function CheckGate({
                   />
                 </Field>
               </div>
+              {boundIsDecision ? <DecisionCoverage check={check} onOption={onOption} /> : null}
               <GroupField label={t('adminSecurity.policies.categoriesLabel')} hint={t('adminSecurity.policies.categoriesHint')}>
                 <CategoryPicker
                   taxonomy={taxonomy}
@@ -1768,7 +1847,10 @@ function BindingDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           .filter((m) => !m.classifier_role)
           .map((m) => ({ id: m.id, label: `${m.display_name || m.name} · ${m.upstream_name}` }));
       case 'managed_model':
-        return (managed.data?.managed_models ?? []).map((m) => ({ id: m.id, label: m.name }));
+        return (managed.data?.managed_models ?? []).map((m) => ({
+          id: m.id,
+          label: m.kind === 'router' ? `${m.name} · auto-routing router` : m.name,
+        }));
       case 'personal_subscription':
         return [
           { id: '*', label: t('adminSecurity.bindings.personalAnyProvider') },
@@ -1992,7 +2074,11 @@ function EffectiveCard(): ReactNode {
                         <Badge tone={modeTone(c.mode)}>{c.mode}</Badge>
                       </td>
                       <td className="small">{c.direction}</td>
-                      <td className="small">{c.kind === 'prompt_injection' ? (c.fail ?? 'closed') : '—'}</td>
+                      <td className="small">
+                        {(c.kind === 'prompt_injection' || c.kind === 'content_safety') && c.mode === 'block'
+                          ? (c.fail ?? 'closed')
+                          : '—'}
+                      </td>
                       <td>
                         <div className="secgw-cell-stack">
                           <span className="row" style={{ gap: 'var(--janus-space-2)' }}>
@@ -2796,6 +2882,8 @@ function roleLabel(role: string | undefined): string {
   switch (role || 'text_classification') {
     case 'generative_guard':
       return t('adminSecurity.classifiers.roleGenerativeGuard');
+    case 'decision':
+      return t('adminSecurity.classifiers.roleDecision');
     default:
       return t('adminSecurity.classifiers.roleTextClassification');
   }
@@ -2947,6 +3035,7 @@ function ClassifiersTab(): ReactNode {
                 // is almost certainly a generative guard. Admin can override.
                 const picked = candidates.find((m) => m.id === e.target.value);
                 if (picked && /llama[-_ ]?guard/i.test(picked.name)) setRole('generative_guard');
+                if (picked && /jev|nimble/i.test(picked.name)) setRole('decision');
               }}
             >
               <option value="">{t('adminSecurity.classifiers.modelPlaceholder')}</option>
@@ -2961,6 +3050,7 @@ function ClassifiersTab(): ReactNode {
             <select className="select" value={role} onChange={(e) => setRole(e.target.value as ClassifierRole)}>
               <option value="text_classification">{t('adminSecurity.classifiers.roleTextClassification')}</option>
               <option value="generative_guard">{t('adminSecurity.classifiers.roleGenerativeGuard')}</option>
+              <option value="decision">{t('adminSecurity.classifiers.roleDecision')}</option>
             </select>
           </Field>
         </div>

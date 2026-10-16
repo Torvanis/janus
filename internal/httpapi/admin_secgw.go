@@ -239,8 +239,8 @@ func (s *Server) validateSecgwClassifierRefs(ctx context.Context, p *store.Secgw
 		// encoder to content_safety (or Llama Guard to prompt_injection)
 		// would only fail at request time, inside the breaker, as a
 		// generic "classifier failed". Refuse it here with the reason.
-		if want := store.ClassifierRoleForKind(c.Kind); want != "" && m.ClassifierRole != want {
-			return ErrInvalidRequest("checks[" + strconv.Itoa(i) + "].classifier_model_id: " + m.PublicName() + " is a " + m.ClassifierRole + " classifier; " + string(c.Kind) + " needs a " + want + " model.").WithParam("checks")
+		if want := store.ClassifierRoleForKind(c.Kind); want != "" && !store.ClassifierRoleServes(m.ClassifierRole, c.Kind) {
+			return ErrInvalidRequest("checks[" + strconv.Itoa(i) + "].classifier_model_id: " + m.PublicName() + " is a " + m.ClassifierRole + " classifier; " + string(c.Kind) + " needs a " + want + " or decision model.").WithParam("checks")
 		}
 	}
 	return nil
@@ -653,7 +653,9 @@ func (s *Server) handleSecgwDryRun(w http.ResponseWriter, r *http.Request) {
 		}
 		eff = eng.Resolve(sub)
 	}
-	dec, err := eng.Ingress(ctx, eff, secgw.Request{Body: in.Body, IsServiceToken: in.ServiceTokenID != ""})
+	// A dry run's classifier failures are the admin's test, not an outage:
+	// they must not open the breaker the live guards depend on.
+	dec, err := eng.Ingress(classify.WithTrialCall(ctx), eff, secgw.Request{Body: in.Body, IsServiceToken: in.ServiceTokenID != ""})
 	if err != nil {
 		writeSecgwError(w, r, err)
 		return

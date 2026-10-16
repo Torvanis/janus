@@ -80,6 +80,8 @@ func (t *textClassification) Classify(ctx context.Context, in []Segment) ([]Scor
 	if t.up.Meter != nil {
 		defer func() { t.up.Meter(ctx, time.Since(started), chars, err) }()
 	}
+	var body []byte
+	defer func() { traceCall(ctx, t.up, ProtocolTextClassification, url, started, payload, body, err) }()
 	if err != nil {
 		return nil, err
 	}

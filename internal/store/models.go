@@ -327,6 +327,11 @@ func (s *Store) ModelsByName(ctx context.Context, name string) ([]*Model, error)
 	if err != nil {
 		return nil, err
 	}
+	return matchModelName(models, name)
+}
+
+// matchModelName applies the caller-name tiers to a candidate list.
+func matchModelName(models []*Model, name string) ([]*Model, error) {
 	tiers := []func(m *Model) bool{
 		func(m *Model) bool { return m.DisplayName != "" && strings.EqualFold(m.DisplayName, name) },
 		func(m *Model) bool {
@@ -413,10 +418,14 @@ func (s *Store) SetModelDisplayName(ctx context.Context, id, displayName string)
 }
 
 // UpsertDiscoveredModel records a model reported by an upstream. Existing rows
-// keep their curation status; brand new models land as pending_approval.
+// keep their curation status; brand new models land as pending_approval. A
+// stale row that is listed again goes back to pending_approval for an admin
+// to look at, except a decision model, which resumes the state it had before
+// it was marked stale: decision models back guards, routers and served
+// decisions, and a listing gap must not quietly switch them off.
 func (s *Store) UpsertDiscoveredModel(ctx context.Context, upstreamID, name string, modalities []string) (created bool, err error) {
-	var id, status string
-	err = s.queryRow(ctx, `SELECT id, status FROM model WHERE upstream_id = ? AND name = ?`, upstreamID, name).Scan(&id, &status)
+	var id, status, role, before string
+	err = s.queryRow(ctx, `SELECT id, status, classifier_role, status_before_stale FROM model WHERE upstream_id = ? AND name = ?`, upstreamID, name).Scan(&id, &status, &role, &before)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		now := FormatTime(nowUTC())
@@ -430,8 +439,14 @@ func (s *Store) UpsertDiscoveredModel(ctx context.Context, upstreamID, name stri
 		next := status
 		if status == ModelStale {
 			next = ModelPending
+			if role == ClassifierRoleDecision {
+				switch before {
+				case ModelEnabled, ModelDisabled, ModelPending:
+					next = before
+				}
+			}
 		}
-		return false, s.exec(ctx, `UPDATE model SET discovered_at = ?, modalities = ?, status = ? WHERE id = ?`,
+		return false, s.exec(ctx, `UPDATE model SET discovered_at = ?, modalities = ?, status = ?, status_before_stale = '' WHERE id = ?`,
 			FormatTime(nowUTC()), strings.Join(modalities, ","), next, id)
 	}
 }
@@ -439,11 +454,22 @@ func (s *Store) UpsertDiscoveredModel(ctx context.Context, upstreamID, name stri
 // MarkStaleModels flags models that an upstream stopped reporting. Rows are
 // never deleted: an admin decides what to do with them.
 func (s *Store) MarkStaleModels(ctx context.Context, upstreamID string, seen []string) (int, error) {
-	query := `UPDATE model SET status = ? WHERE upstream_id = ? AND status <> ?`
+	return s.MarkStaleModelsKeeping(ctx, upstreamID, seen, nil)
+}
+
+// MarkStaleModelsKeeping is MarkStaleModels that leaves rows with one of the
+// keepRoles classifier roles untouched: discovery could not list that kind
+// of model this run, so their absence says nothing.
+func (s *Store) MarkStaleModelsKeeping(ctx context.Context, upstreamID string, seen, keepRoles []string) (int, error) {
+	query := `UPDATE model SET status_before_stale = status, status = ? WHERE upstream_id = ? AND status <> ?`
 	args := []any{ModelStale, upstreamID, ModelStale}
 	if len(seen) > 0 {
 		query += ` AND name NOT IN (` + placeholders(len(seen)) + `)`
 		args = append(args, toArgs(seen)...)
+	}
+	if len(keepRoles) > 0 {
+		query += ` AND classifier_role NOT IN (` + placeholders(len(keepRoles)) + `)`
+		args = append(args, toArgs(keepRoles)...)
 	}
 	res, err := s.db.ExecContext(ctx, s.rebind(query), args...)
 	if err != nil {

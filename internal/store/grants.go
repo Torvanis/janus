@@ -117,7 +117,13 @@ func (s *Store) CreateGrant(ctx context.Context, modelID, modelKind, granteeType
 		// A Security Gateway classifier is never grantable: a caller who can
 		// invoke the judge directly has free oracle access to it.
 		if m, err := s.ModelByID(ctx, modelID); err == nil && m.ClassifierRole != "" {
-			return nil, &ValidationError{Field: "model_id", Message: "this model is a security classifier and cannot be granted to callers"}
+			ok, why, gerr := s.DecisionGrantable(ctx, m)
+			if gerr != nil {
+				return nil, gerr
+			}
+			if !ok {
+				return nil, &ValidationError{Field: "model_id", Message: why}
+			}
 		}
 	}
 	// Collective grantee types address a whole population, so they carry no

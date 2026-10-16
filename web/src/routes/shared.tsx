@@ -5,7 +5,7 @@ import type { TimePoint } from '../lib/types';
 import { seriesColor, type AreaSeries } from '../components/charts';
 import { t } from '../lib/i18n';
 import type { UsageEvent } from '../lib/types';
-import { formatBytes, formatDateTime, formatDuration, formatNumber, formatUSD, statusTone, titleCase } from '../lib/format';
+import { formatBytes, formatDateTime, formatDuration, formatNumber, formatUSD, statusTone, modalityLabel } from '../lib/format';
 import { Badge } from '../components/ui';
 import { ChargedTeam } from '../components/ChargedTeam';
 import { useLocalOnly } from '../app/session';
@@ -368,7 +368,7 @@ export function RequestDetail({
           <span className="mono">{event.endpoint_path}</span>
         </DetailRow>
         <DetailRow label={t('requests.method')}>{event.http_method}</DetailRow>
-        <DetailRow label={t('tables.modality')}>{titleCase(event.modality)}</DetailRow>
+        <DetailRow label={t('tables.modality')}>{modalityLabel(event.modality)}</DetailRow>
         <DetailRow label={t('tables.status')}>
           <Badge tone={statusTone(event.http_status)}>{event.http_status}</Badge>
         </DetailRow>

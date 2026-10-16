@@ -89,12 +89,46 @@ const (
 	// conversation guard (Llama Guard style): a chat model whose reply is
 	// a safe/unsafe verdict with hazard categories.
 	ClassifierRoleGenerativeGuard = "generative_guard"
+	// ClassifierRoleDecision marks a catalog model as a System One decision
+	// model (TypeSafe Jev, Bespoke Nimble): it answers typed questions with
+	// probabilities, so ONE model can back prompt-injection checks,
+	// content-safety checks and Usage insights, and Janus can ask it
+	// several of those questions together.
+	ClassifierRoleDecision = "decision"
+)
+
+// What a decision-model guard judges (check option "judge_scope"), and how
+// it reads text longer than one call takes (option "long_text"). Both only
+// apply to checks bound to a decision model; Prompt Guard and Llama Guard
+// always read every message. The defaults are the original behaviour: the
+// new turn only, its last 12,000 characters, in one call per check.
+const (
+	// SecgwJudgeNewTurn judges the new turn: the messages after the last
+	// assistant reply (ignoring a trailing assistant prefill). Earlier turns
+	// were judged when they were new, provided they came through Janus.
+	SecgwJudgeNewTurn = "new_turn"
+	// SecgwJudgeConversation judges every non-assistant message the caller
+	// sends, so caller-written history is judged too. Longer text per call.
+	SecgwJudgeConversation = "conversation"
+	// SecgwLongTextTail keeps only the last 12,000 characters: one call.
+	SecgwLongTextTail = "tail"
+	// SecgwLongTextWindows judges the whole text in overlapping
+	// 12,000-character windows, one call per window, and takes the worst
+	// verdict. Longer text costs proportionally more calls.
+	SecgwLongTextWindows = "windows"
 )
 
 // ClassifierRoles lists every role a model may carry, for validation and
 // the admin UI.
 func ClassifierRoles() []string {
-	return []string{ClassifierRoleTextClassification, ClassifierRoleGenerativeGuard}
+	return []string{ClassifierRoleTextClassification, ClassifierRoleGenerativeGuard, ClassifierRoleDecision}
+}
+
+// ClassifierRoleServes reports whether a model with role can back a check
+// of kind k. Decision models back every model-backed kind.
+func ClassifierRoleServes(role string, k SecgwCheckKind) bool {
+	want := ClassifierRoleForKind(k)
+	return want != "" && (role == want || role == ClassifierRoleDecision)
 }
 
 // ClassifierRoleForKind names which classifier protocol a model-backed
@@ -261,6 +295,12 @@ func (p *SecgwPolicy) Validate() error {
 		} else if c.ClassifierModelID != "" {
 			return &ValidationError{Field: fmt.Sprintf("checks[%d].classifier_model_id", i), Message: string(c.Kind) + " is deterministic and takes no classifier"}
 		}
+		if c.Kind == SecgwCheckPromptInjection || c.Kind == SecgwCheckContentSafety {
+			if err := validateDecisionCoverage(c.Options); err != nil {
+				err.Field = fmt.Sprintf("checks[%d].options.%s", i, err.Field)
+				return err
+			}
+		}
 		if c.HoldBytes < 0 || c.HoldBytes > 1<<20 {
 			return &ValidationError{Field: fmt.Sprintf("checks[%d].hold_bytes", i), Message: "hold_bytes must be between 0 and 1048576"}
 		}
@@ -273,6 +313,32 @@ func (p *SecgwPolicy) Validate() error {
 	}
 	if len(p.RefusalText) > 2000 {
 		return &ValidationError{Field: "refusal_text", Message: "refusal_text must be at most 2000 characters"}
+	}
+	return nil
+}
+
+// validateDecisionCoverage checks the judge_scope and long_text options.
+// Malformed options JSON is reported by the generic check after it.
+func validateDecisionCoverage(raw json.RawMessage) *ValidationError {
+	if len(raw) == 0 {
+		return nil
+	}
+	var o struct {
+		JudgeScope string `json:"judge_scope"`
+		LongText   string `json:"long_text"`
+	}
+	if json.Unmarshal(raw, &o) != nil {
+		return nil
+	}
+	switch o.JudgeScope {
+	case "", SecgwJudgeNewTurn, SecgwJudgeConversation:
+	default:
+		return &ValidationError{Field: "judge_scope", Message: "judge_scope must be new_turn or conversation"}
+	}
+	switch o.LongText {
+	case "", SecgwLongTextTail, SecgwLongTextWindows:
+	default:
+		return &ValidationError{Field: "long_text", Message: "long_text must be tail or windows"}
 	}
 	return nil
 }

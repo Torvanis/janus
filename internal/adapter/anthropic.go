@@ -143,6 +143,8 @@ type chatCompletionRequest struct {
 	User                string            `json:"user"`
 	N                   *int              `json:"n"`
 	Thinking            json.RawMessage   `json:"thinking"`
+	ReasoningEffort     string            `json:"reasoning_effort"`
+	Reasoning           json.RawMessage   `json:"reasoning"`
 }
 
 // chatMessage is one OpenAI chat message. Content is raw because it is either
@@ -324,9 +326,12 @@ func chatToMessages(body []byte) ([]byte, error) {
 		out["metadata"] = map[string]any{"user_id": in.User}
 	}
 	// Anthropic-native extended thinking passes straight through for callers
-	// that already speak it.
-	if len(in.Thinking) > 0 {
+	// that already speak it; otherwise an OpenAI reasoning effort is
+	// translated into the form this Claude model takes.
+	if len(in.Thinking) > 0 && string(in.Thinking) != "null" {
 		out["thinking"] = in.Thinking
+	} else {
+		applyAnthropicEffort(out, in.Model, chatEffort(in.ReasoningEffort, in.Reasoning), in.MaxCompletionTokens != nil || in.MaxTokens != nil)
 	}
 
 	encoded, err := json.Marshal(out)

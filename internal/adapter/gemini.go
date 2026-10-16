@@ -154,6 +154,13 @@ func geminiModalities(name string, methods []string) []string {
 // authenticates with the API key as a bearer token, as Google documents.
 func (a *Gemini) Prepare(up Upstream, req *Request) (*Prepared, error) {
 	up.BaseURL = geminiBase(up.BaseURL)
+	if isChatCompletions(req) {
+		// Clients drop the thought signature from tool calls they replay;
+		// Gemini refuses the turn without it (gemini_signatures.go).
+		r := *req
+		r.Body = restoreGeminiSignatures(req.Body)
+		req = &r
+	}
 	return a.openai.Prepare(up, req)
 }
 
@@ -166,14 +173,19 @@ func (a *Gemini) ExtractUsage(body []byte) (Usage, bool) {
 // NewStreamCollector folds streamed usage, adding thinking tokens to output.
 func (a *Gemini) NewStreamCollector() StreamCollector { return &geminiStreamCollector{} }
 
-// TransformResponse passes OpenAI-shaped bodies through unchanged.
+// TransformResponse passes OpenAI-shaped bodies through unchanged, noting
+// the thought signatures on tool calls.
 func (a *Gemini) TransformResponse(req *Request, body []byte) ([]byte, error) {
+	if isChatCompletions(req) {
+		rememberGeminiSignatures(body)
+	}
 	return a.openai.TransformResponse(req, body)
 }
 
-// NewStreamTransformer passes OpenAI-shaped SSE through unchanged.
+// NewStreamTransformer passes OpenAI-shaped SSE through unchanged, noting
+// the thought signatures on tool calls.
 func (a *Gemini) NewStreamTransformer(req *Request, h http.Header) StreamTransformer {
-	return a.openai.NewStreamTransformer(req, h)
+	return geminiStreamWithSignatures(a.openai.NewStreamTransformer(req, h), req, h)
 }
 
 // withGeminiThinking makes output tokens what Google bills as output.

@@ -593,6 +593,11 @@ type ManagedModel struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	// Kind is ManagedKindAlias (a stable name for one model or a pool) or
+	// ManagedKindRouter (auto-routing: a classifier picks one of several
+	// routes per request). Grants, security bindings and quotas treat both
+	// the same way.
+	Kind string `json:"kind"`
 	// TargetModelID is the real catalog model this alias currently resolves
 	// to. It is never another managed model: aliases do not chain.
 	TargetModelID string `json:"target_model_id"`
@@ -802,6 +807,33 @@ type UsageEvent struct {
 	// PoolAttempts counts members tried (>1 = pre-byte retry).
 	PoolReason   string `json:"pool_reason,omitempty"`
 	PoolAttempts int    `json:"pool_attempts,omitempty"`
+	// ClassifierMs is how long this request waited on classifiers before
+	// it was forwarded: Security Gateway guards and inline prompt
+	// classification, end to end (calls that ran in parallel count once).
+	// Background classification never delays a request and is not here;
+	// its own timing is on its classification_result row.
+	ClassifierMs int `json:"classifier_ms,omitempty"`
+	// ClassifierCalls is the number of classifier requests this request
+	// waited for (inline). Background calls are counted on the request's
+	// classification_result row.
+	ClassifierCalls int `json:"classifier_calls,omitempty"`
+	// ManagedModelID is the managed model (alias or router) the caller
+	// addressed, so quotas scoped to it count its traffic; empty when a
+	// catalog model was addressed directly.
+	ManagedModelID string `json:"managed_model_id,omitempty"`
+	// RouteReason says how an auto-routing router chose the model that
+	// served ("matched:coding", "timeout", "sticky", "shadow"); empty for
+	// requests that did not go through a router.
+	RouteReason string `json:"route_reason,omitempty"`
+	// ServedManagedModelID is the alias or pool an auto-routing route
+	// served through (empty otherwise), so quotas scoped to that alias
+	// count routed traffic and rebuild correctly from the event log.
+	ServedManagedModelID string `json:"served_managed_model_id,omitempty"`
+	// Classification is the label given to the request ("coding/rust")
+	// when it was classified inline. Background labels are written later,
+	// to classification_result, and joined onto the request log by
+	// request_id.
+	Classification string `json:"classification,omitempty"`
 	// SecgwAction summarises what the Security Gateway did to this
 	// request ('' = no policy applied / nothing matched; observed,
 	// redacted, blocked, stream_cut). SecgwViolations counts the matched
@@ -824,6 +856,9 @@ type UsageEvent struct {
 	// by troubleshooting mode, so the admin request log can offer a
 	// download. Resolved at read time by the API layer; never persisted.
 	HasCapture bool `json:"has_capture,omitempty"`
+	// ClassificationTag is how Usage insights labelled the request (admin
+	// log only; attached on read, not stored on the event).
+	ClassificationTag *ClassificationTag `json:"classification_tag,omitempty"`
 	// AfterInsert, when set, runs on the goroutine that inserted the row,
 	// after the insert, with the row's ID populated. Used to write
 	// dependent rows (Security Gateway violations) without a second

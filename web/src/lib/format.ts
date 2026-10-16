@@ -115,6 +115,31 @@ export function formatTokenCount(tokens: number | undefined): string {
   return `${formatNumber(tokens)} tokens`;
 }
 
+/** Plain-language names for request kinds (usage_event.modality). */
+const MODALITY_LABELS: Record<string, string> = {
+  chat: 'Chat',
+  embedding: 'Embedding',
+  image: 'Image',
+  audio: 'Audio',
+  video: 'Video',
+  tts: 'Text to speech',
+  stt: 'Speech to text',
+  function: 'Function',
+  response: 'Response',
+  assistant: 'Assistant',
+  thread: 'Thread',
+  file: 'File',
+  moderation: 'Moderation',
+  decision: 'Decision',
+  fine_tune: 'Fine-tuning',
+  classification: 'Classifier call',
+};
+
+/** Names a modality for people; unknown values fall back to title case. */
+export function modalityLabel(value: string): string {
+  return MODALITY_LABELS[value] ?? titleCase(value);
+}
+
 export function titleCase(value: string): string {
   if (!value) return '';
   return value

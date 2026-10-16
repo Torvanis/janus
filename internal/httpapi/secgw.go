@@ -102,19 +102,54 @@ type classifierResolver struct {
 	// so a role change must rebuild rather than reuse. Keyed separately from
 	// breakers so the breaker's open/closed state is dropped with it.
 	roles map[string]string
+	// bench marks a resolver private to a classifier benchmark: its
+	// breakers never alert, and forceStyle (when set) overrides every
+	// decision classifier's call style so styles can be compared.
+	bench      bool
+	forceStyle string
+}
+
+// classifierLookup is what the resolver reads from the database for one
+// classifier model. It is cached against the model revision (bumped by
+// role and profile writes, and by every catalog change) and the config
+// cache TTL, so a request with several model-backed checks and a live
+// router no longer costs two queries per check before it is forwarded.
+type classifierLookup struct {
+	model *store.Model
+	prof  store.ClassifierProfile
+	sig   string
+}
+
+func (r *classifierResolver) lookup(ctx context.Context, modelID string) (classifierLookup, error) {
+	return cachedModelRead(&r.s.configCache, r.s.Store.ModelRevision(), "classifier_lookup|"+modelID, func() (classifierLookup, error) {
+		model, err := r.s.Store.ModelByID(ctx, modelID)
+		if err != nil {
+			return classifierLookup{}, fmt.Errorf("classifier model %s: %w", modelID, err)
+		}
+		if model.ClassifierRole == "" {
+			return classifierLookup{}, fmt.Errorf("model %s has no classifier role", model.PublicName())
+		}
+		// The signature covers what the classifier is built from, so a role
+		// or profile change rebuilds it (and drops its breaker state).
+		out := classifierLookup{model: model, sig: model.ClassifierRole}
+		if model.ClassifierRole == store.ClassifierRoleDecision {
+			if out.prof, err = r.s.Store.ClassifierProfileFor(ctx, model.UpstreamID, model.Name); err != nil {
+				return classifierLookup{}, err
+			}
+			out.sig += "|" + out.prof.CallStyle + "|" + strconv.Itoa(out.prof.MaxOptions) + "|" + out.prof.WireModel + "|" + out.prof.Dialect
+		}
+		return out, nil
+	})
 }
 
 func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.Classifier, error) {
-	model, err := r.s.Store.ModelByID(ctx, modelID)
+	lk, err := r.lookup(ctx, modelID)
 	if err != nil {
-		return nil, fmt.Errorf("classifier model %s: %w", modelID, err)
+		return nil, err
 	}
-	if model.ClassifierRole == "" {
-		return nil, fmt.Errorf("model %s has no classifier role", model.PublicName())
-	}
-
+	model, prof, sig := lk.model, lk.prof, lk.sig
 	r.mu.Lock()
-	if b, ok := r.breakers[modelID]; ok && r.roles[modelID] == model.ClassifierRole {
+	if b, ok := r.breakers[modelID]; ok && r.roles[modelID] == sig {
 		r.mu.Unlock()
 		return b, nil
 	}
@@ -132,14 +167,26 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 	}
 	inner, err := classify.New(model.ClassifierRole, classify.Upstream{
 		ModelID: model.ID, ModelName: model.Name, BaseURL: upstream.BaseURL, APIKey: apiKey,
-		Client: r.s.upstreamHTTPClient(ctx),
-		Meter:  r.s.meterClassifierCall(model, upstream),
+		Client:     r.s.upstreamHTTPClient(ctx),
+		Meter:      r.s.meterClassifierCall(model, upstream),
+		UpstreamID: upstream.ID, AdapterType: upstream.AdapterType,
+		WireModel: prof.WireModel, Style: prof.CallStyle, MaxOptions: prof.MaxOptions,
+		Dialect:       prof.Dialect,
+		DecisionMeter: r.s.meterDecisionCall(model, upstream),
 	})
+	if r.forceStyle != "" {
+		if d, ok := inner.(*classify.DecisionClassifier); ok {
+			d.Backend.Style = r.forceStyle
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
 	b := &classify.Breaker{Inner: inner, ModelID: model.ID, Threshold: 3, Cooldown: 30 * time.Second,
 		OnOpen: func(id string, cause error) {
+			if r.bench {
+				return
+			}
 			r.s.Logger.Error("secgw: classifier circuit breaker opened", "model", model.PublicName(), "error", cause.Error())
 			if r.s.Alerts != nil {
 				r.s.Alerts.Dispatch(context.Background(), alerting.Event{
@@ -153,7 +200,7 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 		}}
 	r.mu.Lock()
 	r.breakers[modelID] = b
-	r.roles[modelID] = model.ClassifierRole
+	r.roles[modelID] = sig
 	r.mu.Unlock()
 	return b, nil
 }

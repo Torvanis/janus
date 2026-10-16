@@ -134,6 +134,11 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 	discoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	// A provider that lists some models in a separate best-effort request
+	// reports here when that request failed; those rows are kept as they
+	// are instead of being marked stale.
+	report := &adapter.DiscoveryReport{}
+	discoverCtx = adapter.WithDiscoveryReport(discoverCtx, report)
 	models, err := a.Discover(discoverCtx, adapter.Upstream{
 		ID: up.ID, Name: up.Name, BaseURL: up.BaseURL, APIKey: apiKey, AdapterType: up.AdapterType,
 	}, s.client)
@@ -173,7 +178,12 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 		}
 		seen = append(seen, m.Name)
 	}
-	stale, err := s.store.MarkStaleModels(ctx, up.ID, seen)
+	var keepRoles []string
+	for role, why := range report.Unlisted() {
+		keepRoles = append(keepRoles, role)
+		s.logger.WarnContext(ctx, "model discovery could not list some models; keeping them as they are", "upstream", up.Name, "classifier_role", role, "error", why)
+	}
+	stale, err := s.store.MarkStaleModelsKeeping(ctx, up.ID, seen, keepRoles)
 	if err != nil {
 		return s.fail(ctx, up, res, err, started)
 	}

@@ -193,3 +193,60 @@ func TestDurationUntilBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// The daily purge enforces auto-routing retention: expired sticky
+// conversations, decisions and verdicts past the router settings' "Keep
+// decisions (days)", and caller ids on decisions older than the usage log.
+func TestPurgeEnforcesRoutingRetention(t *testing.T) {
+	db, metrics, logger := newPurgeFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	settings := store.DefaultRoutingSettings()
+	settings.RetentionDays = 10
+	if err := db.SetRoutingSettings(ctx, settings); err != nil {
+		t.Fatal(err)
+	}
+	for _, age := range []int{20, 7, 1} {
+		if err := db.InsertRoutingDecision(ctx, &store.RoutingDecision{RequestID: store.NewID(), RouterID: "r1", Mode: store.RouterModeLive,
+			Reason: store.RouteReasonMatched, UserID: "u1", CreatedAt: now.AddDate(0, 0, -age)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InsertRoutingEval(ctx, &store.RoutingEvalResult{RouterID: "r1", RouteID: "legal", CreatedAt: now.AddDate(0, 0, -20)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutStickyRoute(ctx, store.StickyRoute{Key: "k", RouterID: "r1", RouteID: "legal", ExpiresAt: now.Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Usage kept 5 days: decisions older than that keep no caller.
+	NewPurger(db, quota.NewEngine(db), metrics, logger, 5, 730, "02:00").RunOnce(ctx)
+
+	ds, err := db.ListRoutingDecisions(ctx, store.RoutingDecisionFilter{RouterID: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ds) != 2 {
+		t.Fatalf("%d decisions remain, want the 2 inside the 10-day window", len(ds))
+	}
+	for _, d := range ds {
+		old := now.Sub(d.CreatedAt) > 5*24*time.Hour
+		if old && d.UserID != "" {
+			t.Fatalf("a decision older than usage retention still names its caller (%v old)", now.Sub(d.CreatedAt))
+		}
+		if !old && d.UserID != "u1" {
+			t.Fatal("a recent decision lost its caller")
+		}
+	}
+	if evals, _ := db.ListRoutingEvals(ctx, "r1", "legal", 10); len(evals) != 0 {
+		t.Fatal("an evaluation past retention was kept")
+	}
+	if _, err := db.LookupStickyRoute(ctx, "k", now.Add(-time.Hour)); err == nil {
+		t.Fatal("an expired sticky conversation was kept")
+	}
+	for table, want := range map[string]float64{"routing_decision": 1, "routing_eval_result": 1, "routing_sticky": 1} {
+		if got := testutil.ToFloat64(metrics.PurgeDeletedRows.WithLabelValues(table)); got != want {
+			t.Errorf("janus_purge_deleted_rows_total{table=%s} = %v, want %v", table, got, want)
+		}
+	}
+}

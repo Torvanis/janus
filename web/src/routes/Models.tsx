@@ -3,8 +3,24 @@ import { sortCollection } from '../lib/collections';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { isRenamedModel, modelHealth, publicModelName, type ManagedModel, type Model, type ModelActivity, type ModelHealth } from '../lib/types';
-import { formatErrorRate, formatModelRate, formatRelative, formatTokenCount, healthTone, titleCase } from '../lib/format';
+import {
+  isRenamedModel,
+  modelHealth,
+  publicModelName,
+  type ManagedModel,
+  type Model,
+  type ModelActivity,
+  type ModelHealth,
+} from '../lib/types';
+import {
+  formatErrorRate,
+  formatModelRate,
+  formatRelative,
+  formatTokenCount,
+  healthTone,
+  modalityLabel,
+  titleCase,
+} from '../lib/format';
 import { AsyncSection, Badge, CodeBlock, Drawer, EmptyState } from '../components/ui';
 import { useDebounced, useUrlState } from '../lib/hooks';
 import { useLocalOnly, useMe } from '../app/session';
@@ -139,7 +155,7 @@ export function ModelsPage(): ReactNode {
           onChange={setModality}
           options={[
             { value: '', label: t('requests.allModalities') },
-            ...modalities.map((value) => ({ value, label: titleCase(value) })),
+            ...modalities.map((value) => ({ value, label: modalityLabel(value) })),
           ]}
         />
         <FilterSelect
@@ -214,8 +230,12 @@ export function ModelsPage(): ReactNode {
                       <th scope="col">{t('models.contextWindow')}</th>
                       <th scope="col">{t('models.colHealth')}</th>
                       <th scope="col">{t('models.colErrorRate')}</th>
-                      <th scope="col" className="num">{t('models.jobsPerDay')}</th>
-                      <th scope="col" className="num">{t('models.speed')}</th>
+                      <th scope="col" className="num">
+                        {t('models.jobsPerDay')}
+                      </th>
+                      <th scope="col" className="num">
+                        {t('models.speed')}
+                      </th>
                       <th scope="col">{t('models.colAccess')}</th>
                     </tr>
                   </thead>
@@ -232,7 +252,7 @@ export function ModelsPage(): ReactNode {
                             <div className="small">{model.target_public_name || '—'}</div>
                           </td>
                           <td>{model.target_upstream_name}</td>
-                          <td>{model.modalities.map(titleCase).join(', ')}</td>
+                          <td>{model.modalities.map(modalityLabel).join(', ')}</td>
                           {localOnly ? null : (
                             <>
                               <td title="Billed at target rates">—</td>
@@ -270,7 +290,7 @@ export function ModelsPage(): ReactNode {
                             <Badge tone="neutral">Physical model</Badge>
                           </td>
                           <td className="small muted">{model.upstream_name}</td>
-                          <td className="small">{model.modalities.map(titleCase).join(', ')}</td>
+                          <td className="small">{model.modalities.map(modalityLabel).join(', ')}</td>
                           {localOnly ? null : (
                             <>
                               <td className="num small">{formatModelRate(model, 'rate_in_nanousd')}</td>
@@ -315,7 +335,9 @@ export function ModelsPage(): ReactNode {
               </DetailRow>
               <DetailRow label={t('models.errorRate10m')}>{errorRateDetail(detail)}</DetailRow>
               <DetailRow label={t('models.jobsPerDay')}>
-                {detail.activity ? `${formatJobsPerDay(detail.activity.jobs_per_day_7d)} · ${jobsTrendDetail(detail.activity)}` : '—'}
+                {detail.activity
+                  ? `${formatJobsPerDay(detail.activity.jobs_per_day_7d)} · ${jobsTrendDetail(detail.activity)}`
+                  : '—'}
               </DetailRow>
               <DetailRow label={t('models.speed')}>
                 {detail.activity && detail.activity.tokens_per_second_7d > 0
@@ -325,7 +347,7 @@ export function ModelsPage(): ReactNode {
               <DetailRow label={t('models.upstreamLatency')}>{upstreamProbeLabel(detail)}</DetailRow>
               <DetailRow label={t('adminModels.colUpstream')}>{detail.upstream_name}</DetailRow>
               <DetailRow label={t('models.providerType')}>{detail.adapter_type}</DetailRow>
-              <DetailRow label={t('models.colModalities')}>{detail.modalities.map(titleCase).join(', ')}</DetailRow>
+              <DetailRow label={t('models.colModalities')}>{detail.modalities.map(modalityLabel).join(', ')}</DetailRow>
               <DetailRow label={t('models.contextWindow')}>{formatTokenCount(detail.context_window)}</DetailRow>
               {localOnly ? null : (
                 <>

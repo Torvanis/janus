@@ -1,5 +1,6 @@
 import { Collection } from '../../components/Collection';
 import { useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
 import {
@@ -64,6 +65,7 @@ function SortableColumn({
 export function ManagedModelsPage(): ReactNode {
   const localOnly = useLocalOnly();
   const toast = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ManagedModelRow | null>(null);
@@ -241,6 +243,12 @@ export function ManagedModelsPage(): ReactNode {
                           <tr key={m.id}>
                             <td>
                               <span className="mono">{m.name}</span>
+                              {m.kind === 'router' ? (
+                                <>
+                                  {' '}
+                                  <Badge tone="primary">{t('adminManagedModels.routerBadge')}</Badge>
+                                </>
+                              ) : null}
                               {m.description ? (
                                 <div className="small muted truncate" style={{ maxWidth: 240 }}>
                                   {m.description}
@@ -269,7 +277,9 @@ export function ManagedModelsPage(): ReactNode {
                             <td className="small">
                               <span className="mono">{m.target_public_name}</span>
                               <div className="small muted">
-                                {(m.pool?.members.length ?? 1) > 1 ? (
+                                {m.kind === 'router' ? (
+                                  <Link to={`/admin/routing/routers/${m.id}`}>{t('adminManagedModels.routerTarget')}</Link>
+                                ) : (m.pool?.members.length ?? 1) > 1 ? (
                                   <Badge tone="info">
                                     {t('adminManagedModels.poolBadge', { count: m.pool?.members.length ?? 1 })}
                                   </Badge>
@@ -309,7 +319,13 @@ export function ManagedModelsPage(): ReactNode {
                             <td className="small muted">{formatRelative(m.updated_at)}</td>
                             <td>
                               <RowActions>
-                                <IconButton icon="edit" label={t('adminManagedModels.edit')} onClick={() => setEditing(m)} />
+                                <IconButton
+                                  icon="edit"
+                                  label={t('adminManagedModels.edit')}
+                                  onClick={() =>
+                                    m.kind === 'router' ? navigate(`/admin/routing/routers/${m.id}`) : setEditing(m)
+                                  }
+                                />
                                 <IconButton
                                   icon={m.status === 'enabled' ? 'disable' : 'enable'}
                                   label={

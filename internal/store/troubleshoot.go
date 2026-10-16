@@ -611,6 +611,8 @@ type TroubleshootingCapture struct {
 	StorageRef        string    `json:"storage_ref,omitempty"`
 	Encrypted         bool      `json:"encrypted"`
 	Truncated         bool      `json:"truncated"`
+	// ClassifierRunCount is resolved at read time for the admin list.
+	ClassifierRunCount int `json:"classifier_run_count"`
 }
 
 const troubleshootingCaptureColumns = `id, session_id, usage_event_id, request_id, captured_at, user_id, service_token_id,

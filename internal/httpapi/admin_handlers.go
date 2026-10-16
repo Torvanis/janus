@@ -34,6 +34,10 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Put("/admin/system/license/sync", s.handlePutLicenseSync)
 	r.Post("/admin/system/license/sync", s.handlePostLicenseSync)
 	s.mountAdminLocalAuthRoutes(r)
+	s.mountClassificationRoutes(r)
+	s.mountRoutingRoutes(r)
+	s.mountClassifierBenchmarkRoutes(r)
+	s.mountDecisionAdminRoutes(r)
 	// Runtime upstream timeouts (connect / TTFB / total): view, override any
 	// hop, or revert to the environment defaults. See admin_system.go.
 	r.Get("/admin/system/upstream-timeouts", s.handleGetUpstreamTimeouts)
@@ -122,6 +126,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Delete("/admin/troubleshooting/data", s.handlePurgeTroubleshootingData)
 	r.Post("/admin/troubleshooting/cleanup", s.handleTroubleshootingCleanup)
 	r.Get("/admin/troubleshooting/captures", s.handleListTroubleshootingCaptures)
+	r.Get("/admin/troubleshooting/captures/{event_id}/classifiers", s.handleGetCaptureClassifierRuns)
 	r.Get("/admin/troubleshooting/export", s.handleExportTroubleshooting)
 	r.Get("/admin/requests/{id}/download", s.handleDownloadRequestCapture)
 	r.Get("/admin/requests/{id}/security", s.handleRequestSecurity)
@@ -945,7 +950,9 @@ func (s *Server) handleCreateGrant(w http.ResponseWriter, r *http.Request) {
 	for _, modelID := range models {
 		g, err := s.Store.CreateGrant(r.Context(), modelID, modelKind, body.GranteeType, body.GranteeID)
 		if err != nil {
-			WriteError(w, r, err)
+			// A refused grant (e.g. a decision model that guards a
+			// policy) is the admin's to fix: 400 with the reason, not 500.
+			writeValidation(w, r, err)
 			return
 		}
 		created = append(created, g)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/torvanis/janus/internal/classtrace"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -52,14 +53,20 @@ type ManifestFiles struct {
 	RequestBody     string `json:"request_body,omitempty"`
 	ResponseHeaders string `json:"response_headers"`
 	ResponseBody    string `json:"response_body,omitempty"`
+	// ClassifierRuns lists every classifier call the request caused
+	// (Security Gateway guards, Usage insights): feature, classifier,
+	// timing, status, and — when request bodies were captured — the exact
+	// questions sent and answers returned.
+	ClassifierRuns string `json:"classifier_runs,omitempty"`
 }
 
 // Entry is one captured request ready to be archived.
 type Entry struct {
-	Event        *store.UsageEvent
-	Capture      *store.TroubleshootingCapture
-	RequestBody  []byte
-	ResponseBody []byte
+	Event          *store.UsageEvent
+	Capture        *store.TroubleshootingCapture
+	RequestBody    []byte
+	ResponseBody   []byte
+	ClassifierRuns []classtrace.Call
 }
 
 // Archiver writes tar.gz archives.
@@ -138,6 +145,9 @@ func (a Archiver) manifest(e Entry, now time.Time) Manifest {
 	if len(e.ResponseBody) > 0 {
 		m.Files.ResponseBody = dir + "/response/body" + bodyExt(e.ResponseBody, headerValue(e.Capture.ResponseHeaders, "Content-Type"))
 	}
+	if len(e.ClassifierRuns) > 0 {
+		m.Files.ClassifierRuns = dir + "/classifiers.json"
+	}
 	return m
 }
 
@@ -167,6 +177,15 @@ func (a Archiver) writeEntry(tw *tar.Writer, e Entry, now time.Time) error {
 	}
 	if m.Files.ResponseBody != "" {
 		if err := writeFile(tw, m.Files.ResponseBody, e.ResponseBody, now); err != nil {
+			return err
+		}
+	}
+	if m.Files.ClassifierRuns != "" {
+		runs, err := json.MarshalIndent(e.ClassifierRuns, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := writeFile(tw, m.Files.ClassifierRuns, runs, now); err != nil {
 			return err
 		}
 	}

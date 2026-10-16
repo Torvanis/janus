@@ -194,14 +194,18 @@ func (s Subject) IsServiceToken() bool { return s.ServiceTokenID != "" }
 
 // Applicable returns the quotas governing a subject (including team-inherited
 // rules for users), narrowed to those that cover the requested model.
-func (e *Engine) Applicable(ctx context.Context, subject Subject, modelID string) ([]*store.Quota, error) {
+//
+// also lists further ids the request answers to: the managed model (alias
+// or auto-routing router) the caller addressed, so a rule scoped to the
+// managed model applies alongside rules scoped to the model that serves.
+func (e *Engine) Applicable(ctx context.Context, subject Subject, modelID string, also ...string) ([]*store.Quota, error) {
 	quotas, err := e.rulesFor(ctx, subject)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*store.Quota, 0, len(quotas))
 	for _, q := range quotas {
-		if q.ModelID != "" && modelID != "" && q.ModelID != modelID {
+		if q.ModelID != "" && modelID != "" && q.ModelID != modelID && !containsID(also, q.ModelID) {
 			continue
 		}
 		if e.localOnly && q.Metric == store.MetricCostUSD {
@@ -216,8 +220,17 @@ func (e *Engine) Applicable(ctx context.Context, subject Subject, modelID string
 
 // Check evaluates every applicable quota before the upstream is contacted.
 // Multiple quotas compose with AND: the most restrictive one wins.
-func (e *Engine) Check(ctx context.Context, subject Subject, modelID string) (Decision, error) {
-	return e.CheckWithPending(ctx, subject, modelID, Delta{})
+func (e *Engine) Check(ctx context.Context, subject Subject, modelID string, also ...string) (Decision, error) {
+	return e.CheckWithPending(ctx, subject, modelID, Delta{}, also...)
+}
+
+func containsID(ids []string, id string) bool {
+	for _, x := range ids {
+		if x != "" && x == id {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckWithPending evaluates quotas like Check, but adds a not-yet-recorded
@@ -225,8 +238,8 @@ func (e *Engine) Check(ctx context.Context, subject Subject, modelID string) (De
 // use it so a single stream's own consumption can breach its limit:
 // usage is only recorded post-flight, so without the pending delta a lone
 // large stream would never be cut by what it is itself consuming.
-func (e *Engine) CheckWithPending(ctx context.Context, subject Subject, modelID string, pending Delta) (Decision, error) {
-	quotas, err := e.Applicable(ctx, subject, modelID)
+func (e *Engine) CheckWithPending(ctx context.Context, subject Subject, modelID string, pending Delta, also ...string) (Decision, error) {
+	quotas, err := e.Applicable(ctx, subject, modelID, also...)
 	if err != nil {
 		return Decision{Allowed: true}, err
 	}
@@ -246,8 +259,8 @@ func (e *Engine) CheckWithPending(ctx context.Context, subject Subject, modelID 
 
 // HardKillActive reports whether any applicable quota demands that a stream be
 // cut mid-flight once its limit is crossed.
-func (e *Engine) HardKillActive(ctx context.Context, subject Subject, modelID string) bool {
-	quotas, err := e.Applicable(ctx, subject, modelID)
+func (e *Engine) HardKillActive(ctx context.Context, subject Subject, modelID string, also ...string) bool {
+	quotas, err := e.Applicable(ctx, subject, modelID, also...)
 	if err != nil {
 		return false
 	}
@@ -261,8 +274,8 @@ func (e *Engine) HardKillActive(ctx context.Context, subject Subject, modelID st
 
 // Record applies a completed request's usage to every applicable quota and
 // raises threshold alerts at 80%, 95%, and breach.
-func (e *Engine) Record(ctx context.Context, subject Subject, modelID string, d Delta) error {
-	quotas, err := e.Applicable(ctx, subject, modelID)
+func (e *Engine) Record(ctx context.Context, subject Subject, modelID string, d Delta, also ...string) error {
+	quotas, err := e.Applicable(ctx, subject, modelID, also...)
 	if err != nil {
 		return err
 	}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deriveSignal } from './Shell';
+import { t } from '../lib/i18n';
 import type { GlobalDashboard, TimePoint, Totals } from '../lib/types';
 
 function totals(overrides: Partial<Totals> = {}): Totals {
@@ -100,5 +101,11 @@ describe('deriveSignal', () => {
     expect(signal.tokensPerMinute).toBe(0);
     expect(signal.tokensInPerMinute).toBe(0);
     expect(signal.tokensOutPerMinute).toBe(0);
+  });
+});
+
+describe('primary navigation', () => {
+  it('names the token page "API Tokens", not the ambiguous "Tokens" (usage token counts)', () => {
+    expect(t('shell.navTokens')).toBe('API Tokens');
   });
 });

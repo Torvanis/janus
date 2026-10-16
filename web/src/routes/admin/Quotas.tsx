@@ -3,7 +3,7 @@ import { Collection } from '../../components/Collection';
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { AdminUserRow, Model, QuotaStatus, RateLimitRule, Team } from '../../lib/types';
+import type { AdminUserRow, ManagedModel, Model, QuotaStatus, RateLimitRule, Team } from '../../lib/types';
 import { formatDateTime, formatNumber, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Field, Modal, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
@@ -548,6 +548,13 @@ function CreateQuotaModal({
     queryFn: () => api.get<{ models: Model[] }>('/api/v1/admin/models?status=enabled'),
     enabled: open,
   });
+  const managedModels = useQuery({
+    queryKey: ['admin', 'managed-models', 'for-quotas'],
+    queryFn: () => api.get<{ managed_models: ManagedModel[] }>('/api/v1/admin/managed-models'),
+    enabled: open,
+  });
+  const routers = (managedModels.data?.managed_models ?? []).filter((m) => m.kind === 'router');
+  const aliases = (managedModels.data?.managed_models ?? []).filter((m) => m.kind !== 'router');
 
   // parse "50, 90" into sorted unique whole percentages (1–100).
   // Returns null when invalid; [] when the input matches the 80/95 defaults
@@ -641,11 +648,31 @@ function CreateQuotaModal({
       <Field label={t('adminQuotas.modelScope')} hint={t('adminQuotas.modelScopeHint')}>
         <select className="select" value={modelId} onChange={(event) => setModelId(event.target.value)}>
           <option value="">{t('adminQuotas.allModels')}</option>
-          {(models.data?.models ?? []).map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name} · {model.upstream_name}
-            </option>
-          ))}
+          {routers.length > 0 ? (
+            <optgroup label={t('adminQuotas.routersGroup')}>
+              {routers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+          {aliases.length > 0 ? (
+            <optgroup label={t('adminQuotas.managedGroup')}>
+              {aliases.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+          <optgroup label={t('adminQuotas.modelsGroup')}>
+            {(models.data?.models ?? []).map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name} · {model.upstream_name}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </Field>
 

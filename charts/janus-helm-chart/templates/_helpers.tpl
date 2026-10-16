@@ -1,5 +1,5 @@
 {{- define "janus.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 40 | trimSuffix "-" -}}
+{{- default "janus" .Values.nameOverride | trunc 40 | trimSuffix "-" -}}
 {{- end -}}
 {{- define "janus.fullname" -}}
 {{- if .Values.fullnameOverride -}}

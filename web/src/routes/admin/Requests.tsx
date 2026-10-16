@@ -5,11 +5,27 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
-import { listAdminModels } from '../../api/client';
-import { publicModelName, type RequestSecurity, type UsageEvent } from '../../lib/types';
-import { formatBytes, formatDateTime, formatDuration, formatNumber, formatUSD, statusTone, titleCase } from '../../lib/format';
+import {
+  type ClassificationCategory,
+  type ClassificationTag,
+  type ClassifierRunTrace,
+  type RequestSecurity,
+  type UsageEvent,
+} from '../../lib/types';
+import {
+  formatBytes,
+  formatDateTime,
+  formatDuration,
+  formatNumber,
+  formatUSD,
+  modalityLabel,
+  statusTone,
+  titleCase,
+} from '../../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../../components/ui';
 import { ChargedTeam } from '../../components/ChargedTeam';
+import { reasonLabel } from '../../lib/routing';
+import { RouteDecisionLine } from './Routing';
 import { useLocalPreference, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
 import {
@@ -25,22 +41,12 @@ import {
 
 const PAGE_SIZE = 50;
 
-const MODALITIES = [
-  'chat',
-  'embedding',
-  'image',
-  'audio',
-  'video',
-  'tts',
-  'stt',
-  'function',
-  'response',
-  'assistant',
-  'thread',
-  'file',
-  'moderation',
-  'fine_tune',
-];
+/** One (kind, model) pair in the current scope, with its request count. */
+interface RequestFacet {
+  modality: string;
+  model: string;
+  count: number;
+}
 
 type ColumnKey =
   | 'time'
@@ -61,16 +67,18 @@ type ColumnKey =
   | 'responseSize'
   | 'errorCode'
   | 'clientApp'
-  | 'security';
+  | 'security'
+  | 'classified'
+  | 'classifierTime';
 
 /** Every column the viewer can show. sortKey marks the server-sortable ones. */
 const COLUMNS: Array<{ key: ColumnKey; label: () => string; sortKey?: string }> = [
   { key: 'time', label: () => t('tables.time'), sortKey: 'time' },
   { key: 'user', label: () => t('adminRequests.user') },
   { key: 'chargedTo', label: () => 'Charged to' },
-  { key: 'model', label: () => t('tables.model') },
-  { key: 'modality', label: () => t('tables.modality') },
-  { key: 'status', label: () => t('tables.status') },
+  { key: 'model', label: () => t('tables.model'), sortKey: 'model' },
+  { key: 'modality', label: () => 'Kind', sortKey: 'modality' },
+  { key: 'status', label: () => t('tables.status'), sortKey: 'status' },
   { key: 'latency', label: () => t('tables.latency'), sortKey: 'latency' },
   { key: 'tokensIn', label: () => t('tables.tokensIn'), sortKey: 'tokens_in' },
   { key: 'tokensOut', label: () => t('tables.tokensOut'), sortKey: 'tokens_out' },
@@ -78,12 +86,14 @@ const COLUMNS: Array<{ key: ColumnKey; label: () => string; sortKey?: string }> 
   { key: 'endpoint', label: () => t('requests.endpoint') },
   { key: 'requestId', label: () => t('requests.requestId') },
   { key: 'streaming', label: () => t('requests.streaming') },
-  { key: 'ttfb', label: () => t('requests.ttfb') },
+  { key: 'ttfb', label: () => t('requests.ttfb'), sortKey: 'ttfb' },
   { key: 'requestSize', label: () => t('requests.requestSize') },
   { key: 'responseSize', label: () => t('requests.responseSize') },
   { key: 'errorCode', label: () => t('requests.errorCode') },
   { key: 'clientApp', label: () => t('adminRequests.clientApp') },
   { key: 'security', label: () => t('adminRequests.securityColumn') },
+  { key: 'classified', label: () => 'Classified as' },
+  { key: 'classifierTime', label: () => 'Classifier wait', sortKey: 'classifier' },
 ];
 
 const DEFAULT_COLUMNS: ColumnKey[] = [
@@ -98,6 +108,7 @@ const DEFAULT_COLUMNS: ColumnKey[] = [
   'tokensOut',
   'cost',
   'security',
+  'classified',
 ];
 
 /**
@@ -154,6 +165,9 @@ export function AdminRequestsPage(): ReactNode {
   // The backend already accepts principal=users|service_tokens; without a
   // control for it an admin cannot separate human traffic from integrations.
   const [principal] = useUrlState('principal', '');
+  // Usage insights label: a category, category/subcategory, * (any) or -
+  // (not classified).
+  const [classified] = useUrlState('classified', '');
   const [sort, setSort] = useCollectionState('sort', 'time');
   const [page, setPage] = useUrlState('page', '0');
   // Filter/range changes must atomically reset the page offset, otherwise an
@@ -170,6 +184,7 @@ export function AdminRequestsPage(): ReactNode {
   const toggleInternal = () => batchParams({ include_internal: includeInternal === 'true' ? null : 'true', page: null });
   const setTokensIn = (next: string) => batchParams({ tokens_in: next, page: null });
   const setTokensOut = (next: string) => batchParams({ tokens_out: next, page: null });
+  const setClassified = (next: string) => batchParams({ classified: next, page: null });
   const clearFilters = () =>
     batchParams({
       user: null,
@@ -181,6 +196,7 @@ export function AdminRequestsPage(): ReactNode {
       include_internal: null,
       tokens_in: null,
       tokens_out: null,
+      classified: null,
       page: null,
     });
   const [selected, setSelected] = useState<UsageEvent | null>(null);
@@ -223,6 +239,7 @@ export function AdminRequestsPage(): ReactNode {
     model,
     accounting,
     include_internal: includeInternal,
+    classified,
     sort,
     ...tokenSizeParams('tokens_in', tokensIn),
     ...tokenSizeParams('tokens_out', tokensOut),
@@ -242,6 +259,7 @@ export function AdminRequestsPage(): ReactNode {
       includeInternal,
       tokensIn,
       tokensOut,
+      classified,
       sort,
       offset,
     ],
@@ -257,26 +275,93 @@ export function AdminRequestsPage(): ReactNode {
   // instances that never enable capture.
   const hasCaptures = requests.data?.requests.some((event) => event.has_capture) ?? false;
 
-  // Model options come from the full admin catalog (usage records the public
-  // name at request time), unioned with names seen on the page and the active
-  // filter value so a since-removed model stays selectable.
-  const adminModels = useQuery({
-    queryKey: ['admin', 'models', 'filter-options'],
-    queryFn: () => listAdminModels({}),
-    staleTime: 60_000,
+  // Kind and model options come from what actually happened in this scope
+  // (range, who, outcome...), each with its request count, ignoring the kind
+  // and model filters themselves so the other choices stay visible. A chosen
+  // value with no requests stays selectable so the filter can be read back.
+  const facetParams = { ...filterParams, sort: undefined };
+  const facets = useQuery({
+    queryKey: [
+      'admin',
+      'requests',
+      'facets',
+      range,
+      userFilter,
+      principal,
+      status,
+      accounting,
+      includeInternal,
+      tokensIn,
+      tokensOut,
+      classified,
+    ],
+    queryFn: () => api.get<{ facets: RequestFacet[] }>(`/api/v1/requests/facets${qs(facetParams)}`),
+    staleTime: 30_000,
   });
-  const modelOptions = [
-    ...new Set(
-      [
-        ...(adminModels.data?.models ?? []).map((m) => publicModelName(m)),
-        ...(requests.data?.requests ?? []).map((event) => event.model),
-        model,
-      ].filter(Boolean),
-    ),
-  ].sort();
+  const { kindOptions, modelGroups } = useMemo(() => {
+    const rows = facets.data?.facets ?? [];
+    const kinds = new Map<string, number>();
+    for (const f of rows) if (!model || f.model === model) kinds.set(f.modality, (kinds.get(f.modality) ?? 0) + f.count);
+    if (modality && !kinds.has(modality)) kinds.set(modality, 0);
+    const byKind = new Map<string, Map<string, number>>();
+    for (const f of rows) {
+      if (modality && f.modality !== modality) continue;
+      const m = byKind.get(f.modality) ?? new Map<string, number>();
+      m.set(f.model, (m.get(f.model) ?? 0) + f.count);
+      byKind.set(f.modality, m);
+    }
+    const groups = [...byKind.entries()]
+      .map(([kind, names]) => ({
+        kind,
+        total: [...names.values()].reduce((x, y) => x + y, 0),
+        models: [...names.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])),
+      }))
+      .sort((x, y) => y.total - x.total);
+    if (model && !groups.some((g) => g.models.some(([name]) => name === model))) {
+      groups.push({ kind: '', total: 0, models: [[model, 0]] });
+    }
+    return {
+      kindOptions: [...kinds.entries()].sort((x, y) => y[1] - x[1]),
+      modelGroups: groups,
+    };
+  }, [facets.data, modality, model]);
+  const withCount = (label: string, n: number) => `${label} (${n.toLocaleString()})`;
+
+  // Categories for the classification filter; empty (and the filter
+  // hidden) when Usage insights has never been set up.
+  const categories = useQuery({
+    queryKey: ['classification', 'categories'],
+    queryFn: () => api.get<{ categories: ClassificationCategory[] }>('/api/v1/admin/classification/categories'),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const categoryName = useMemo(() => {
+    const names = new Map(
+      (categories.data?.categories ?? []).map((c) => [c.parent_slug ? `${c.parent_slug}/${c.slug}` : c.slug, c.name]),
+    );
+    return (slug: string) => names.get(slug) ?? slug.replace(/_/g, ' ');
+  }, [categories.data]);
+  const classifiedOptions = useMemo(() => {
+    const cats = (categories.data?.categories ?? []).filter((c) => c.enabled);
+    const roots = cats.filter((c) => !c.parent_slug);
+    const out = [
+      { value: '', label: 'Any classification' },
+      { value: '*', label: 'Classified' },
+      { value: '-', label: 'Not classified' },
+    ];
+    for (const r of roots) {
+      out.push({ value: r.slug, label: r.name });
+      for (const c of cats.filter((x) => x.parent_slug === r.slug))
+        out.push({ value: `${r.slug}/${c.slug}`, label: `${r.name} › ${c.name}` });
+    }
+    return out;
+  }, [categories.data]);
+  const insightsConfigured = (categories.data?.categories?.length ?? 0) > 0;
 
   const exportUrl = `/api/v1/requests.csv${qs(filterParams)}`;
-  const hasFilters = Boolean(userFilter || principal || modality || status || model || accounting || tokensIn || tokensOut);
+  const hasFilters = Boolean(
+    userFilter || principal || modality || status || model || accounting || tokensIn || tokensOut || classified,
+  );
   const shownColumns = COLUMNS.filter((column) => visibleColumns.has(column.key));
 
   return (
@@ -338,12 +423,12 @@ export function AdminRequestsPage(): ReactNode {
           {...userLookup}
         />
         <FilterSelect
-          label={t('tables.modality')}
+          label="Kind"
           value={modality}
           onChange={setModality}
           options={[
-            { value: '', label: t('requests.allModalities') },
-            ...MODALITIES.map((value) => ({ value, label: titleCase(value) })),
+            { value: '', label: 'All kinds' },
+            ...kindOptions.map(([value, n]) => ({ value, label: withCount(modalityLabel(value), n) })),
           ]}
         />
         <FilterSelect
@@ -356,12 +441,24 @@ export function AdminRequestsPage(): ReactNode {
             { value: 'error', label: t('requests.failed') },
           ]}
         />
-        <FilterSelect
-          label={t('tables.model')}
-          value={model}
-          onChange={setModel}
-          options={[{ value: '', label: t('requests.allModels') }, ...modelOptions.map((name) => ({ value: name, label: name }))]}
-        />
+        <label className="row" style={{ gap: 6 }}>
+          <span className="sr-only">{t('tables.model')}</span>
+          <select className="select" aria-label={t('tables.model')} value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="">{t('requests.allModels')}</option>
+            {modelGroups.map((g) => (
+              <optgroup
+                key={g.kind || 'other'}
+                label={g.kind ? withCount(modalityLabel(g.kind), g.total) : 'No requests in this view'}
+              >
+                {g.models.map(([name, n]) => (
+                  <option key={`${g.kind}/${name}`} value={name}>
+                    {withCount(name || '(no model)', n)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
         <FilterSelect
           label={t('requests.countingMethod')}
           value={accounting}
@@ -375,6 +472,9 @@ export function AdminRequestsPage(): ReactNode {
             { value: 'not_billable', label: t('requests.notBillable') },
           ]}
         />
+        {insightsConfigured || classified ? (
+          <FilterSelect label="Classified as" value={classified} onChange={setClassified} options={classifiedOptions} />
+        ) : null}
         <TokenSizeFilter direction="in" value={tokensIn} onChange={setTokensIn} />
         <TokenSizeFilter direction="out" value={tokensOut} onChange={setTokensOut} />
         <button
@@ -449,7 +549,7 @@ export function AdminRequestsPage(): ReactNode {
                           }}
                         >
                           {shownColumns.map((column) => (
-                            <EventCell key={column.key} column={column.key} event={event} />
+                            <EventCell key={column.key} column={column.key} event={event} categoryName={categoryName} />
                           ))}
                           {hasCaptures ? (
                             <td className="small">
@@ -497,10 +597,22 @@ export function AdminRequestsPage(): ReactNode {
               ) : null
             }
             extra={
-              <section className="card">
-                <h3 style={{ marginTop: 0 }}>{t('adminRequests.securityTitle')}</h3>
-                <RequestSecuritySection event={selected} />
-              </section>
+              <>
+                <section className="card">
+                  <h3 style={{ marginTop: 0 }}>{t('adminRequests.securityTitle')}</h3>
+                  <RequestSecuritySection event={selected} />
+                </section>
+                <section className="card">
+                  <h3 style={{ marginTop: 0 }}>Classification</h3>
+                  <RequestClassificationSection event={selected} categoryName={categoryName} />
+                </section>
+                {selected.has_capture ? (
+                  <section className="card">
+                    <h3 style={{ marginTop: 0 }}>Classifier calls (troubleshooting capture)</h3>
+                    <CapturedClassifierRuns event={selected} />
+                  </section>
+                ) : null}
+              </>
             }
             owner={
               <DetailRow label={t('adminRequests.user')}>
@@ -629,8 +741,187 @@ function RequestSecuritySection({ event }: { event: UsageEvent }): ReactNode {
     </AsyncSection>
   );
 }
-function EventCell({ column, event }: { column: ColumnKey; event: UsageEvent }): ReactNode {
+/** "Coding › Rust" for a classification tag. */
+function tagLabel(tag: ClassificationTag, categoryName: (slug: string) => string): string {
+  const cat = categoryName(tag.category);
+  return tag.subcategory ? `${cat} › ${categoryName(`${tag.category}/${tag.subcategory}`)}` : cat;
+}
+
+const FEATURE_LABELS: Record<string, string> = {
+  prompt_injection: 'Prompt injection',
+  content_safety: 'Content safety',
+  usage_insights: 'Usage insights',
+};
+
+function featureLabel(feature: string): string {
+  return feature
+    .split('+')
+    .map((f) => FEATURE_LABELS[f] ?? titleCase(f.replace(/_/g, ' ')))
+    .join(' + ');
+}
+
+/**
+ * How Usage insights labelled the request, and what classification cost
+ * it: the wait before the request was forwarded (guards and an inline
+ * label) versus work done in the background afterwards.
+ */
+function RequestClassificationSection({
+  event,
+  categoryName,
+}: {
+  event: UsageEvent;
+  categoryName: (slug: string) => string;
+}): ReactNode {
+  const tag = event.classification_tag;
+  const waited = event.classifier_ms ?? 0;
+  const calls = event.classifier_calls ?? 0;
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      {event.route_reason ? (
+        <DetailRow label="Auto-routing">
+          <span className="stack" style={{ gap: 2 }}>
+            <span>
+              {event.requested_model_name ?? ''} → {event.model} · {reasonLabel(event.route_reason)}
+            </span>
+            {event.request_id ? <RouteDecisionLine requestId={event.request_id} /> : null}
+          </span>
+        </DetailRow>
+      ) : null}
+      <DetailRow label="Classified as">
+        {tag && tag.status === 'ok' ? (
+          <span className="row wrap" style={{ gap: 'var(--janus-space-2)' }}>
+            <span>{tagLabel(tag, categoryName)}</span>
+            <span className="small muted">{Math.round(tag.confidence * 100)}% sure</span>
+            <Badge tone={tag.mode === 'inline' ? 'info' : 'neutral'}>{tag.mode === 'inline' ? 'Inline' : 'Background'}</Badge>
+          </span>
+        ) : tag ? (
+          <Badge tone="warning">{tag.status === 'dropped' ? 'Skipped (queue full)' : `Failed (${tag.status})`}</Badge>
+        ) : (
+          <span className="muted">Not classified</span>
+        )}
+      </DetailRow>
+      <DetailRow label="Waited on classifiers">
+        {waited > 0 || calls > 0 ? (
+          <span>
+            {formatDuration(waited)}
+            <span className="small muted">
+              {' '}
+              · {calls} classifier {calls === 1 ? 'call' : 'calls'} before forwarding
+            </span>
+          </span>
+        ) : (
+          <span className="muted">None</span>
+        )}
+      </DetailRow>
+      {tag && tag.mode !== 'inline' ? (
+        <DetailRow label="Background labelling">
+          <span>
+            {formatDuration(tag.latency_ms)}
+            <span className="small muted">
+              {' '}
+              after {formatDuration(tag.queue_ms)} in the queue · {tag.calls} {tag.calls === 1 ? 'call' : 'calls'} · did not delay
+              the request
+            </span>
+          </span>
+        </DetailRow>
+      ) : null}
+      {tag ? (
+        <DetailRow label="Classifier">
+          <span className="small">{tag.classifier}</span>
+        </DetailRow>
+      ) : null}
+    </div>
+  );
+}
+
+/** Every classifier call troubleshooting mode captured for the request. */
+function CapturedClassifierRuns({ event }: { event: UsageEvent }): ReactNode {
+  const runs = useQuery({
+    queryKey: ['capture-classifiers', event.id],
+    queryFn: () =>
+      api.get<{ classifier_runs: ClassifierRunTrace[] }>(
+        `/api/v1/admin/troubleshooting/captures/${encodeURIComponent(event.id)}/classifiers`,
+      ),
+  });
+  return (
+    <AsyncSection query={runs}>
+      {(data) =>
+        (data.classifier_runs ?? []).length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            No classifier ran for this request.
+          </p>
+        ) : (
+          <div className="stack" style={{ gap: 'var(--janus-space-3)' }}>
+            {(data.classifier_runs ?? []).map((run, i) => (
+              <details key={`${run.started_at}-${i}`} className="small">
+                <summary className="row wrap" style={{ gap: 8, cursor: 'pointer' }}>
+                  <strong>{featureLabel(run.feature)}</strong>
+                  <span className="muted">{run.classifier}</span>
+                  <Badge tone={run.status === 'ok' ? 'success' : 'danger'}>{run.status}</Badge>
+                  <span className="muted">
+                    {formatDuration(run.latency_ms)} · {run.mode === 'inline' ? 'inline' : 'background'}
+                  </span>
+                </summary>
+                <div className="stack" style={{ gap: 6, marginTop: 6 }}>
+                  {run.error ? <div className="banner banner-danger">{run.error}</div> : null}
+                  {run.questions?.length ? <div className="muted">Questions: {run.questions.join(', ')}</div> : null}
+                  {run.request ? (
+                    <div className="code-block">
+                      <pre style={{ maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {JSON.stringify(run.request, null, 2)}
+                      </pre>
+                    </div>
+                  ) : (
+                    <div className="muted">
+                      The session does not capture request bodies, so questions and answers were not kept.
+                    </div>
+                  )}
+                  {run.response ? (
+                    <div className="code-block">
+                      <pre style={{ maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {JSON.stringify(run.response, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
+                </div>
+              </details>
+            ))}
+          </div>
+        )
+      }
+    </AsyncSection>
+  );
+}
+
+function EventCell({
+  column,
+  event,
+  categoryName,
+}: {
+  column: ColumnKey;
+  event: UsageEvent;
+  categoryName: (slug: string) => string;
+}): ReactNode {
   switch (column) {
+    case 'classified': {
+      const tag = event.classification_tag;
+      if (!tag) return <td className="small muted">—</td>;
+      if (tag.status !== 'ok') return <td className="small muted">{tag.status === 'dropped' ? 'Skipped' : 'Failed'}</td>;
+      return (
+        <td
+          className="small truncate"
+          title={`${Math.round(tag.confidence * 100)}% · ${tag.mode === 'inline' ? 'inline' : 'background'}`}
+        >
+          {tagLabel(tag, categoryName)}
+        </td>
+      );
+    }
+    case 'classifierTime':
+      return (
+        <td className="num small">
+          {event.classifier_calls ? formatDuration(event.classifier_ms ?? 0) : <span className="muted">—</span>}
+        </td>
+      );
     case 'time':
       return <td className="small muted">{formatDateTime(event.created_at)}</td>;
     case 'user':
@@ -654,7 +945,15 @@ function EventCell({ column, event }: { column: ColumnKey; event: UsageEvent }):
         </td>
       );
     case 'model':
-      return <td className="truncate">{event.model || '—'}</td>;
+      return (
+        <td
+          className="truncate"
+          title={event.route_reason ? `${event.requested_model_name ?? ''} · ${reasonLabel(event.route_reason)}` : undefined}
+        >
+          {event.model || '—'}
+          {event.route_reason ? <span className="small muted"> ⇶</span> : null}
+        </td>
+      );
     case 'chargedTo':
       return (
         <td className="small">
@@ -662,7 +961,7 @@ function EventCell({ column, event }: { column: ColumnKey; event: UsageEvent }):
         </td>
       );
     case 'modality':
-      return <td className="small">{titleCase(event.modality)}</td>;
+      return <td className="small">{modalityLabel(event.modality)}</td>;
     case 'security':
       return (
         <td className="small">

@@ -179,6 +179,36 @@ export function useUnsavedGuard(dirty: boolean): void {
   }, [dirty]);
 }
 
+/**
+ * Asks before an in-app link leaves a form with unsaved edits. The app uses
+ * a plain BrowserRouter (no data router, so no useBlocker): this catches
+ * clicks on links anywhere on the page (sidebar, section tabs, back links)
+ * in the capture phase, before the router handles them. Pair it with
+ * useUnsavedGuard, which covers closing or reloading the tab.
+ */
+export function useUnsavedLinkGuard(dirty: boolean, message: string): void {
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handler = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+        return;
+      const anchor = (event.target as Element | null)?.closest?.('a[href]');
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      if (anchor.target && anchor.target !== '_self') return;
+      if (anchor.hasAttribute('download')) return;
+      const to = new URL(anchor.href, window.location.href);
+      if (to.origin !== window.location.origin) return;
+      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
+      if (!window.confirm(message)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, [dirty, message]);
+}
+
 /** Tracks whether the document is visible, so polling can pause in the background. */
 export function useDocumentVisible(): boolean {
   const [visible, setVisible] = useState(() => document.visibilityState === 'visible');

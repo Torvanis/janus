@@ -3156,6 +3156,12 @@
             "schema": { "type": "string", "enum": ["organization", "subscription"] }
           },
           {
+            "name": "classified",
+            "in": "query",
+            "description": "Admin only. Usage insights label: a category slug, category/subcategory, * (any classified request) or - (not classified).",
+            "schema": { "type": "string" }
+          },
+          {
             "name": "token_id",
             "in": "query",
             "description": "Narrow to one personal API token within the caller's authorized request scope. Does not widen access to another user's events.",
@@ -3213,10 +3219,20 @@
                 "tokens_in",
                 "tokens_in_asc",
                 "tokens_out",
-                "tokens_out_asc"
+                "tokens_out_asc",
+                "model",
+                "model_asc",
+                "modality",
+                "modality_asc",
+                "status",
+                "status_asc",
+                "ttfb",
+                "ttfb_asc",
+                "classifier",
+                "classifier_asc"
               ]
             },
-            "description": "Sort key. Bare keys sort descending (time = newest first); `_asc` variants ascend, and `oldest` is the ascending form of time."
+            "description": "Sort key. Bare keys sort descending (time = newest first); `_asc` variants ascend, and `oldest` is the ascending form of time. model, modality and status break ties newest first."
           },
           {
             "name": "tokens_in_gt",
@@ -3303,6 +3319,25 @@
         "responses": {
           "200": {
             "description": "Paginated usage events. Under an admin cross-user scope each event carries user_email and user_name. Each event also carries tokens_in_per_second, tokens_out_per_second and throughput_source (upstream|calculated), and fallback_reason when a managed alias's fallback served the request."
+          }
+        }
+      }
+    },
+    "/api/v1/requests/facets": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Kinds and models in the request log",
+        "description": "Request counts per (modality, model) pair under the same scope and filters as GET /api/v1/requests (range, user, principal, status, counting method, token sizes, classification, internal rows), ignoring the modality and model filters themselves so every other kind and model stays selectable. The request log builds its Kind and Model filters from this.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{facets: [{modality, model, count}]}, most requests first (at most 2000 pairs)."
           }
         }
       }
@@ -3698,6 +3733,183 @@
         "responses": {
           "200": {
             "description": "Prometheus exposition format."
+          }
+        }
+      }
+    },
+    "/v1/decisions": {
+      "post": {
+        "tags": [
+          "proxy"
+        ],
+        "summary": "Decision (OpenAI Decisions format)",
+        "description": "OpenAI Decisions API shape: {model, input, questions:[{type: predicate|choice|score, name, instructions, choices|levels}]}; works with the official OpenAI SDKs (client.decisions.create). Reaches any decision model the caller is granted: Janus translates between the OpenAI and System One dialects when the model's provider speaks the other one, and forwards same-dialect requests as sent. Runs the full gateway pipeline (grants, policy rules, rate limits, Security Gateway on the evidence text, quotas) and is metered as modality decision, priced by the model's cost source.",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answers, in the dialect of this endpoint. X-Janus-Decision-Dialect names the dialect the model's provider speaks; X-Janus-Decision-Translated (e.g. openai->systemone) is set when Janus translated; X-Janus-Cost-USD is the cost attributed to the call.",
+            "headers": {
+              "X-Janus-Cost-USD": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Janus-Decision-Dialect": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "systemone",
+                    "openai"
+                  ]
+                }
+              },
+              "X-Janus-Decision-Translated": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a valid request in this dialect, a chat model named, or something the model cannot read (images to a text-only model)."
+          },
+          "403": {
+            "description": "Model not granted, or declined by a security policy."
+          },
+          "429": {
+            "description": "Rate limit or quota."
+          }
+        }
+      }
+    },
+    "/v1/systemone": {
+      "post": {
+        "tags": [
+          "proxy"
+        ],
+        "summary": "Decision (System One format)",
+        "description": "System One shape (TypeSafe): {model, state, questions:{id:{type: noul|choice|score, instructions, criteria}}}; works with the TypeSafe SDK. Reaches any decision model the caller is granted: Janus translates between the OpenAI and System One dialects when the model's provider speaks the other one, and forwards same-dialect requests as sent. Runs the full gateway pipeline (grants, policy rules, rate limits, Security Gateway on the evidence text, quotas) and is metered as modality decision, priced by the model's cost source.",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answers, in the dialect of this endpoint. X-Janus-Decision-Dialect names the dialect the model's provider speaks; X-Janus-Decision-Translated (e.g. openai->systemone) is set when Janus translated; X-Janus-Cost-USD is the cost attributed to the call.",
+            "headers": {
+              "X-Janus-Cost-USD": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Janus-Decision-Dialect": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "systemone",
+                    "openai"
+                  ]
+                }
+              },
+              "X-Janus-Decision-Translated": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a valid request in this dialect, a chat model named, or something the model cannot read (images to a text-only model)."
+          },
+          "403": {
+            "description": "Model not granted, or declined by a security policy."
+          },
+          "429": {
+            "description": "Rate limit or quota."
+          }
+        }
+      }
+    },
+    "/api/alpha/decisions": {
+      "post": {
+        "tags": [
+          "proxy"
+        ],
+        "summary": "Decision (OpenRouter-compatible path)",
+        "description": "The System One format at OpenRouter's path, so the OpenRouter SDK (alpha.decisions.create) works with its base URL pointed at Janus. Reaches any decision model the caller is granted: Janus translates between the OpenAI and System One dialects when the model's provider speaks the other one, and forwards same-dialect requests as sent. Runs the full gateway pipeline (grants, policy rules, rate limits, Security Gateway on the evidence text, quotas) and is metered as modality decision, priced by the model's cost source.",
+        "security": [
+          {
+            "bearerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answers, in the dialect of this endpoint. X-Janus-Decision-Dialect names the dialect the model's provider speaks; X-Janus-Decision-Translated (e.g. openai->systemone) is set when Janus translated; X-Janus-Cost-USD is the cost attributed to the call.",
+            "headers": {
+              "X-Janus-Cost-USD": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Janus-Decision-Dialect": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "systemone",
+                    "openai"
+                  ]
+                }
+              },
+              "X-Janus-Decision-Translated": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a valid request in this dialect, a chat model named, or something the model cannot read (images to a text-only model)."
+          },
+          "403": {
+            "description": "Model not granted, or declined by a security policy."
+          },
+          "429": {
+            "description": "Rate limit or quota."
           }
         }
       }
@@ -4288,6 +4500,39 @@
         }
       }
     },
+    "/api/v1/admin/troubleshooting/captures/{event_id}/classifiers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Classifier calls of a captured request",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Usage event id of the captured request."
+          }
+        ],
+        "description": "Every classifier call the request caused (Security Gateway guards and Usage insights, inline or background): feature, classifier, mode, timing, status, and \u2014 when the session captures request bodies \u2014 the exact request and response. Viewing is audited.",
+        "responses": {
+          "200": {
+            "description": "{classifier_runs: [...]}"
+          },
+          "404": {
+            "description": "No capture for this request."
+          }
+        }
+      }
+    },
     "/api/v1/admin/troubleshooting/captures": {
       "get": {
         "tags": [
@@ -4581,6 +4826,1158 @@
           },
           "404": {
             "description": "No capture for that request."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Auto-routing settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Routing settings, the decision models that can classify (style, hosting, whether a security policy already calls them), judge model candidates, whether routing is running and why not, residency warnings, this replica's evaluation queue and in-flight decisions."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/settings": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Save auto-routing settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "classifier_model_id, max_concurrent_decisions, difficulty_style (general|category), max_chars, eval_judge_model_id, eval_max_concurrent, eval_pause_above_in_flight, eval_max_output_tokens, retention_days."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings document after saving."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/targets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Models a route can send requests to",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enabled text models and managed aliases/pools, with upstream, hosting and context window."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/categories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Routing categories",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every routing category with the routers that use it, the Usage insights categories a routing category can link to, and the enabled limit."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a routing category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "name, includes, excludes, linked_slug (a Usage insights category to follow instead), min_confidence, examples (test prompts), enabled."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created category."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/categories/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a routing category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Any of name, includes, excludes, linked_slug, min_confidence, examples, enabled, sort_order."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated category. Disabling a category a router uses is refused."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a custom routing category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No content. Built-in categories and categories routers use cannot be deleted."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/categories/{id}/reset": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restore a built-in routing category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The category with its shipped definition."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/routers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Auto-routing routers",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every router with its routes resolved, 24-hour decision stats (route mix, reasons, latency) and 30-day evaluation summaries."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a router",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "name, description, status (draft|shadow|live), config {routes[], default {model_id, thinking}, budget_ms, sticky, sticky_minutes, disclose}."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created router. A router is a managed model of kind router: grant it, bind policies and scope quotas to it like an alias."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/routers/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A router and its grants",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The router and the grants on it."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replace a router",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "name, description, status, config (see POST)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated router."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a router",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No content. Its grants and remembered conversations go with it; decisions and evaluation verdicts stay until retention."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Try routing a prompt",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "text, optional classifier_model_id (compare before switching), router_id or config (an unsaved router from the builder)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The classifier's category (with every probability) and difficulty, and for each router (or the one given, or an unsaved config) the route it chose with a step-by-step trace. Nothing is stored."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/test-batch": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Score the categories' test examples",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "optional classifier_model_id."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overall and per-category accuracy with each miss (expected, got, confidence). Example text is admin-authored configuration."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/stats": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Routing decision stats",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-router request counts, routed vs default, timeouts, errors, shadow decisions, p50/p95 decision latency, route mix, reasons and categories in the range (from/to, days or hours)."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/decisions": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Recent routing decisions",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest decisions first: route, model, category, confidence, difficulty, thinking, reason and timing. Filters: router_id, reason, request_id, from/to, limit."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/evaluations": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Route evaluation summaries",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per route: compared count, better/tie/worse, judge consistency, 95% interval on at-least-as-good, verdict (keep|losing|needs_data), cost and latency of both sides, and this replica's evaluation queue."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/routing/evaluations/{router}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Recent evaluation verdicts for a router",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "router",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verdicts, scores and the judge's one-line reason (or why a sample was skipped); never the prompt or answers. Filter: route_id, limit, and one pairing with routed_model_id, default_model_id and judge_model_id."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Prompt classification settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings, the providers and models that can classify (decision-model suggestions and the System One URL per provider), whether the saved settings are running and why not, this replica's async queue depth, and the taxonomy limits."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Save prompt classification settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Classification settings: enabled, mode (async|inline), protocol (systemone|chat), upstream_id, model, sample_rate (1-100), timeout_ms, text_scope (last_user|all_user|conversation), include_system_prompt, max_chars, include_service_tokens, concurrency, queue_size, subcategories, retention_days."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validated, stored, audit-logged (classification_settings_updated) and applied on this replica at once; other replicas within the config cache TTL. Same document as GET."
+          },
+          "400": {
+            "description": "Invalid settings; error.param names the field."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/decision-models": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Decision models",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "description": "Every catalog model with the decision role: the dialect Janus speaks to it (systemone or openai, and whether detected or set), the wire model name and endpoint, its pricing (rate card, cost_source, per-request fee, whether the provider reports a cost per call), and access (grant_count, the policies in which it blocks requests, and whether it can be granted to callers).",
+        "responses": {
+          "200": {
+            "description": "{models: [...]}"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/decision-models/{id}/settings": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set a decision model's pricing and grant rule",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cost_source": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "provider",
+                      "card",
+                      "none"
+                    ],
+                    "description": "Empty (automatic): the provider's reported charge when sent (OpenRouter), else the rate card. provider: only the reported charge. card: always the rate card. none: free (self-hosted)."
+                  },
+                  "request_fee_usd": {
+                    "type": "number",
+                    "description": "Added to every call's cost (not with cost_source none)."
+                  },
+                  "grant_when_guarding": {
+                    "type": "boolean",
+                    "description": "Let callers be granted this model even while it blocks requests in a security policy (they could then test what gets past it)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved setting."
+          },
+          "400": {
+            "description": "Invalid value, or the model is not a decision model."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/profiles": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Classifier call profiles",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "description": "Every decision classifier (catalog models with the decision role, and the Usage insights classifier) with how Janus sends it several questions: call_style combined (one request) or separate (one request per question, in parallel), the most options one question may carry, and the wire model name. Empty saved fields mean automatic; effective_style and effective_max_options show what is used. used_by names the features using it.",
+        "responses": {
+          "200": {
+            "description": "{profiles: [...]}"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set a classifier call profile",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "upstream_id",
+                  "model"
+                ],
+                "properties": {
+                  "upstream_id": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Catalog model name."
+                  },
+                  "call_style": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "combined",
+                      "separate"
+                    ],
+                    "description": "Empty = automatic."
+                  },
+                  "max_options": {
+                    "type": "integer",
+                    "description": "0 = detected limit."
+                  },
+                  "wire_model": {
+                    "type": "string",
+                    "description": "Name the decision API answers to, when it differs from the catalog name. Empty = catalog name."
+                  },
+                  "dialect": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "systemone",
+                      "openai"
+                    ],
+                    "description": "Decision wire format. Empty = detected from the provider (api.openai.com speaks openai, everything else systemone)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved profile. Saving all-automatic values removes the profile."
+          },
+          "400": {
+            "description": "Invalid value."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/benchmarks": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Classifier benchmarks",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "description": "The 20 most recent benchmark runs, newest first, and form defaults taken from the current configuration.",
+        "responses": {
+          "200": {
+            "description": "{benchmarks: [...], defaults: {...}}"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Start a classifier benchmark",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "description": "Replays built-in sample prompts through the chosen classifiers exactly as the proxy calls them, at increasing numbers of simultaneous requests, and records latency per level and the highest level whose p95 wait stays within budget_ms. Nothing is forwarded to a model and no request log rows are written; circuit breakers are private to the run. One benchmark runs at a time per replica.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "injection_model_id": {
+                    "type": "string"
+                  },
+                  "safety_model_id": {
+                    "type": "string"
+                  },
+                  "usage_insights": {
+                    "type": "boolean"
+                  },
+                  "insights_mode": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "inline",
+                      "async"
+                    ]
+                  },
+                  "style": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "combined",
+                      "separate"
+                    ],
+                    "description": "Override every decision classifier's call style for this run."
+                  },
+                  "levels": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Simultaneous-request counts (1-256, at most 12). Default 1,2,4,8,16,32."
+                  },
+                  "requests_per_level": {
+                    "type": "integer",
+                    "description": "Default 24; at least twice the level is always sent."
+                  },
+                  "budget_ms": {
+                    "type": "integer",
+                    "description": "Acceptable p95 wait. Default 1000."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The started run (status running)."
+          },
+          "400": {
+            "description": "Invalid configuration."
+          },
+          "409": {
+            "description": "A benchmark is already running."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/benchmarks/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "One classifier benchmark",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Status, configuration and results: plan (how the classifiers are called), levels (concurrency, p50/p95/max wait, background p50/p95, per_second, calls_per_request, errors, within_budget), max_concurrent and single_ms. Results update after each level while the run is in progress.",
+        "responses": {
+          "200": {
+            "description": "The benchmark."
+          },
+          "404": {
+            "description": "Not found."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Classify a sample text",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "description": "Classification settings: enabled, mode (async|inline), protocol (systemone|chat), upstream_id, model, sample_rate (1-100), timeout_ms, text_scope (last_user|all_user|conversation), include_system_prompt, max_chars, include_service_tokens, concurrency, queue_size, subcategories, retention_days."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Classifies text with the posted (unsaved) settings, or the saved ones, and returns category, subcategory, confidence, probabilities, latency_ms, tokens and cost. Nothing is stored."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/report": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Prompt classification report",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Range in days back from now (default 30, max 366)."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Range in hours back from now (max 72); hourly buckets."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Start (RFC 3339 or YYYY-MM-DD)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "End (RFC 3339 or YYYY-MM-DD)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Classified request counts by category with share, average confidence, low-confidence count, top subcategories, models and people; a daily (or hourly) series; category mix by team; and classifier health: attempts, ok, errors, timeouts, dropped, latency average/p50/p95/max, queue wait, tokens and cost, split by classifier and mode."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/results": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Recent classification results",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Range in days back from now (default 30, max 366)."
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Range in hours back from now (max 72); hourly buckets."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Start (RFC 3339 or YYYY-MM-DD)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "End (RFC 3339 or YYYY-MM-DD)."
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only this category."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ok, error, timeout or dropped."
+          },
+          {
+            "name": "request_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Results for one request."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "At most this many (default 50, max 500)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first. Labels and timings only; prompt text is never stored."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/categories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Classification categories",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The taxonomy: built-in and custom categories, each top-level category followed by its subcategories."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Add a classification category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "What belongs in the category; the classifier reads it."
+                  },
+                  "parent_slug": {
+                    "type": "string",
+                    "description": "Make this a subcategory of a top-level category."
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Adds a custom top-level category or a subcategory (one level deep). 201 with the category."
+          },
+          "400": {
+            "description": "Duplicate name, missing description, nesting too deep, or the enabled-category limit reached."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/classification/categories/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Edit a classification category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "What belongs in the category; the classifier reads it."
+                  },
+                  "parent_slug": {
+                    "type": "string",
+                    "description": "Make this a subcategory of a top-level category."
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Built-ins keep their identifier; name, description and enabled may change. Other cannot be disabled."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a custom classification category",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "204. Deletes the category and its subcategories; past results keep their label. Built-ins cannot be deleted (disable them)."
           }
         }
       }

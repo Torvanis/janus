@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/torvanis/janus/internal/classtrace"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/troubleshoot"
 )
@@ -95,7 +97,12 @@ func (s *Server) beginCapture(w http.ResponseWriter, r *http.Request, event *sto
 		RequestBody:      body,
 		RequestTruncated: bodyOverflows,
 	}
-	return pending.Writer, r.WithContext(troubleshoot.WithPending(r.Context(), pending))
+	// Classifier calls made for this request (guards, Usage insights)
+	// are collected alongside, so the capture shows what each classifier
+	// was asked and answered.
+	trace := &classtrace.Buffer{Bodies: session.Config.CaptureRequestBody}
+	ctx := classtrace.With(troubleshoot.WithPending(r.Context(), pending), trace)
+	return pending.Writer, r.WithContext(ctx)
 }
 
 // finishCapture runs after the usage event has been written (so event.ID is
@@ -111,7 +118,61 @@ func (s *Server) finishCapture(ctx context.Context, event *store.UsageEvent) {
 	if session == nil {
 		return
 	}
-	s.recorder().Capture(ctx, session, event, pending.Payload())
+	payload := pending.Payload()
+	trace, _ := classtrace.From(ctx).(*classtrace.Buffer)
+	if trace == nil {
+		s.recorder().Capture(ctx, session, event, payload)
+		return
+	}
+	// Calls already made ride with the capture. A background
+	// classification that finishes later is attached when it lands.
+	late := &lateRuns{rec: s.recorder(), session: session}
+	payload.ClassifierRuns = trace.Drain(late.add)
+	late.ready(s.recorder().Capture(ctx, session, event, payload))
+}
+
+// lateRuns attaches classifier calls that finish after their request's
+// capture was written (background classification). Calls arriving before
+// the capture id is known are held, then flushed.
+type lateRuns struct {
+	rec       *troubleshoot.Recorder
+	session   *store.TroubleshootingSession
+	mu        sync.Mutex
+	known     bool
+	captureID string
+	held      []classtrace.Call
+}
+
+func (l *lateRuns) add(c classtrace.Call) {
+	l.mu.Lock()
+	if !l.known {
+		l.held = append(l.held, c)
+		l.mu.Unlock()
+		return
+	}
+	id := l.captureID
+	l.mu.Unlock()
+	l.attach(id, c)
+}
+
+func (l *lateRuns) ready(captureID string) {
+	l.mu.Lock()
+	l.known, l.captureID = true, captureID
+	held := l.held
+	l.held = nil
+	l.mu.Unlock()
+	for _, c := range held {
+		l.attach(captureID, c)
+	}
+}
+
+func (l *lateRuns) attach(captureID string, c classtrace.Call) {
+	if captureID == "" {
+		return // the request did not match the session filter
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	l.rec.AttachClassifierRun(ctx, l.session, captureID, c)
 }
 
 // attachCaptureMarkers flags the events in a request-log page that have a
@@ -379,7 +440,39 @@ func (s *Server) handleListTroubleshootingCaptures(w http.ResponseWriter, r *htt
 		WriteError(w, r, err)
 		return
 	}
+	ids := make([]string, 0, len(captures))
+	for _, c := range captures {
+		ids = append(ids, c.ID)
+	}
+	if counts, err := s.Store.TroubleshootingClassifierRunCounts(r.Context(), ids); err == nil {
+		for _, c := range captures {
+			c.ClassifierRunCount = counts[c.ID]
+		}
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{"captures": captures, "total_count": total})
+}
+
+// handleGetCaptureClassifierRuns serves GET
+// /api/v1/admin/troubleshooting/captures/{event_id}/classifiers: the
+// classifier calls a captured request caused, decoded, so the request
+// drawer can show them without downloading the archive.
+func (s *Server) handleGetCaptureClassifierRuns(w http.ResponseWriter, r *http.Request) {
+	capture, err := s.Store.TroubleshootingCaptureByEvent(r.Context(), chi.URLParam(r, "event_id"))
+	if errors.Is(err, store.ErrNotFound) {
+		WriteError(w, r, ErrNotFoundf("capture"))
+		return
+	}
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	runs, err := s.recorder().ClassifierRuns(r.Context(), capture.ID)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	s.audit(r, "troubleshooting_classifier_runs_viewed", "troubleshooting_capture", capture.ID, nil, nil)
+	WriteJSON(w, http.StatusOK, map[string]any{"classifier_runs": runs})
 }
 
 func captureFilterFromQuery(r *http.Request) store.TroubleshootingCaptureFilter {
@@ -441,7 +534,11 @@ func (s *Server) handleDownloadRequestCapture(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", `attachment; filename="janus-request-`+sanitizeFilename(name)+`.tar.gz"`)
 	w.WriteHeader(http.StatusOK)
-	if err := s.archiver().WriteOne(w, troubleshoot.Entry{Event: event, Capture: capture, RequestBody: reqBody, ResponseBody: respBody}); err != nil {
+	runs, rerr := s.recorder().ClassifierRuns(r.Context(), capture.ID)
+	if rerr != nil {
+		s.Logger.WarnContext(r.Context(), "troubleshooting: classifier runs", "error", rerr.Error(), "capture_id", capture.ID)
+	}
+	if err := s.archiver().WriteOne(w, troubleshoot.Entry{Event: event, Capture: capture, RequestBody: reqBody, ResponseBody: respBody, ClassifierRuns: runs}); err != nil {
 		s.Logger.WarnContext(r.Context(), "troubleshooting: write archive", "error", err.Error(), "usage_event_id", id)
 	}
 }
@@ -485,7 +582,8 @@ func (s *Server) handleExportTroubleshooting(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			event = nil // purged by usage retention; the capture is self-describing
 		}
-		return &troubleshoot.Entry{Event: event, Capture: c, RequestBody: reqBody, ResponseBody: respBody}, nil
+		runs, _ := s.recorder().ClassifierRuns(r.Context(), c.ID)
+		return &troubleshoot.Entry{Event: event, Capture: c, RequestBody: reqBody, ResponseBody: respBody, ClassifierRuns: runs}, nil
 	}
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", `attachment; filename="janus-troubleshooting-`+time.Now().UTC().Format("20060102-150405")+`.tar.gz"`)

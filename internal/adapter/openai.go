@@ -88,7 +88,71 @@ func (a *OpenAICompatible) Discover(ctx context.Context, up Upstream, client *ht
 			Name: m.ID, Modalities: guessModalities(m.ID), ContextWindow: ctxWindow, Rates: rates, MetadataWarnings: warnings,
 		})
 	}
-	return out, nil
+	return append(out, a.discoverDecisionModels(ctx, up, client, out)...), nil
+}
+
+// openAIDecisionModels are OpenAI models served on /v1/decisions, with the
+// decision price per million input tokens in nano-USD (output, cache reads
+// and cache writes are free there). OpenAI lists them once, as chat models,
+// so Janus adds a "<model>:decisions" row beside the chat row: the two are
+// priced differently and granted separately.
+var openAIDecisionModels = map[string]int64{"gpt-6-luna": 100_000_000}
+
+// discoverDecisionModels adds the provider's decision models, marked as
+// such: OpenRouter lists them only under output_modalities=decisions, and
+// OpenAI's are known by name. A failure here never fails discovery, but it
+// is reported (DiscoveryReport) so the decision models already known are
+// kept as they are rather than marked stale.
+func (a *OpenAICompatible) discoverDecisionModels(ctx context.Context, up Upstream, client *http.Client, listed []DiscoveredModel) []DiscoveredModel {
+	var out []DiscoveredModel
+	switch MetadataProvider(a.Type(), up.BaseURL) {
+	case "openai":
+		for _, m := range listed {
+			if price, ok := openAIDecisionModels[m.Name]; ok {
+				out = append(out, DiscoveredModel{Name: m.Name + ":decisions", Modalities: []string{ModalityDecision},
+					ContextWindow: m.ContextWindow, ClassifierRole: ClassifierRoleDecision,
+					Rates: map[string]int64{"rate_in_nanousd": price, "rate_out_nanousd": 0, "rate_cached_nanousd": 0}})
+			}
+		}
+	case "openrouter":
+		u := joinURL(up.BaseURL, "/v1/models") + "?output_modalities=decisions"
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			reportUnlisted(ctx, ClassifierRoleDecision, err)
+			return nil
+		}
+		if up.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+up.APIKey)
+		}
+		body, err := doDiscovery(client, req)
+		if err != nil {
+			reportUnlisted(ctx, ClassifierRoleDecision, err)
+			return nil
+		}
+		var raw struct {
+			Data []map[string]json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(body, &raw); err != nil || raw.Data == nil {
+			if err == nil {
+				err = fmt.Errorf("the decision model list has no data array")
+			}
+			reportUnlisted(ctx, ClassifierRoleDecision, fmt.Errorf("parse decision model list: %w", err))
+			return nil
+		}
+		for _, row := range raw.Data {
+			var id string
+			var ctxLen int64
+			_ = json.Unmarshal(row["id"], &id)
+			_ = json.Unmarshal(row["context_length"], &ctxLen)
+			if id == "" {
+				continue
+			}
+			rates, warnings := discoveryPrices(a.Type(), up, row)
+			out = append(out, DiscoveredModel{Name: id, Modalities: []string{ModalityDecision}, ContextWindow: max(ctxLen, 0),
+				Rates: rates, MetadataWarnings: warnings, ClassifierRole: ClassifierRoleDecision})
+		}
+	}
+	return out
 }
 
 // Prepare rewrites the target URL and injects credentials. Bodies pass through

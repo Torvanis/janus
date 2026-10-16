@@ -1,10 +1,36 @@
 # Janus Edge Helm chart
 
-Chart **0.1.6**, application **2026.10.2**. The chart uses semantic versioning;
+Chart **0.2.0**, application **2026.10.3**. The chart uses semantic versioning;
 the application uses `YEAR.MONTH.RELEASE_NUMBER`. The default public gateway
-image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.10.2`.
+image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.10.3`.
 A nonempty `image.digest` takes precedence over `image.tag`; clear the digest
 explicitly when selecting a different tag.
+
+The chart is published as `janus-helm-chart-<version>.tgz` on each GitHub
+release (it was named `janus` up to chart 0.1.6). The rename changes only the
+chart's name: rendered resource names and labels are still `janus`, so
+`helm upgrade` of a release installed from the old chart keeps working when you
+point it at the new file.
+
+## Offline (air-gapped) installs
+
+Each release also attaches the container image as a file per architecture:
+`janus-container-image-<version>-linux-amd64.tar` and
+`janus-container-image-<version>-linux-arm64.tar`. Load it on a machine that
+can reach your private registry, push it there, and set `image.repository`
+(and clear `image.digest`, or set it to the digest your registry reports):
+
+```bash
+podman load -i janus-container-image-2026.10.3-linux-amd64.tar   # or: docker load -i …
+podman tag ghcr.io/torvanis/janus:2026.10.3 registry.example.internal/janus:2026.10.3
+podman push registry.example.internal/janus:2026.10.3
+helm upgrade --install janus ./janus-helm-chart-0.2.0.tgz --namespace janus \
+  --set image.repository=registry.example.internal/janus --set image.tag=2026.10.3 \
+  --set image.digest= …
+```
+
+The bundled PostgreSQL uses `postgres:16-alpine`; mirror it the same way and
+set `postgresql.image`, or use an existing PostgreSQL.
 
 ## Architecture and requirements
 
@@ -53,7 +79,7 @@ kubectl -n janus create secret generic janus-key \
   --from-file=JANUS_ENCRYPTION_KEY="$secret_dir/encryption-key"
 kubectl -n janus create secret generic janus-db \
   --from-file=password="$secret_dir/password"
-helm upgrade --install janus ./charts/janus --namespace janus \
+helm upgrade --install janus ./charts/janus-helm-chart --namespace janus \
   --set encryptionKey.existingSecret=janus-key \
   --set postgresql.existingSecret=janus-db \
   --wait --timeout 10m
@@ -227,11 +253,11 @@ No running cluster is required for the focused static test suite:
 ```sh
 # Python 3 + PyYAML; Helm 3 on PATH (or set HELM=/path/to/helm).
 python3 scripts/test_helm_chart.py
-helm lint charts/janus --strict \
+helm lint charts/janus-helm-chart --strict \
   --set encryptionKey.existingSecret=test-key --set postgresql.existingSecret=test-db
-helm template janus charts/janus \
+helm template janus charts/janus-helm-chart \
   --set encryptionKey.existingSecret=test-key --set postgresql.existingSecret=test-db
-helm package charts/janus --destination /chosen/artifact/directory
+helm package charts/janus-helm-chart --destination /chosen/artifact/directory
 ```
 
 Bare `helm template` intentionally fails until existing Secret names are supplied.

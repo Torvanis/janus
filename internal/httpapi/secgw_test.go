@@ -690,7 +690,7 @@ func TestSecgwContentSafetyEndToEnd(t *testing.T) {
 	// Wrong protocol for the kind is refused at save, with the reason.
 	if err := h.server.validateSecgwClassifierRefs(ctx, &store.SecgwPolicy{Name: "x", Checks: []store.SecgwCheck{
 		{Kind: store.SecgwCheckPromptInjection, Enabled: true, ClassifierModelID: lg.ID},
-	}}); err == nil || !strings.Contains(err.Error(), "needs a text_classification model") {
+	}}); err == nil || !strings.Contains(err.Error(), "needs a text_classification or decision model") {
 		t.Fatalf("binding Llama Guard to prompt_injection must be refused: %v", err)
 	}
 	if err := h.server.validateSecgwClassifierRefs(ctx, &store.SecgwPolicy{Name: "x", Checks: []store.SecgwCheck{

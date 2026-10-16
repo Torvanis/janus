@@ -40,6 +40,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/upstreams', label: () => t('shell.navUpstreams'), glyph: '⇅', admin: true },
   { to: '/admin/models', label: () => t('shell.navModels'), glyph: '◈', admin: true },
   { to: '/admin/managed-models', label: () => t('shell.navManagedModels'), glyph: '⧫', admin: true },
+  { to: '/admin/routing', label: () => t('shell.navRouting'), glyph: '⇶', admin: true },
   { to: '/admin/grants', label: () => t('shell.navGrants'), glyph: '⚑', admin: true },
   { to: '/admin/service-tokens', label: () => t('shell.navServiceTokens'), glyph: '⚙', admin: true },
   { to: '/admin/users', label: () => t('shell.navPeople'), glyph: '⚭', admin: true },
@@ -48,6 +49,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/security', label: () => t('shell.navSecurity'), glyph: '⛉', admin: true },
   { to: '/admin/alerts', label: () => t('shell.navAlerts'), glyph: '◉', admin: true },
   { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
+  { to: '/admin/insights', label: () => t('shell.navInsights'), glyph: '◭', admin: true },
   { to: '/admin/audit', label: () => t('shell.navAuditLog'), glyph: '❑', admin: true },
   { to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true },
 ];

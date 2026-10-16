@@ -14,9 +14,11 @@ import { LegacyWorkspaceRedirect } from '../../app/LegacyWorkspaceRedirect';
 import { AdminQuotasPage } from './Quotas';
 import { RulesPage } from './Rules';
 import { SecurityPage } from './Security';
+import { RoutingPage } from './Routing';
 import { AlertsPage } from './Alerts';
 import { AuditPage } from './Audit';
 import { AdminRequestsPage } from './Requests';
+import { InsightsPage } from './Insights';
 import { NotFoundPage } from '../Errors';
 
 export default function AdminRoutes(): ReactNode {
@@ -40,10 +42,15 @@ export default function AdminRoutes(): ReactNode {
       <Route path="users/:id" element={<PeoplePage />} />
       <Route path="quotas" element={<AdminQuotasPage />} />
       <Route path="rules" element={<RulesPage />} />
+      <Route path="routing" element={<RoutingPage />} />
+      <Route path="routing/:tab" element={<RoutingPage />} />
+      <Route path="routing/:tab/:id" element={<RoutingPage />} />
       <Route path="security" element={<SecurityPage />} />
       <Route path="security/:tab" element={<SecurityPage />} />
       <Route path="alerts" element={<AlertsPage />} />
       <Route path="requests" element={<AdminRequestsPage />} />
+      <Route path="insights" element={<InsightsPage />} />
+      <Route path="insights/:tab" element={<InsightsPage />} />
       <Route path="audit" element={<AuditPage />} />
       <Route path="system" element={<LegacyWorkspaceRedirect />} />
       <Route path="settings" element={<LegacyWorkspaceRedirect />} />

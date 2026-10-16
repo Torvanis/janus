@@ -204,6 +204,8 @@ type DiscoveredModel struct {
 // must stay free of internal imports; the store validates them on write.
 const (
 	ClassifierRoleTextClassification = "text_classification"
+	// ClassifierRoleDecision marks a decision model (typed answers).
+	ClassifierRoleDecision = "decision"
 )
 
 // StreamTransformer rewrites one provider's streamed response into the
@@ -331,7 +333,9 @@ const (
 	ModalityThread     = "thread"
 	ModalityFile       = "file"
 	ModalityModeration = "moderation"
-	ModalityFineTune   = "fine_tune"
+	// ModalityDecision is a decision-API call (typed answers, no text).
+	ModalityDecision = "decision"
+	ModalityFineTune = "fine_tune"
 )
 
 // AllModalities is the canonical enum, used for validation and UI filters.

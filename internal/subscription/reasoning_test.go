@@ -9,6 +9,7 @@ import (
 // Refusal bodies exactly as the vendors returned them (probed 2026-09-30).
 const (
 	xaiParamRefused  = `{"code":"invalid-argument","error":"Model grok-4.20-0309-reasoning does not support parameter reasoningEffort."}`
+	vllmBareListed   = "{\"error\":{\"message\":\"Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.\",\"type\":\"BadRequestError\",\"code\":400}}"
 	xaiValueRefused  = "{\"code\":\"invalid-argument\",\"error\":\"This model does not support `reasoning_effort` value `none`.\"}"
 	mistralListed    = `{"object":"error","message":"reasoning_effort='medium' is not supported for this model. Must be one of (<ReasoningEffort.none: 'none'>, <ReasoningEffort.high: 'high'>)","type":"invalid_request_invalid_args","param":null,"code":"3051"}`
 	mistralListedAlt = `{"object":"error","message":"reasoning_effort low is not supported for this model, supported values: [<ReasoningEffort.high: 'high'>, <ReasoningEffort.none: 'none'>]","type":"invalid_request_invalid_args"}`
@@ -30,6 +31,7 @@ func TestLearnFromRefusal(t *testing.T) {
 		{"mistral listed alt", "low", mistralListedAlt, true, boolPtr(true), []string{"high", "none"}, nil},
 		{"mistral disabled", "medium", mistralDisabled, true, boolPtr(false), nil, nil},
 		{"copilot", "medium", copilotNoEffort, true, boolPtr(false), nil, nil},
+		{"vllm listed bare", "high", vllmBareListed, true, boolPtr(true), []string{"xhigh", "medium", "low"}, nil},
 		{"unrelated", "medium", unrelated400, false, nil, nil, nil},
 		{"not json", "medium", "Bad Request", false, nil, nil, nil},
 	}

@@ -20,6 +20,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	dec "github.com/torvanis/janus/internal/classify"
 )
 
 // Segment is one chunk of text to score.
@@ -55,6 +57,23 @@ type Upstream struct {
 	// input characters, so the gateway can write a usage event on the
 	// overhead subject. Optional.
 	Meter func(ctx context.Context, elapsed time.Duration, inputChars int, err error)
+	// DecisionMeter, when set, replaces Meter for decision models: it also
+	// receives what the call consumed, so the call can be priced.
+	DecisionMeter func(ctx context.Context, elapsed time.Duration, inputChars int, res dec.Result, err error)
+	// Dialect is the decision wire format ("" = detected from BaseURL).
+	Dialect string
+
+	// Decision models only.
+	UpstreamID  string
+	AdapterType string
+	// WireModel is the name sent to the decision API when it differs from
+	// the catalog name (OpenRouter lists Jev as typesafe/jev-router but
+	// answers decisions as ~typesafe/jev-latest). Empty = ModelName.
+	WireModel string
+	// Style and MaxOptions come from the classifier's profile; empty/0
+	// means the default for the server (dec.DefaultStyle/MaxOptions).
+	Style      string
+	MaxOptions int
 }
 
 // Constructor builds a classifier for an upstream.
@@ -173,7 +192,7 @@ func (b *Breaker) Classify(ctx context.Context, in []Segment) ([]Score, error) {
 		return nil, ErrBreakerOpen
 	}
 	out, err := b.Inner.Classify(ctx, in)
-	b.record(err)
+	b.record(ctx, err, false)
 	return out, err
 }
 
@@ -190,13 +209,55 @@ func (b *Breaker) Judge(ctx context.Context, turns []Turn) (Verdict, error) {
 		return Verdict{}, ErrBreakerOpen
 	}
 	v, err := cg.Judge(ctx, turns)
-	b.record(err)
+	b.record(ctx, err, false)
 	return v, err
 }
 
+type guardCallKey struct{}
+
+// WithGuardCall marks ctx as a Security Gateway check's own call. Only
+// such calls move a decision model's breaker: the same model also answers
+// auto-routing, admin tests and other features, and their failures (a
+// router's budget running out, a rejected routing question, an admin's
+// batch test) say nothing about whether the guard can judge. Without the
+// separation three routing timeouts opened the breaker and every
+// fail-closed guard on that model refused all traffic for the cooldown.
+func WithGuardCall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, guardCallKey{}, true)
+}
+
+// IsGuardCall reports whether ctx was marked by WithGuardCall.
+func IsGuardCall(ctx context.Context) bool {
+	v, _ := ctx.Value(guardCallKey{}).(bool)
+	return v
+}
+
+type trialCallKey struct{}
+
+// WithTrialCall marks ctx as an administrator's test (policy dry run): its
+// classifier calls never move a breaker, whichever guard they exercise.
+func WithTrialCall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, trialCallKey{}, true)
+}
+
+func isTrialCall(ctx context.Context) bool {
+	v, _ := ctx.Value(trialCallKey{}).(bool)
+	return v
+}
+
 // record applies one call's outcome to the failure counter and opens the
-// breaker at the threshold.
-func (b *Breaker) record(err error) {
+// breaker at the threshold. guardOnly limits the accounting to calls
+// marked WithGuardCall (decision models, which other features share).
+// Administrators' trial calls (WithTrialCall) never count. A call the
+// caller itself cancelled (client gone, request finished) is
+// never a classifier failure.
+func (b *Breaker) record(ctx context.Context, err error, guardOnly bool) {
+	if isTrialCall(ctx) || (guardOnly && !IsGuardCall(ctx)) {
+		return
+	}
+	if err != nil && errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err == nil {

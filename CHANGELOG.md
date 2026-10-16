@@ -1,5 +1,44 @@
 # Changelog
 
+## [2026.10.3] — 2026-10-16
+
+### Added
+
+- **Auto-routing** (Administration → Auto-routing). Let Janus pick the model for each request. A router is a model name callers use (`auto/legal`, `auto/smart`): a decision model classifies each request by kind of work and difficulty, and the router sends it to the first route that fits, or to its default. Routing never fails a request; an unsure, slow or failed classifier, or no fitting route, serves the default.
+  - Routes choose a model or managed model by routing category, difficulty band, context fit, grant and quota, and set thinking (as requested, fixed, or scaled with difficulty). Templates: Cost saver, Keep specialist work on-prem, Effort scaler, Coding by difficulty.
+  - 15 built-in routing categories plus a Legal example, each with includes/does-not-include descriptions, a minimum confidence and test examples; or follow a Usage insights category.
+  - Draft, Shadow (served by the default while Janus records what it would have done) and Live states. Conversations stick to their route (30 minutes by default) without another classifier call, and later turns are held to the same rules as the first.
+  - Routers are managed models: grant them, bind security policies and scope quotas to them.
+  - Try routing, and a batch test of each category's examples with any classifier; a warning when a hosted classifier would read prompts that are routed to self-hosted models.
+  - **Evaluation**: a sample of a route's requests is also answered by the default, out of band, and a judge model compares the two blind, twice with the order swapped. Verdicts, a 95% range and cost against the default per route; prompts and answers are never stored. A daily count, budget, end date and a busy-gateway pause bound it, and it never counts against the caller's quota.
+  - The request log shows the router asked for, the model that served and why; optional `X-Janus-Route`, `X-Janus-Route-Reason` and `X-Janus-Route-Model` response headers.
+- **Usage insights** (Administration → Usage insights). See what kinds of work people use AI for. A classifier labels sampled chat requests from a built-in taxonomy of 22 categories (Coding, Technical help, Legal, Medical and health, Writing and editing, and so on), plus your own categories and subcategories. Reports show categories over time, share, confidence, subcategories, models and people, the mix per team, and the classifier's own latency, failures, tokens and cost. Only labels are stored, never prompts.
+  - Any decision model can classify (System One models such as TypeSafe Jev, Bespoke Nimble or Laya, served by TypeSafe, OpenRouter, Ollama or llama.cpp; or OpenAI Decisions models), or any chat model Janus can reach, prompted to answer in JSON.
+  - Runs in the background (no added latency) or inline, where the label is returned in `X-Janus-Category` within a time budget; a classifier failure never fails the request.
+- **Decision models.** A new model role for classifiers that answer typed questions (yes/no, choice, score) in the System One format (`/v1/systemone`) or the OpenAI Decisions format (`/v1/decisions`). Janus picks the format from the provider and translates between them.
+  - **As security guards**: a decision model can back prompt-injection checks, content-safety checks (requests and, observed, responses), or both, as an alternative to Llama Prompt Guard 2 and Llama Guard 4. Model-backed checks run at the same time, so a request waits for its slowest guard, not all of them in turn. Checks bound to the same decision model are asked together when the model can, or in parallel when it cannot. Two options per check: **What to judge** (the new turn, or the whole conversation) and **Long text** (the last 12,000 characters, or the whole text in windows).
+  - **For people and apps**: call any granted decision model at `/v1/decisions` (OpenAI SDKs), `/v1/systemone` (TypeSafe SDK) or `/api/alpha/decisions` (OpenRouter SDK). Calls are granted, checked by security policies (questions and evidence both), counted against quotas, priced and logged like any other request. A decision model that blocks requests in a security policy can't be granted unless an administrator allows it. `/v1/models` lists decision models with `janus.kind: "decision"`.
+  - **Pricing per provider**: each decision model has a cost source (automatic, the provider's reported charge, the rate card, or free) and an optional fee per call; the same figure prices Janus's own classifier calls.
+- **Classifier benchmark** (Usage insights → Performance). Measure what your classifier choices cost each request: the wait with nothing else running, typical and 95th-percentile wait at rising concurrency, classifier calls per request, and the most simultaneous requests that stay within a latency budget you set. Sample prompts run through the real classifiers; nothing is forwarded or logged.
+- The request log records how long each request waited on classifiers and how many calls that took, shows how Usage insights labelled it (Classified as, with a filter), and troubleshooting captures include every classifier call a request caused.
+- **Models page**: filter a large catalog by kind, by what a model is used as, by price and by access, with counts on every choice; every column sorts, and unpriced models sort last, never as free. **Requests page**: filter and sort by kind, model, status, time to first byte and classifier wait.
+
+### Changed
+
+- **Thinking settings work on every provider.** Chat clients such as Open WebUI send one reasoning effort, temperature and set of tools to every model, and providers each refused part of that. When a provider refuses a setting and names it, Janus now fits the request and sends it again before anything reaches the caller, and remembers the fix per model for a day: a refused reasoning level becomes the nearest one the model takes, a refused temperature or top_p is left out, and GPT-5/GPT-6 tool calls go through OpenAI's Responses API and come back as a normal chat completion. Changes are shown in `X-Janus-Reasoning-Adjusted` and the request log.
+- The navigation item **Tokens** is now **API Tokens**.
+- **Helm chart renamed to `janus-helm-chart`** (chart 0.2.0, file `janus-helm-chart-0.2.0.tgz`, source in `charts/janus-helm-chart`). Rendered resource names and labels are unchanged, so `helm upgrade` of an existing release works as before; point it at the new file.
+- **Offline container images** are attached to the release as `janus-container-image-2026.10.3-linux-amd64.tar` and `janus-container-image-2026.10.3-linux-arm64.tar`, for installing without registry access (`docker load -i …` or `podman load -i …`).
+- Built with Go 1.26.9.
+
+### Fixed
+
+- **Claude now thinks when asked.** `reasoning_effort` was dropped on the way to Anthropic. Claude 4.6 and later (all of Claude 5) get adaptive thinking with that effort and return a summary of the thinking as `reasoning_content`; earlier models get a thinking budget kept within the model's output limit. Auto-routing's forced levels use the same translation.
+- Gemini tool calls no longer fail on the second turn when the client drops the thought signature: Janus restores it.
+- An observe-mode security check no longer blocks requests when its classifier is down; fail closed applies to blocking checks only.
+- A failed decision-model catalog read no longer switches decision models off.
+- Classifier benchmarks interrupted by a restart no longer show as running forever, and only one runs at a time across replicas.
+
 ## [2026.10.2] — 2026-10-04
 
 ### Added

@@ -254,6 +254,14 @@ type sqlRunner interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+// bumpModelRevision invalidates revision-tagged caches of catalog reads
+// after a write outside modelTx.
+func (s *Store) bumpModelRevision() {
+	if s.modelRevision != nil {
+		s.modelRevision.Add(1)
+	}
+}
+
 func (s *Store) ModelRevision() uint64 {
 	if s.modelRevision == nil {
 		return 0

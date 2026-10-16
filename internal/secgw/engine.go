@@ -325,6 +325,13 @@ type Request struct {
 	Body           []byte
 	IsServiceToken bool
 	Subject        Subject
+	// Extra is another feature's questions that may share a decision-model
+	// call the guards are making anyway (Usage insights). Optional; the
+	// engine reports on it in place.
+	Extra *Extra
+	// Extras are further features' questions offered the same way
+	// (auto-routing).
+	Extras []*Extra
 }
 
 // Recorded counts the violations that will be persisted (Record == true).
@@ -366,6 +373,8 @@ type Decision struct {
 	// request is blocked because the judge was unavailable, not because
 	// anything matched. Distinguishable in the audit trail.
 	ClassifierFailed bool
+	// Model is what the model-backed checks cost this request.
+	Model ModelStats
 }
 
 // Ingress evaluates a request against its effective checks.
@@ -433,16 +442,28 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		return e.block(dec, blockKind), nil
 	}
 
-	// 3. prompt injection — model-backed, only over what survived.
-	if c, ok := eff.Has(store.SecgwCheckPromptInjection, direction); ok {
-		vs, failed, err := e.classifyInjection(ctx, c, msgs)
-		if err != nil {
-			e.logger.WarnContext(ctx, "secgw: classifier call failed", "error", err.Error(), "model", c.ClassifierModelID, "fail", c.Fail)
+	// 3–4. model-backed checks (prompt injection, content safety), only
+	// over what survived. They run in parallel; their failures, findings
+	// and fail stances are applied in the fixed order injection, then
+	// content safety, so a request both checks flag reports injection.
+	extras := req.Extras
+	if req.Extra != nil {
+		extras = append([]*Extra{req.Extra}, extras...)
+	}
+	inj, safe, stats := e.runModelChecks(ctx, eff, msgs, parsed, extras)
+	dec.Model = stats
+	if inj.ran {
+		c, _ := eff.Has(store.SecgwCheckPromptInjection, direction)
+		if inj.err != nil {
+			e.logger.WarnContext(ctx, "secgw: classifier call failed", "error", inj.err.Error(), "model", c.ClassifierModelID, "fail", c.Fail)
 		}
-		if failed && c.Fail == store.SecgwFailClosed {
+		// Fail-closed applies to blocking checks only: an observe-mode
+		// check never blocks, whatever its fail setting says.
+		if inj.failed && FailsClosed(c) {
 			dec.ClassifierFailed = true
 			return e.block(dec, c.Kind), nil
 		}
+		vs := inj.vs
 		for j := range vs {
 			if c.Mode == store.SecgwModeBlock {
 				vs[j].Action = store.SecgwActionBlocked
@@ -455,21 +476,17 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 			return e.block(dec, c.Kind), nil
 		}
 	}
-
-	// 4. content safety — a conversation guard judges the LAST turn with
-	// the earlier ones as context. Same block/observe/fail semantics as
-	// prompt injection; the difference is the verdict is a category set.
-	if c, ok := eff.Has(store.SecgwCheckContentSafety, direction); ok && parsed {
-		vs, failed, err := e.judgeContentSafety(ctx, c, direction, msgs)
-		if err != nil {
-			e.logger.WarnContext(ctx, "secgw: content guard call failed", "error", err.Error(), "model", c.ClassifierModelID, "fail", c.Fail)
+	if safe.ran {
+		c, _ := eff.Has(store.SecgwCheckContentSafety, direction)
+		if safe.err != nil {
+			e.logger.WarnContext(ctx, "secgw: content guard call failed", "error", safe.err.Error(), "model", c.ClassifierModelID, "fail", c.Fail)
 		}
-		if failed && c.Fail == store.SecgwFailClosed {
+		if safe.failed && FailsClosed(c) {
 			dec.ClassifierFailed = true
 			return e.block(dec, c.Kind), nil
 		}
-		dec.Violations = append(dec.Violations, vs...)
-		for _, v := range vs {
+		dec.Violations = append(dec.Violations, safe.vs...)
+		for _, v := range safe.vs {
 			if v.Action == store.SecgwActionBlocked {
 				return e.block(dec, c.Kind), nil
 			}
@@ -487,6 +504,14 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		dec.Action = store.SecgwActionObserved
 	}
 	return dec, nil
+}
+
+// FailsClosed reports whether a check's classifier failure blocks the
+// request: only a blocking check set to fail closed. An observe-mode check
+// only reports, so it must never block, even when its stored fail stance
+// is "closed" (the default written for every model-backed check).
+func FailsClosed(c ResolvedCheck) bool {
+	return c.Mode == store.SecgwModeBlock && c.Fail == store.SecgwFailClosed
 }
 
 func (e *Engine) block(dec Decision, kind store.SecgwCheckKind) Decision {
@@ -686,6 +711,22 @@ func (e *Engine) EgressContentSafety(ctx context.Context, eff *Effective, reqBod
 		if t.Path == "content" && strings.TrimSpace(t.Text) != "" {
 			msgs = append(msgs, Message{Index: len(msgs), Role: "assistant", Text: t.Text})
 			break
+		}
+	}
+	if e.classify != nil {
+		// A decision model is asked the harm question about the reply;
+		// a generative guard judges the conversation (below).
+		if cl, err := e.classify.For(ctx, c.ClassifierModelID); err == nil {
+			if d, ok := cl.(decisionClassifier); ok && d.IsDecision() {
+				if len(msgs) == 0 || msgs[len(msgs)-1].Role != "assistant" {
+					return nil // no answer text to judge
+				}
+				vs, err := e.egressSafetyFromDecision(ctx, c, d, msgs)
+				if err != nil {
+					e.logger.WarnContext(ctx, "secgw: egress content guard call failed", "error", err.Error(), "model", c.ClassifierModelID)
+				}
+				return vs
+			}
 		}
 	}
 	vs, _, err := e.judgeContentSafety(ctx, c, store.SecgwDirectionEgress, msgs)

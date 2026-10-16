@@ -16,7 +16,8 @@ const usageColumns = `id, created_at, user_id, service_token_id, token_id, team_
 	finish_reason, http_status, latency_ms, ttfb_ms,
 	upstream_latency_ms, client_user_agent, client_ip, x_forwarded_for, referer, client_app, error_code, quota_violated,
 	blocking_rule_id, request_id, tokens_in_per_second, tokens_out_per_second, throughput_source, fallback_reason,
-	secgw_action, secgw_violations, subscription_id, reasoning_adjustment, pool_reason, pool_attempts`
+	secgw_action, secgw_violations, subscription_id, reasoning_adjustment, pool_reason, pool_attempts,
+	classifier_ms, classifier_calls, classification, managed_model_id, route_reason, served_managed_model_id`
 
 // InsertUsageEvent appends a metering record with the team context admitted
 // for the request (empty = Personal). The current roster is never consulted,
@@ -40,7 +41,8 @@ func usageArgs(e *UsageEvent) []any {
 		e.HTTPStatus, e.LatencyMs, e.TTFBMs, e.UpstreamMs, e.UserAgent, e.ClientIP, e.XForwardedFor, e.Referer,
 		e.ClientApp, e.ErrorCode, boolInt(e.QuotaViolated), e.BlockingRuleID, e.RequestID,
 		e.TokensInPerSecond, e.TokensOutPerSecond, e.ThroughputSource, e.FallbackReason,
-		e.SecgwAction, e.SecgwViolations, e.SubscriptionID, e.ReasoningAdjustment, e.PoolReason, e.PoolAttempts}
+		e.SecgwAction, e.SecgwViolations, e.SubscriptionID, e.ReasoningAdjustment, e.PoolReason, e.PoolAttempts,
+		e.ClassifierMs, e.ClassifierCalls, e.Classification, e.ManagedModelID, e.RouteReason, e.ServedManagedModelID}
 }
 
 func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
@@ -53,7 +55,7 @@ func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
 	})
 }
 
-// usageBatchRows bounds one multi-row INSERT: 44 columns x 200 rows stays far
+// usageBatchRows bounds one multi-row INSERT: 54 columns x 200 rows stays far
 // below PostgreSQL's 65535 and SQLite's 32766 bind-parameter limits.
 const usageBatchRows = 200
 
@@ -117,7 +119,8 @@ func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 		&e.FinishReason, &e.HTTPStatus, &e.LatencyMs, &e.TTFBMs, &e.UpstreamMs, &e.UserAgent, &e.ClientIP,
 		&e.XForwardedFor, &e.Referer, &e.ClientApp, &e.ErrorCode, &violated, &e.BlockingRuleID, &e.RequestID,
 		&e.TokensInPerSecond, &e.TokensOutPerSecond, &e.ThroughputSource, &e.FallbackReason,
-		&e.SecgwAction, &e.SecgwViolations, &e.SubscriptionID, &e.ReasoningAdjustment, &e.PoolReason, &e.PoolAttempts); err != nil {
+		&e.SecgwAction, &e.SecgwViolations, &e.SubscriptionID, &e.ReasoningAdjustment, &e.PoolReason, &e.PoolAttempts,
+		&e.ClassifierMs, &e.ClassifierCalls, &e.Classification, &e.ManagedModelID, &e.RouteReason, &e.ServedManagedModelID); err != nil {
 		return nil, err
 	}
 	e.CreatedAt = ParseTime(created)
@@ -198,6 +201,9 @@ type RequestFilter struct {
 	// Source narrows by who paid: "subscription" keeps only requests served
 	// by a user's own connected plan, "organization" excludes them.
 	Source string
+	// Classified narrows by Usage insights label: a category slug,
+	// "category/subcategory", ClassifiedAny or ClassifiedNone.
+	Classified string
 }
 
 // InternalClientApp marks usage events the gateway generated for itself
@@ -205,32 +211,91 @@ type RequestFilter struct {
 // against the caller's quota.
 const InternalClientApp = "janus-security-gateway"
 
+// InternalRoutingClientApp marks auto-routing's own calls (evaluation
+// answers from the default model and the judge's verdicts). Like security
+// classifier calls they carry the caller's request_id so their cost is
+// attributable, are platform overhead, and are hidden from the request log
+// by default.
+const InternalRoutingClientApp = "janus-auto-routing"
+
 // requestSortOrder maps the request-log sort vocabulary to an ORDER BY
 // expression. Every key has a `<key>_asc` ascending twin except "time", whose
 // ascending form keeps the historical "oldest" name.
 func requestSortOrder(sort string) string {
 	switch sort {
 	case "latency":
-		return "latency_ms DESC"
+		return "latency_ms DESC, created_at DESC, id DESC"
 	case "latency_asc":
-		return "latency_ms ASC"
+		return "latency_ms ASC, created_at DESC, id DESC"
 	case "cost":
-		return "cost_nanousd DESC"
+		return "cost_nanousd DESC, created_at DESC, id DESC"
 	case "cost_asc":
-		return "cost_nanousd ASC"
+		return "cost_nanousd ASC, created_at DESC, id DESC"
 	case "tokens_in":
-		return "tokens_in DESC"
+		return "tokens_in DESC, created_at DESC, id DESC"
 	case "tokens_in_asc":
-		return "tokens_in ASC"
+		return "tokens_in ASC, created_at DESC, id DESC"
 	case "tokens_out":
-		return "tokens_out DESC"
+		return "tokens_out DESC, created_at DESC, id DESC"
 	case "tokens_out_asc":
-		return "tokens_out ASC"
+		return "tokens_out ASC, created_at DESC, id DESC"
+	case "model":
+		return "model_name DESC, created_at DESC, id DESC"
+	case "model_asc":
+		return "model_name ASC, created_at DESC, id DESC"
+	case "modality":
+		return "modality DESC, created_at DESC, id DESC"
+	case "modality_asc":
+		return "modality ASC, created_at DESC, id DESC"
+	case "status":
+		return "http_status DESC, created_at DESC, id DESC"
+	case "status_asc":
+		return "http_status ASC, created_at DESC, id DESC"
+	case "ttfb":
+		return "ttfb_ms DESC, created_at DESC, id DESC"
+	case "ttfb_asc":
+		return "ttfb_ms ASC, created_at DESC, id DESC"
+	case "classifier":
+		return "classifier_ms DESC, created_at DESC, id DESC"
+	case "classifier_asc":
+		return "classifier_ms ASC, created_at DESC, id DESC"
 	case "oldest":
-		return "created_at ASC"
+		return "created_at ASC, id ASC"
 	default:
-		return "created_at DESC"
+		return "created_at DESC, id DESC"
 	}
+}
+
+// RequestFacet is one (modality, model) pair seen in a request-log scope,
+// with how many requests it had. The request log builds its kind and model
+// filters from these so they offer only what actually happened.
+type RequestFacet struct {
+	Modality string `json:"modality"`
+	Model    string `json:"model"`
+	Count    int64  `json:"count"`
+}
+
+// RequestFacets counts requests per (modality, model) under the filter's
+// scope (who, range, internal rows) but ignores its modality, model and
+// paging, so picking one kind still lists every other kind to switch to.
+func (s *Store) RequestFacets(ctx context.Context, f RequestFilter) ([]RequestFacet, error) {
+	f.Modality, f.Model, f.Sort, f.Limit, f.Offset = "", "", "", 0, 0
+	clause, args := f.clause()
+	rows, err := s.query(ctx, `SELECT modality, model_name, COUNT(*) FROM usage_event WHERE `+clause+
+		` GROUP BY modality, model_name ORDER BY COUNT(*) DESC LIMIT 2000`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []RequestFacet{}
+	for rows.Next() {
+		var fc RequestFacet
+		if err := rows.Scan(&fc.Modality, &fc.Model, &fc.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, fc)
+	}
+	return out, rows.Err()
 }
 
 func usageTeamClause(teamIDs []string) (string, []any) {
@@ -284,8 +349,8 @@ func (f RequestFilter) clause() (string, []any) {
 		args = append(args, f.Modality)
 	}
 	if !f.IncludeInternal {
-		where = append(where, "(client_app IS NULL OR client_app <> ?)")
-		args = append(args, InternalClientApp)
+		where = append(where, "(client_app IS NULL OR client_app NOT IN (?, ?))")
+		args = append(args, InternalClientApp, InternalRoutingClientApp)
 	}
 	switch f.Source {
 	case "subscription":
@@ -296,6 +361,10 @@ func (f RequestFilter) clause() (string, []any) {
 	if f.Accounting != "" {
 		where = append(where, "token_accounting_method = ?")
 		args = append(args, f.Accounting)
+	}
+	if clause, cargs := classifiedWhere(f.Classified); clause != "" {
+		where = append(where, clause)
+		args = append(args, cargs...)
 	}
 	switch f.Status {
 	case "success":
@@ -896,8 +965,12 @@ func (s *Store) SumMetricSince(ctx context.Context, subjectType, subjectID, mode
 		args = append(args, toArgs(members)...)
 	}
 	if modelID != "" {
-		where = append(where, "model_id = ?")
-		args = append(args, modelID)
+		// A rule scoped to a managed model (alias or router) counts the
+		// traffic addressed to it, and an alias also the traffic a router
+		// route served through it; a rule on a catalog model counts what
+		// that model served, however it was addressed.
+		where = append(where, "(model_id = ? OR managed_model_id = ? OR served_managed_model_id = ?)")
+		args = append(args, modelID, modelID, modelID)
 	}
 	var total int64
 	if err := s.queryRow(ctx, `SELECT `+expr+` FROM usage_event WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {

@@ -245,6 +245,8 @@ func ModalityForPath(path string) string {
 		return adapter.ModalityThread
 	case strings.Contains(p, "/files"):
 		return adapter.ModalityFile
+	case strings.HasSuffix(p, "/decisions"), strings.HasSuffix(p, "/systemone"):
+		return adapter.ModalityDecision
 	case strings.Contains(p, "/moderations"):
 		return adapter.ModalityModeration
 	case strings.Contains(p, "/fine_tuning"):

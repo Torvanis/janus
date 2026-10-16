@@ -212,24 +212,42 @@ func (r *Reasoning) Efforts() []string {
 }
 
 var (
-	// "Must be one of (… 'none' …, 'high')" / "supported values: [...]" (Mistral).
-	reListedValues = regexp.MustCompile(`(?i)(must be one of|supported values|allowed values|valid values|expected one of)`)
-	reQuoted       = regexp.MustCompile("['\"`]([a-z]+)['\"`]")
+	// "Must be one of (… 'none' …, 'high')" / "supported values: [...]" (Mistral),
+	// "Supported values are: 'low', …" (OpenAI), "Valid values are: high, …"
+	// (Gemini), "Supported levels: high, low, max, medium." (Anthropic).
+	reListedValues = regexp.MustCompile(`(?i)(must be one of|supported values|allowed values|valid values|expected one of|supported (?:types|levels|efforts)(?: are)?)`)
+	// Bare ladder words after a listing (vLLM: "Supported types are xhigh
+	// (default), medium, and low."), used when nothing is quoted.
+	reBareLevel = regexp.MustCompile(`(?i)\b(none|minimal|low|medium|high|xhigh|max|ultra)\b`)
+	reQuoted    = regexp.MustCompile("['\"`]([a-z]+)['\"`]")
 	// "does not support `reasoning_effort` value `none`" (xAI).
 	reValue = regexp.MustCompile("(?i)value\\s*['\"`]?([a-z]+)['\"`]?")
+	// "Thinking level MINIMAL is not supported for this model" (Gemini).
+	reLevelRefused = regexp.MustCompile("(?i)(?:thinking|effort) level\\s+['\"`]?([a-z]+)['\"`]?\\s+is not supported")
 	// The field itself: "does not support parameter reasoningEffort" (xAI),
 	// "is not enabled for this model" (Mistral), "does not support reasoning
 	// effort" (Copilot), "Unsupported parameter: 'reasoning_effort'" (OpenAI).
-	reMentionsReasoning = regexp.MustCompile(`(?i)reasoning[ _.]?effort|reasoning`)
-	reRefusal           = regexp.MustCompile(`(?i)not supported|does not support|not enabled|unsupported|unknown parameter|unrecognized`)
+	reMentionsReasoning = regexp.MustCompile(`(?i)reasoning[ _.]?effort|reasoning|thinking level|effort level`)
+	reRefusal           = regexp.MustCompile(`(?i)not supported|does not support|not enabled|unsupported|unknown parameter|unrecognized|unexpected reasoning|invalid`)
+	// "Function tools with reasoning_effort are not supported for gpt-6.1-sol
+	// in /v1/chat/completions. To use function tools, use /v1/responses"
+	// (OpenAI GPT-5/6): not a refusal of the value, of the endpoint.
+	reToolsNeedResponses = regexp.MustCompile(`(?i)function tools.*not supported.*use /v1/responses`)
 )
+
+// ToolsNeedResponses reports whether a provider's 400 says function tools
+// with a reasoning effort only work on the Responses API (OpenAI GPT-5 and
+// GPT-6 on chat completions).
+func ToolsNeedResponses(body []byte) bool {
+	return reToolsNeedResponses.MatchString(errorMessage(body))
+}
 
 // LearnFromRefusal reads a vendor's 400 body after it refused a reasoning
 // value. It returns the updated facts, or ok=false when the error is about
 // something else.
 func LearnFromRefusal(prev *Reasoning, sent string, body []byte) (Reasoning, bool) {
 	msg := errorMessage(body)
-	if msg == "" || !reMentionsReasoning.MatchString(msg) || !reRefusal.MatchString(msg) {
+	if msg == "" || !reMentionsReasoning.MatchString(msg) || !reRefusal.MatchString(msg) || reToolsNeedResponses.MatchString(msg) {
 		return Reasoning{}, false
 	}
 	next := Reasoning{Learned: true}
@@ -244,22 +262,62 @@ func LearnFromRefusal(prev *Reasoning, sent string, body []byte) (Reasoning, boo
 				levels = append(levels, m[1])
 			}
 		}
+		if len(levels) == 0 {
+			for _, m := range reBareLevel.FindAllStringSubmatch(msg[loc[1]:], -1) {
+				if l := strings.ToLower(m[1]); !slices.Contains(levels, l) {
+					levels = append(levels, l)
+				}
+			}
+		}
 		if len(levels) > 0 {
 			next.Supported, next.Levels = boolPtr(true), levels
 			return next, true
 		}
 	}
-	if m := reValue.FindStringSubmatch(msg); m != nil && strings.EqualFold(m[1], sent) && rank(strings.ToLower(m[1])) >= 0 {
-		v := strings.ToLower(m[1])
-		if !slices.Contains(next.Rejected, v) {
-			next.Rejected = append(next.Rejected, v)
+	for _, re := range []*regexp.Regexp{reValue, reLevelRefused} {
+		if m := re.FindStringSubmatch(msg); m != nil && strings.EqualFold(m[1], sent) && rank(strings.ToLower(m[1])) >= 0 {
+			v := strings.ToLower(m[1])
+			if !slices.Contains(next.Rejected, v) {
+				next.Rejected = append(next.Rejected, v)
+			}
+			next.Supported = boolPtr(true)
+			return next, true
 		}
-		next.Supported = boolPtr(true)
-		return next, true
 	}
 	next.Supported, next.Levels, next.Rejected = boolPtr(false), nil, nil
 	return next, true
 }
+
+// samplingParams are the sampling hints a provider may refuse outright on
+// some models (Claude 5 deprecates temperature and top_p; GPT-5/6 and
+// thinking Claude take only the default temperature). They tune how an
+// answer is drawn, not what it means, so a refused one can be dropped.
+var samplingParams = []string{"temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty"}
+
+var reSamplingRefusal = regexp.MustCompile(`(?i)deprecated|not supported|does not support|unsupported|only the default|may only be set|only supports`)
+
+// RefusedSamplingParam reads a provider's 400 and returns the sampling
+// parameter it refused, when the body carried it (present lists the
+// sampling fields the request had). "" when the error is about something
+// else.
+func RefusedSamplingParam(body []byte, present []string) string {
+	msg := errorMessage(body)
+	if msg == "" || !reSamplingRefusal.MatchString(msg) {
+		return ""
+	}
+	for _, p := range samplingParams {
+		if !slices.Contains(present, p) {
+			continue
+		}
+		if regexp.MustCompile("(?i)['\"`]" + p + "['\"`]|\\b" + p + "\\b").MatchString(msg) {
+			return p
+		}
+	}
+	return ""
+}
+
+// SamplingParams lists the sampling fields Janus may drop when refused.
+func SamplingParams() []string { return slices.Clone(samplingParams) }
 
 // errorMessage pulls the human text out of the error shapes vendors use.
 func errorMessage(body []byte) string {

@@ -719,6 +719,10 @@ func (s *Server) handlePatchManagedModel(w http.ResponseWriter, r *http.Request)
 		WriteError(w, r, err)
 		return
 	}
+	if before.Kind == store.ManagedKindRouter && (body.TargetModelID != nil || body.FallbackModelID != nil || body.FallbackTriggers != nil || body.Pool != nil) {
+		WriteError(w, r, ErrInvalidRequest("This is an auto-routing router: change its routes and default on the Auto-routing page.").WithParam("target_model_id"))
+		return
+	}
 	var pool *store.ManagedModelPool
 	if body.Pool != nil {
 		if body.TargetModelID != nil {
@@ -859,7 +863,15 @@ func (s *Server) handleDeleteManagedModel(w http.ResponseWriter, r *http.Request
 		WriteError(w, r, err)
 		return
 	}
-	if err := s.Store.DeleteManagedModel(r.Context(), id); err != nil {
+	if users, err := s.Store.RoutersUsingModel(r.Context(), id); err == nil && len(users) > 0 {
+		WriteError(w, r, ErrInvalidRequest("Routers "+strings.Join(users, ", ")+" send requests to this managed model. Change their routes on the Auto-routing page first.").WithParam("id"))
+		return
+	}
+	del := s.Store.DeleteManagedModel
+	if before.Kind == store.ManagedKindRouter {
+		del = s.Store.DeleteRouter
+	}
+	if err := del(r.Context(), id); err != nil {
 		WriteError(w, r, err)
 		return
 	}

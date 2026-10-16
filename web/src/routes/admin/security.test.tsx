@@ -264,6 +264,51 @@ describe('security — policies', () => {
     expect(await within(drawer).findByText('Mark a model as a classifier on the Classifiers tab first.')).toBeTruthy();
   });
 
+  it('shows the fail stance only for blocking checks and offers coverage options for a decision model', async () => {
+    routeGets({
+      '/api/v1/admin/secgw/classifiers': {
+        classifiers: [{ id: 'm-jev', name: 'jev', display_name: 'Jev', classifier_role: 'decision', status: 'enabled' }],
+        protocols: [],
+      },
+    });
+    mocked.post.mockResolvedValue({ policy });
+    renderPage('/admin/security/policies');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'New policy' }));
+    const drawer = screen.getByRole('dialog');
+    await user.type(within(drawer).getByLabelText(/^Name/), 'Injection trial');
+    await user.click(within(drawer).getByLabelText('Prompt injection: Enabled'));
+    await user.click(within(drawer).getByRole('button', { name: 'Prompt injection: Details' }));
+    await user.selectOptions(await within(drawer).findByDisplayValue('Select a classifier'), 'm-jev');
+
+    // Observe mode: an outage never blocks, so there is no fail choice.
+    expect(within(drawer).queryByLabelText('On classifier failure', { selector: 'select' })).toBeNull();
+    expect(within(drawer).getByDisplayValue('Never blocks (observe mode)')).toBeTruthy();
+    // Coverage options appear for a decision model, defaulting to the old behaviour.
+    const scope = within(drawer).getByLabelText('What to judge', { selector: 'select' }) as HTMLSelectElement;
+    const longText = within(drawer).getByLabelText('Long text', { selector: 'select' }) as HTMLSelectElement;
+    expect(scope.value).toBe('new_turn');
+    expect(longText.value).toBe('tail');
+    await user.selectOptions(scope, 'conversation');
+    await user.selectOptions(longText, 'windows');
+
+    const modes = within(drawer).getByRole('group', { name: 'Prompt injection: Mode' });
+    await user.click(within(modes).getByRole('button', { name: 'Block' }));
+    expect(within(drawer).getByLabelText('On classifier failure', { selector: 'select' })).toBeTruthy();
+
+    await user.click(within(drawer).getByRole('button', { name: 'Create policy' }));
+    await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
+    const [, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
+    const pi = (body.checks as Array<Record<string, unknown>>).find((c) => c.kind === 'prompt_injection')!;
+    expect(pi).toMatchObject({
+      enabled: true,
+      mode: 'block',
+      fail: 'closed',
+      classifier_model_id: 'm-jev',
+      options: { judge_scope: 'conversation', long_text: 'windows', threshold: 0.3, timeout_ms: 2000 },
+    });
+  });
+
   it('toggles secret rules off with chips and sends disable_rules', async () => {
     mocked.put.mockResolvedValue({ policy });
     renderPage('/admin/security/policies');

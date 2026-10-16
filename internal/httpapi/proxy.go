@@ -16,6 +16,7 @@ import (
 
 	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/authz"
+	"github.com/torvanis/janus/internal/classify"
 	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/secgw"
@@ -41,6 +42,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	s.Metrics.ConcurrentRequests.Inc()
 	defer s.Metrics.ConcurrentRequests.Dec()
+	rrt := s.routingRT()
+	rrt.proxyInFlight.Add(1)
+	defer rrt.proxyInFlight.Add(-1)
 
 	// /v1/models is a gateway-owned listing, not a passthrough: it must reflect
 	// this caller's grants rather than the union of every upstream.
@@ -283,6 +287,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
+		if _, derr := s.Store.DecisionModelsByName(ctx, modelName); derr == nil {
+			// A decision model answers typed questions, never chat: say
+			// where to send it rather than "not granted".
+			s.rejectProxyEvent(w, r, ErrInvalidRequest(modelName+" is a decision model. Send decision requests to /v1/decisions (OpenAI format) or /v1/systemone (System One format).").WithParam("model"), event, started)
+			return
+		}
 		s.rejectProxyEvent(w, r, ErrModelNotGranted(modelName), event, started)
 		return
 	}
@@ -317,6 +327,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		resolved = s.applyManagedFallback(ctx, resolved)
 	}
 	model := resolved.Model
+	if model != nil && model.ClassifierRole == store.ClassifierRoleDecision {
+		s.rejectProxyEvent(w, r, ErrInvalidRequest(modelName+" resolves to a decision model. Send decision requests to /v1/decisions (OpenAI format) or /v1/systemone (System One format).").WithParam("model"), event, started)
+		return
+	}
 
 	// Grants are resolved against whichever principal kind is calling. A
 	// managed alias is granted in its own right: holding a grant on the
@@ -365,6 +379,22 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if resolved.ViaManagedModel() {
 		event.RequestedModelName = resolved.Managed.Name
+		event.ManagedModelID = resolved.Managed.ID
+	}
+	// Auto-routing: a router resolved like an alias of its default, and the
+	// caller holds a grant on the router. Which route serves is decided
+	// below, around the Security Gateway's ingress call.
+	quotaSubject := quota.UserSubject(event.UserID, teamIDs)
+	if serviceToken != nil {
+		quotaSubject = quota.ServiceTokenSubject(serviceToken.ID)
+	}
+	var router *store.ManagedModel
+	var pendRoute *pendingRoute
+	if personal == nil && resolved.Managed != nil && resolved.Managed.Kind == store.ManagedKindRouter {
+		router = resolved.Managed
+		if !bodyOverflows {
+			pendRoute = s.prepareRoute(ctx, r, body, event, router, granted, quotaSubject)
+		}
 	}
 
 	// The upstream only understands the native model name. When the caller
@@ -399,8 +429,45 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.rejectProxyEvent(w, r, ErrSecurityBlocked("", true), event, started)
 		return
 	}
-	secgwEff := secgwEng.Resolve(secgwSubject(event, groupIDs, resolved))
+	secgwSub := secgwSubject(event, groupIDs, resolved)
+	switch {
+	case pendRoute != nil:
+		// The route is not known yet: the caller and the router only.
+		// Bindings on the served model and its upstream are added once
+		// the route is chosen.
+		secgwSub = routerSubject(event, groupIDs, router)
+	case router != nil:
+		// No route will be chosen (the router's configuration could not
+		// be read, or the body is too large to classify): the default
+		// serves, so its model and upstream bindings apply now. Resolving
+		// the router alone would silently drop them.
+		secgwSub = secgwSubjectFor(event, groupIDs, router, resolved)
+	}
+	secgwEff := secgwEng.Resolve(secgwSub)
 	var secgwViolations []secgw.Violation
+	// A live router's classifier call starts now, in parallel with the
+	// guards, unless it can ride on a guard call to the same classifier or
+	// a policy may redact (the classifier must then read the redacted text,
+	// so it is asked after the guards).
+	var routeExtras []*secgw.Extra
+	if pendRoute != nil && !pendRoute.decided && pendRoute.extra != nil {
+		rides := s.guardWillCall(ctx, secgwEff, pendRoute)
+		if pendRoute.mode == store.RouterModeLive && !rides && !policyRedacts(secgwEff) {
+			s.startOwnCall(ctx, pendRoute)
+		}
+		if rides {
+			routeExtras = append(routeExtras, pendRoute.extra)
+		}
+	}
+	// Usage insights is prepared first so its question can share a guard
+	// call to the same classifier (no extra round trip). It is recorded
+	// only for requests that are admitted.
+	pendingClass := s.prepareClassification(ctx, event, body, bodyOverflows)
+	var classExtra *secgw.Extra
+	if pendingClass != nil {
+		classExtra = pendingClass.extra
+	}
+	var guardStats secgw.ModelStats
 	if !secgwEff.Empty() {
 		if bodyOverflows {
 			// The body cannot be inspected in full; a policy applies, so
@@ -409,8 +476,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		secgwStart := time.Now()
-		dec, derr := secgwEng.Ingress(ctx, secgwEff, secgw.Request{Body: body, IsServiceToken: serviceToken != nil})
+		dec, derr := secgwEng.Ingress(ctx, secgwEff, secgw.Request{Body: body, IsServiceToken: serviceToken != nil, Extra: classExtra, Extras: routeExtras})
 		trace.Child("secgw.ingress", telemetry.SpanKindInternal, secgwStart, time.Now())
+		guardStats = dec.Model
+		event.ClassifierMs, event.ClassifierCalls = int(dec.Model.Elapsed.Milliseconds()), dec.Model.Calls
 		if derr != nil {
 			s.Logger.ErrorContext(ctx, "secgw: ingress", "error", derr.Error(), "request_id", event.RequestID)
 			s.rejectProxyEvent(w, r, ErrInternal(), event, started)
@@ -430,16 +499,118 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		secgwActionHeader(w, dec.Action, dec.Redactions)
 	}
 
+	// quotaAlso lists the managed models the request answers to (the
+	// router or alias the caller addressed, and an alias a route serves
+	// through), so quota rules scoped to them apply too.
+	quotaAlso := []string{event.ManagedModelID}
+
+	// 3c. Auto-routing: settle the decision (waiting at most the router's
+	// budget), then serve from the chosen route.
+	var evalCap *evalCapture
+	if pendRoute != nil {
+		if !pendRoute.decided && pendRoute.mode == store.RouterModeLive && pendRoute.own == nil && (pendRoute.extra == nil || !pendRoute.extra.Ran) && pendRoute.extra != nil {
+			// Not answered on a guard call and not started yet (a policy
+			// may have redacted): ask now, about the forwarded text.
+			if t := classify.TrimText(secgw.NewTurnText(body), pendRoute.st.settings.MaxChars); strings.TrimSpace(t) != "" {
+				pendRoute.extra.Text = t
+			}
+			s.startOwnCall(ctx, pendRoute)
+		}
+		s.finishRoute(ctx, pendRoute, s.routingContext(ctx, body, granted, quotaSubject, router.ID))
+		preRoute := body
+		served, routedBody := s.applyRoute(ctx, w, pendRoute, event, body, resolved)
+		body = routedBody
+		route = nil
+	servedLoop:
+		for {
+			switch {
+			case isPool(served):
+				route = s.choosePoolMember(ctx, r, body, event, served.Managed)
+				switch {
+				case route != nil:
+					served.Model = route.current()
+				case served.Fallback != nil:
+					served = served.WithFallback(store.FallbackTriggerPoolExhausted)
+				case !pendRoute.decision.IsDefault():
+					// Routing never fails a request: a route whose pool has
+					// every member out of service hands it to the default.
+					pendRoute.fallToDefault()
+					served, body = s.applyRoute(ctx, w, pendRoute, event, preRoute, resolved)
+					continue servedLoop
+				default:
+					s.rejectProxyEvent(w, r, ErrManagedModelUnavailable(modelName, "its default has every pool member out of service"), event, started)
+					return
+				}
+			case served.Managed != nil:
+				served = s.applyManagedFallback(ctx, served)
+			}
+			break
+		}
+		if served.FellBack {
+			w.Header().Set(headerFallbackReason, served.FallbackReason)
+			event.FallbackReason = served.FallbackReason
+		}
+		if served.Managed != nil && served.Managed.ID != router.ID {
+			quotaAlso = append(quotaAlso, served.Managed.ID)
+			// Recorded on the event so the alias's quota is consumed (and
+			// rebuilds from the event log count it), not only checked.
+			event.ServedManagedModelID = served.Managed.ID
+		}
+		model = served.Model
+		s.stampServedModel(ctx, event, model)
+		if rewritten, ok := rewriteJSONModelField(body, model.Name); ok {
+			body = rewritten
+		}
+		// Policies bound to the served model or its upstream apply too.
+		// Re-resolve, and inspect again only if that changes the checks.
+		if eff2 := secgwEng.Resolve(secgwSubjectFor(event, groupIDs, router, served)); effectiveDiffers(secgwEff, eff2) {
+			// Only the checks the served model's bindings add or change
+			// run again: the rest already inspected this body, and running
+			// them twice would repeat classifier calls and record every
+			// violation twice.
+			added := addedChecks(secgwEff, eff2)
+			secgwEff = eff2
+			if !added.Empty() {
+				dec, derr := secgwEng.Ingress(ctx, added, secgw.Request{Body: body, IsServiceToken: serviceToken != nil})
+				if derr != nil {
+					s.Logger.ErrorContext(ctx, "secgw: ingress (routed model)", "error", derr.Error(), "request_id", event.RequestID)
+					s.rejectProxyEvent(w, r, ErrInternal(), event, started)
+					return
+				}
+				secgwViolations = append(secgwViolations, dec.Violations...)
+				if dec.Action != "" {
+					event.SecgwAction = dec.Action
+				}
+				event.SecgwViolations = secgw.Recorded(secgwViolations)
+				if dec.Action == store.SecgwActionBlocked {
+					s.attachSecgwViolations(event, secgwEff.Policy, secgwViolations)
+					s.writeSecgwBlock(w, r, event, secgwEff.Policy, dec, started)
+					return
+				}
+				if dec.Action == store.SecgwActionRedacted {
+					body = dec.Body
+				}
+				secgwActionHeader(w, dec.Action, dec.Redactions)
+			}
+		}
+		if pendRoute.mode == store.RouterModeLive || pendRoute.extra == nil {
+			defer s.recordRouteDecision(pendRoute, event, model)
+		} else {
+			routedBody := body
+			defer s.shadowRoute(pendRoute, event, routedBody)
+		}
+		w, evalCap = s.evalSample(w, pendRoute, event, body)
+		// Every exit from here on, early refusals included, hands the
+		// evaluation slot on or releases it.
+		defer func() { s.finishEvalSample(evalCap, event) }()
+	}
+
 	// 4. Quota enforcement, ahead of any upstream contact so a breached
 	//    principal can never incur provider spend. quotaSubject carries
 	//    whichever principal kind is calling, so a service token is bounded
 	//    by its own rules exactly as a user is bounded by theirs.
-	quotaSubject := quota.UserSubject(event.UserID, teamIDs)
-	if serviceToken != nil {
-		quotaSubject = quota.ServiceTokenSubject(serviceToken.ID)
-	}
 	quotaStart := time.Now()
-	decision, err := s.Quota.Check(ctx, quotaSubject, model.ID)
+	decision, err := s.Quota.Check(ctx, quotaSubject, model.ID, quotaAlso...)
 	s.Metrics.QuotaCheckLatency.Observe(time.Since(quotaStart).Seconds())
 	trace.Child("quota.check", telemetry.SpanKindInternal, quotaStart, time.Now())
 	if err != nil {
@@ -453,6 +624,32 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		s.rejectProxyEvent(w, r, ErrQuotaExceeded(quotaBreachMessage("Your", breached)).WithReset(breached.ResetAt), event, started)
 		return
 	}
+
+	// 4b. Prompt classification, on admitted requests only and on the body
+	//     the upstream will see (after any Security Gateway redaction).
+	//     Async mode queues and returns at once; inline mode waits at most
+	//     the configured timeout. Neither can fail the request.
+	classifyStart := time.Now()
+	if pendingClass != nil && (classExtra == nil || !classExtra.Ran) {
+		// Not answered on a guard call: classify exactly the body the
+		// upstream will see (after any Security Gateway redaction).
+		pendingClass = s.prepareClassificationUnsampled(ctx, pendingClass, body)
+	}
+	cs := s.finishClassification(ctx, w, pendingClass)
+	trace.Child("classification", telemetry.SpanKindInternal, classifyStart, time.Now())
+	// classifier_ms: what this request waited on classifiers before it was
+	// forwarded (guards in parallel count once, plus any inline label).
+	event.ClassifierMs = int((guardStats.Elapsed + cs.waited).Milliseconds())
+	event.ClassifierCalls = guardStats.Calls + cs.calls
+	if pendRoute != nil {
+		// The routing call ran alongside the guards (or after them when a
+		// policy redacts); the request waited for whichever finished last.
+		event.ClassifierCalls += pendRoute.calls
+		if ms := int(pendRoute.waited.Milliseconds()); ms > event.ClassifierMs {
+			event.ClassifierMs = ms
+		}
+	}
+	event.Classification = cs.label
 
 	// 5–6. Resolve the upstream and forward. For a pool this is a loop over
 	// members: a member that fails BEFORE anything reaches the client
@@ -473,6 +670,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamStart   time.Time
 		apiKey          string
 		reasoning       reasoningFit
+		// cfit is what Janus changed to fit a catalog model's limits
+		// (provider_quirks.go).
+		cfit   catalogFit
+		isChat = strings.HasPrefix(r.URL.Path, "/v1/chat/completions")
 	)
 	if route != nil {
 		defer route.end()
@@ -526,6 +727,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				f = &r
 			}
 			body, reasoning = fitReasoningBody(body, f)
+		}
+		// Catalog models: apply what earlier refusals taught about this
+		// model (a reasoning value it refuses, a sampling hint it refuses,
+		// tools that only work through the Responses API).
+		if personal == nil && !bodyOverflows && isChat {
+			var viaResponses bool
+			body, viaResponses, cfit = s.fitCatalogBody(model.ID, body, catalogFit{})
+			if viaResponses && upstream.AdapterType == "openai_compatible" {
+				providerAdapter = adapter.ResponsesFallback()
+			}
 		}
 		// adapterReq is handed to Prepare AND to the response-side hooks
 		// (TransformResponse / NewStreamTransformer), so an adapter that
@@ -659,9 +870,75 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Auto-routing forced a thinking level the model refused (it lists the
+	// values it takes): remember them for this model and resend once,
+	// fitted. Nothing has been relayed yet and a 400 is not billed.
+	if personal == nil && pendRoute != nil && pendRoute.thinkingSent != "" && resp.StatusCode == http.StatusBadRequest && !bodyOverflows {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxRefusalBody))
+		resp.Body = io.NopCloser(bytes.NewReader(raw))
+		if learned, ok := subscription.LearnFromRefusal(s.routedReasoning(model.ID), pendRoute.thinkingSent, raw); ok {
+			s.rememberRoutedReasoning(model.ID, learned)
+			if refit, fit := fitReasoningBody(body, &learned); fit.sent != pendRoute.thinkingSent {
+				retryReq := *adapterReq
+				retryReq.Body = refit
+				if again, perr := providerAdapter.Prepare(adapter.Upstream{
+					ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType,
+				}, &retryReq); perr == nil {
+					if r.URL.RawQuery != "" {
+						again.URL += "?" + r.URL.RawQuery
+					}
+					if out, rerr := http.NewRequestWithContext(ctx, r.Method, again.URL, bytes.NewReader(again.Body)); rerr == nil {
+						out.Header = again.Header
+						out.ContentLength = int64(len(again.Body))
+						if second, derr := s.upstreamHTTPClient(ctx).Do(out); derr == nil {
+							_ = resp.Body.Close()
+							resp = second
+							defer func() { _ = second.Body.Close() }()
+							adapterReq, prepared, body = &retryReq, again, refit
+							to := fit.sent
+							if to == "" {
+								to = "omitted"
+							}
+							event.ReasoningAdjustment = strings.Replace(event.ReasoningAdjustment, "->"+pendRoute.thinkingSent+" ", "->"+to+" ", 1)
+						}
+					}
+				}
+			}
+		}
+	}
+	// A catalog model refused a setting it names (a reasoning value, a
+	// sampling hint, tools on chat completions): learn it, fix the body and
+	// resend, before anything is relayed (provider_quirks.go).
+	if personal == nil && !bodyOverflows && isChat && resp.StatusCode == http.StatusBadRequest {
+		up := adapter.Upstream{ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType}
+		for i := 0; i < maxQuirkRetries && resp.StatusCode == http.StatusBadRequest; i++ {
+			raw := readRefusal(resp)
+			_, viaResponses := providerAdapter.(*adapter.OpenAIResponses)
+			retry, ok := s.learnCatalogRefusal(model.ID, upstream.AdapterType, adapterReq.Body, raw, viaResponses, &cfit)
+			if !ok {
+				break
+			}
+			second, a, req2, sent := s.resendFitted(ctx, r, providerAdapter, up, adapterReq, retry)
+			if !sent {
+				break
+			}
+			s.Logger.InfoContext(ctx, "fitted a request to the model's limits", "model", model.PublicName(), "upstream", upstream.Name,
+				"change", cfit.label(), "status", second.StatusCode, "request_id", event.RequestID)
+			resp = second
+			providerAdapter, adapterReq = a, req2
+		}
+	}
 	if reasoning.changed() {
 		event.ReasoningAdjustment = reasoning.label()
 		w.Header().Set(headerReasoningAdjusted, reasoning.label())
+	}
+	if l := cfit.label(); l != "" {
+		if event.ReasoningAdjustment != "" {
+			event.ReasoningAdjustment += " " + l
+		} else {
+			event.ReasoningAdjustment = l
+		}
+		w.Header().Set(headerReasoningAdjusted, l)
 	}
 
 	event.TTFBMs = int(time.Since(upstreamStart).Milliseconds())
@@ -719,7 +996,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// corrects Content-Type to text/event-stream for the translated output.
 		transformer := providerAdapter.NewStreamTransformer(adapterReq, resp.Header)
 		copyResponseHeaders(w, resp.Header)
-		hardKill := decision.HardKill || s.Quota.HardKillActive(ctx, quotaSubject, model.ID)
+		hardKill := decision.HardKill || s.Quota.HardKillActive(ctx, quotaSubject, model.ID, quotaAlso...)
 		var hold *stream.Holdback
 		if hasEgressChecks(secgwEff) && resp.StatusCode < 300 {
 			hold = stream.New(secgwHoldBytes(secgwEff), secgwEng.MaxSpan(), secgwStreamScanner(secgwEng, secgwEff))
@@ -1456,7 +1733,7 @@ func (s *Server) streamExceededLimit(ctx context.Context, event *store.UsageEven
 		// Requests is deliberately zero: this request was already admitted by
 		// the pre-flight check, and a stream consumes no further requests.
 	}
-	decision, err := s.Quota.CheckWithPending(ctx, subject, event.ModelID, pending)
+	decision, err := s.Quota.CheckWithPending(ctx, subject, event.ModelID, pending, event.ManagedModelID, event.ServedManagedModelID)
 	if err != nil {
 		// Deliberate fail-open, documented posture: this stream was admitted
 		// by the fail-closed pre-flight check, so a storage error here means
@@ -1603,7 +1880,7 @@ func (s *Server) recordEvent(ctx context.Context, event *store.UsageEvent, subje
 		}
 		if err := s.Quota.Record(bg, subject, modelID, quota.Delta{
 			TokensIn: event.TokensIn, TokensOut: event.TokensOut, CostNano: event.CostNano, Requests: 1,
-		}); err != nil {
+		}, event.ManagedModelID, event.ServedManagedModelID); err != nil {
 			s.Logger.ErrorContext(bg, "record quota consumption", "error", err.Error(), "request_id", event.RequestID)
 		}
 	})
@@ -1685,15 +1962,29 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 		// display name when one exists); the native upstream name stays
 		// available under janus.native_name so callers can correlate with
 		// provider documentation. Both names route (documented backward compat).
+		info := map[string]any{
+			"upstream": m.UpstreamName, "adapter_type": m.AdapterType, "modalities": m.Modalities,
+			"usd_per_mtok_in": usage.USD(m.RateInNano), "usd_per_mtok_out": usage.USD(m.RateOutNano),
+			"grant_source": m.GrantSource, "native_name": m.Name,
+			"context_window": m.ContextWindow,
+			"managed":        false,
+			"kind":           "chat",
+		}
+		if m.ClassifierRole == store.ClassifierRoleDecision {
+			// Decision models are called on the decision endpoints, in
+			// either dialect (Janus translates). One reserved for security
+			// checks would only answer 403, so it is not listed.
+			if ok, _ := s.decisionStillGrantable(r.Context(), m); !ok {
+				continue
+			}
+			info["kind"] = "decision"
+			info["endpoints"] = []string{"/v1/decisions", "/v1/systemone", "/api/alpha/decisions"}
+		} else if m.ClassifierRole != "" {
+			continue
+		}
 		data = append(data, map[string]any{
 			"id": m.PublicName(), "object": "model", "created": m.DiscoveredAt.Unix(), "owned_by": m.UpstreamName,
-			"janus": map[string]any{
-				"upstream": m.UpstreamName, "adapter_type": m.AdapterType, "modalities": m.Modalities,
-				"usd_per_mtok_in": usage.USD(m.RateInNano), "usd_per_mtok_out": usage.USD(m.RateOutNano),
-				"grant_source": m.GrantSource, "native_name": m.Name,
-				"context_window": m.ContextWindow,
-				"managed":        false,
-			},
+			"janus": info,
 		})
 	}
 	if personalModels, err := s.personalCatalog(r.Context(), user); err != nil {
@@ -1702,12 +1993,17 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, personalModels...)
 	}
 	for _, mm := range catalog.Managed {
+		kind := s.managedModelKind(r.Context(), mm)
+		if kind == "" {
+			continue
+		}
 		data = append(data, map[string]any{
 			"id": mm.Name, "object": "model", "created": mm.CreatedAt.Unix(), "owned_by": mm.TargetUpstreamName,
 			"janus": map[string]any{
 				"upstream": mm.TargetUpstreamName, "modalities": mm.Modalities,
 				"grant_source": mm.GrantSource, "context_window": mm.ContextWindow,
 				"managed":     true,
+				"kind":        kind,
 				"description": mm.Description,
 				// The alias is an indirection, not a disguise: say plainly
 				// what it resolves to right now, and warn that it may change.

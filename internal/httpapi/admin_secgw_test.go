@@ -393,7 +393,7 @@ func TestAdminSecgwViolationsGatedReadAndClassifierRole(t *testing.T) {
 	}
 	rec = h.doAsSession(sess, http.MethodGet, "/api/v1/admin/secgw/classifiers", nil)
 	body := rec.Body.String()
-	if !strings.Contains(body, "prompt-guard-2") || !strings.Contains(body, `"protocols":["generative_guard","text_classification"]`) {
+	if !strings.Contains(body, "prompt-guard-2") || !strings.Contains(body, `"protocols":["decision","generative_guard","text_classification"]`) {
 		t.Fatalf("classifiers: %s", body)
 	}
 	// The hazard taxonomy rides along so the policy editor never hardcodes it.

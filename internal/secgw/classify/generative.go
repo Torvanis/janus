@@ -132,6 +132,8 @@ func (g *generativeGuard) Judge(ctx context.Context, turns []Turn) (Verdict, err
 	if g.up.Meter != nil {
 		defer func() { g.up.Meter(ctx, time.Since(started), chars, err) }()
 	}
+	var body []byte
+	defer func() { traceCall(ctx, g.up, ProtocolGenerativeGuard, url, started, payload, body, err) }()
 	if err != nil {
 		return Verdict{}, err
 	}

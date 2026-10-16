@@ -742,13 +742,36 @@ func (s *Store) PruneSecgwViolations(ctx context.Context, kind string, r SecgwRe
 // would otherwise hand a caller direct access to the classifier.
 func (s *Store) SetModelClassifierRole(ctx context.Context, id, role string) error {
 	switch role {
-	case "", ClassifierRoleTextClassification, ClassifierRoleGenerativeGuard:
+	case "", ClassifierRoleTextClassification, ClassifierRoleGenerativeGuard, ClassifierRoleDecision:
 	default:
 		return &ValidationError{Field: "classifier_role", Message: "classifier_role must be empty or one of " + strings.Join(ClassifierRoles(), ", ")}
 	}
 	m, err := s.ModelByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if role == ClassifierRoleDecision && m.ClassifierRole == ClassifierRoleDecision {
+		return nil
+	}
+	if role == ClassifierRoleDecision {
+		// Decision models may be granted to callers (served on the
+		// decision endpoints), but a chat alias must not end up pointing
+		// at one.
+		var managed int
+		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM managed_model WHERE target_model_id = ? OR fallback_model_id = ?`, id, id).Scan(&managed); err != nil {
+			return err
+		}
+		if managed > 0 {
+			return &ValidationError{Field: "classifier_role", Message: "a managed model points at this model; repoint it first"}
+		}
+		var grants int
+		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM model_grant WHERE model_id = ?`, id).Scan(&grants); err != nil {
+			return err
+		}
+		if grants > 0 {
+			return &ValidationError{Field: "classifier_role", Message: "callers hold grants for this model as a chat model; remove them first, then grant it again as a decision model"}
+		}
+		return s.setClassifierRole(ctx, id, role)
 	}
 	if role != "" && m.GrantCount == 0 {
 		// GrantCount is only populated by ListModels; count directly.
@@ -767,7 +790,17 @@ func (s *Store) SetModelClassifierRole(ctx context.Context, id, role string) err
 			return &ValidationError{Field: "classifier_role", Message: "a managed model points at this model; repoint it first"}
 		}
 	}
-	return s.exec(ctx, `UPDATE model SET classifier_role = ? WHERE id = ?`, role, id)
+	return s.setClassifierRole(ctx, id, role)
+}
+
+// setClassifierRole writes the role and bumps the model revision, so
+// revision-tagged caches of classifier lookups rebuild at once.
+func (s *Store) setClassifierRole(ctx context.Context, id, role string) error {
+	if err := s.exec(ctx, `UPDATE model SET classifier_role = ? WHERE id = ?`, role, id); err != nil {
+		return err
+	}
+	s.bumpModelRevision()
+	return nil
 }
 
 // SecgwClassifierRunsForRequest assembles what the security gateway did on

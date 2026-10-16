@@ -224,3 +224,128 @@ describe('A04 enable guard — explicit $0 card vs never priced', () => {
     expect(await screen.findByText(/Save a rate card first/)).toBeTruthy();
   });
 });
+
+describe('Models: filter and sort', () => {
+  const priced = '2026-08-01T00:00:00Z';
+  const catalog = [
+    modelFixture({
+      id: 'a',
+      name: 'gpt-5',
+      upstream_id: 'oai',
+      upstream_name: 'OpenAI',
+      status: 'enabled',
+      rate_in_nanousd: 2_000_000_000,
+      rate_effective_from: priced,
+      grant_count: 3,
+      context_window: 400_000,
+    }),
+    modelFixture({
+      id: 'b',
+      name: 'gpt-6-luna:decisions',
+      upstream_id: 'oai',
+      upstream_name: 'OpenAI',
+      status: 'enabled',
+      modalities: ['decision'],
+      classifier_role: 'decision',
+      rate_in_nanousd: 100_000_000,
+      rate_effective_from: priced,
+      grant_count: 1,
+    }),
+    modelFixture({
+      id: 'c',
+      name: 'typesafe/jev-router',
+      upstream_id: 'or',
+      upstream_name: 'Openrouter',
+      status: 'pending_approval',
+      modalities: ['decision'],
+      classifier_role: 'decision',
+    }),
+    modelFixture({
+      id: 'd',
+      name: 'Llama-Prompt-Guard-2-86M',
+      upstream_id: 'pg',
+      upstream_name: 'PromptGuard',
+      status: 'pending_approval',
+      modalities: ['moderation'],
+      classifier_role: 'text_classification',
+    }),
+    modelFixture({
+      id: 'e',
+      name: 'dall-e-3',
+      upstream_id: 'oai',
+      upstream_name: 'OpenAI',
+      status: 'disabled',
+      modalities: ['image'],
+      rate_in_nanousd: 40_000_000_000,
+      rate_effective_from: priced,
+    }),
+  ];
+  const names = () =>
+    screen.getAllByRole('checkbox', { name: /^Select / }).map((c) => c.getAttribute('aria-label')!.replace(/^Select /, ''));
+
+  it('counts what each filter choice would show, and narrows by kind, use, price and access', async () => {
+    mockModels(catalog);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('5 models');
+    const kind = screen.getByRole('combobox', { name: 'Kind' }) as HTMLSelectElement;
+    expect([...kind.options].map((o) => o.text)).toEqual([
+      'All kinds',
+      'Chat (1)',
+      'Decision (2)',
+      'Image (1)',
+      'Moderation (1)',
+    ]);
+    const use = screen.getByRole('combobox', { name: 'Used as' }) as HTMLSelectElement;
+    expect([...use.options].map((o) => o.text)).toEqual([
+      'Any use',
+      'Models people call (2)',
+      'Decision models (2)',
+      'Guard classifiers (1)',
+    ]);
+
+    await user.selectOptions(use, 'decision');
+    expect(await screen.findByText('2 of 5 models match')).toBeTruthy();
+    expect(names().sort()).toEqual(['gpt-6-luna:decisions', 'typesafe/jev-router']);
+    // Other filters now count within decision models only.
+    const price = screen.getByRole('combobox', { name: 'Price' }) as HTMLSelectElement;
+    expect([...price.options].map((o) => o.text)).toEqual(['Priced or not', 'Priced (1)', 'No price yet (1)']);
+    await user.selectOptions(price, 'no');
+    expect(names()).toEqual(['typesafe/jev-router']);
+    // Kinds that would show nothing are not offered.
+    expect([...kind.options].map((o) => o.text)).toEqual(['All kinds', 'Decision (1)']);
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('5 models')).toBeTruthy();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Access' }), 'yes');
+    expect(names().sort()).toEqual(['gpt-5', 'gpt-6-luna:decisions']);
+  });
+
+  it('sorts by any column header, unpriced models last, and keeps old ?sort=cost links working', async () => {
+    mockModels(catalog);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('5 models');
+    expect(names()).toEqual(['dall-e-3', 'gpt-5', 'gpt-6-luna:decisions', 'Llama-Prompt-Guard-2-86M', 'typesafe/jev-router']);
+    await user.click(within(screen.getByRole('columnheader', { name: /Input rate/ })).getByRole('button'));
+    // Highest first; never-priced models sort last, not as free.
+    expect(names().slice(0, 3)).toEqual(['dall-e-3', 'gpt-5', 'gpt-6-luna:decisions']);
+    await user.click(within(screen.getByRole('columnheader', { name: /Input rate/ })).getByRole('button'));
+    expect(names().slice(0, 3)).toEqual(['gpt-6-luna:decisions', 'gpt-5', 'dall-e-3']);
+    await user.click(within(screen.getByRole('columnheader', { name: /Grants/ })).getByRole('button'));
+    expect(names()[0]).toBe('gpt-5');
+  });
+
+  // The legacy ?sort=name link meant A-Z; it used to be the header's Z-A key
+  // too, so the Model header could never sort descending.
+  it('toggles the Model header to Z-A and back', async () => {
+    mockModels(catalog);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('5 models');
+    await user.click(within(screen.getByRole('columnheader', { name: /^Model/ })).getByRole('button'));
+    expect(names()[0]).toBe('typesafe/jev-router');
+    await user.click(within(screen.getByRole('columnheader', { name: /^Model/ })).getByRole('button'));
+    expect(names()[0]).toBe('dall-e-3');
+  });
+});
