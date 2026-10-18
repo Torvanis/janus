@@ -248,6 +248,9 @@ type pendingRoute struct {
 	// callerBody is the request before the route rewrote it, so an
 	// evaluation replays what the default would really have been sent.
 	callerBody []byte
+	// instructions records what router instructions did to the forwarded
+	// body: router, route, router+route, not_applied, or "" (none set).
+	instructions string
 }
 
 // routedReasoning returns what this replica learned about a catalog
@@ -800,9 +803,13 @@ func (s *Server) evalSample(w http.ResponseWriter, pr *pendingRoute, event *stor
 	}
 	// Results are tallied per configured pairing (route model, default,
 	// judge), so the ids recorded are the configured ones.
+	// The routed answer already followed the route's instructions (they
+	// are in the served body); the default's replay gets the router-wide
+	// and default instructions, so the judge compares like with like.
 	cw := &evalCapture{ResponseWriter: w, limit: 256 << 10, router: pr.router.ID, routeID: route.ID, routedModelID: route.ModelID,
 		defaultModelID: pr.cfg.Default.ModelID, defaultThinking: routing.Thinking(pr.cfg.Default.Thinking, pr.answer.Difficulty),
-		eval: ev, body: append([]byte(nil), callerBody...), started: time.Now()}
+		defaultInstructions: defaultInstructions(pr.cfg),
+		eval:                ev, body: append([]byte(nil), callerBody...), started: time.Now()}
 	return cw, cw
 }
 
@@ -838,9 +845,11 @@ type evalCapture struct {
 	routedModelID   string
 	defaultModelID  string
 	defaultThinking string
-	eval            store.RouteEval
-	body            []byte
-	started         time.Time
+	// defaultInstructions is what the default adds to the system prompt.
+	defaultInstructions string
+	eval                store.RouteEval
+	body                []byte
+	started             time.Time
 	// done is set once the slot has been handed on or released.
 	done bool
 	// overflowed reports that the answer was longer than the capture: a
@@ -951,7 +960,8 @@ func (s *Server) finishEvalSample(c *evalCapture, event *store.UsageEvent) {
 	}
 	s.routingRT().eval.enqueue(&evalJob{
 		requestID: event.RequestID, routerID: c.router, routeID: c.routeID, routedModelID: c.routedModelID,
-		defaultModelID: c.defaultModelID, defaultThinking: c.defaultThinking, cfg: c.eval, body: c.body, routedAnswer: text,
+		defaultModelID: c.defaultModelID, defaultThinking: c.defaultThinking, defaultInstructions: c.defaultInstructions,
+		cfg: c.eval, body: c.body, routedAnswer: text,
 		routedCost: event.CostNano, routedLatency: time.Since(c.started),
 		userID: event.UserID, serviceTokenID: event.ServiceTokenID, groupIDs: event.GroupIDs,
 	})

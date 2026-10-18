@@ -1097,6 +1097,82 @@ export interface SecgwCategory {
   name: string;
   tier: 'critical' | 'standard' | 'contextual';
 }
+export type SecgwCategoryGroup = 'safety' | 'family' | 'custom';
+
+/** One security category (Security → Categories). */
+export interface SecurityCategory {
+  id: string;
+  slug: string;
+  name: string;
+  includes: string;
+  excludes: string;
+  linked_slug: string;
+  linked_name?: string;
+  min_confidence: number;
+  examples: string[];
+  group: SecgwCategoryGroup;
+  builtin: boolean;
+  enabled: boolean;
+  sort_order: number;
+  used_by: string[];
+  tier?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityCategoriesDoc {
+  categories: SecurityCategory[];
+  insights_categories: Array<{ slug: string; name: string; parent_slug: string }>;
+  classifiers: Array<{ id: string; name: string; upstream_name: string; status: string }>;
+  default_slugs: string[];
+  max_per_check: number;
+}
+
+export interface SecurityCategoryScore {
+  slug: string;
+  name: string;
+  probability: number;
+  min_confidence: number;
+  counts: boolean;
+}
+
+export interface SecurityCategoryTest {
+  status: 'ok' | 'error';
+  error?: string;
+  classifier: string;
+  ask: string;
+  latency_ms: number;
+  calls: number;
+  scores: SecurityCategoryScore[];
+  counted: string[];
+}
+
+export interface SecurityCategoryBatch {
+  classifier: string;
+  total: number;
+  correct: number;
+  failed: number;
+  accuracy: number;
+  elapsed_ms: number;
+  calls_per_example: number;
+  categories: Array<{
+    slug: string;
+    name: string;
+    group: SecgwCategoryGroup;
+    total: number;
+    correct: number;
+    accuracy: number;
+    misses: Array<{
+      expected: string;
+      got: string;
+      got_name: string;
+      confidence: number;
+      expected_probability: number;
+      text: string;
+      error?: string;
+    }>;
+  }>;
+}
 export type SecgwMode = 'observe' | 'redact' | 'block';
 export type SecgwDirection = 'ingress' | 'egress' | 'both';
 
@@ -1187,6 +1263,8 @@ export interface SecgwViolation {
   policy_name?: string;
   term_list_name?: string;
   capture_disabled?: boolean;
+  /** Category names of a content-safety finding, in rule_id order. */
+  rule_names?: string[];
 }
 
 type SecgwResolvedCheck = SecgwCheck & {
@@ -1216,6 +1294,7 @@ export interface SecgwOverview {
   violations_24h: Record<string, Record<string, number>>;
   protocols: string[];
   check_kinds: string[];
+  top_categories_7d?: Array<{ slug: string; name: string; count: number }>;
 }
 
 export interface SecgwEffective {
@@ -1233,6 +1312,7 @@ interface SecgwDryRunViolation {
   offset: number;
   length: number;
   classifier_score?: number;
+  rule_names?: string[];
 }
 
 export interface SecgwDryRunResult {

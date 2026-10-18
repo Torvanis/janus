@@ -1,8 +1,8 @@
 # Janus Edge Helm chart
 
-Chart **0.2.0**, application **2026.10.3**. The chart uses semantic versioning;
+Chart **0.2.1**, application **2026.10.4**. The chart uses semantic versioning;
 the application uses `YEAR.MONTH.RELEASE_NUMBER`. The default public gateway
-image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.10.3`.
+image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.10.4`.
 A nonempty `image.digest` takes precedence over `image.tag`; clear the digest
 explicitly when selecting a different tag.
 
@@ -21,11 +21,11 @@ can reach your private registry, push it there, and set `image.repository`
 (and clear `image.digest`, or set it to the digest your registry reports):
 
 ```bash
-podman load -i janus-container-image-2026.10.3-linux-amd64.tar   # or: docker load -i …
-podman tag ghcr.io/torvanis/janus:2026.10.3 registry.example.internal/janus:2026.10.3
-podman push registry.example.internal/janus:2026.10.3
-helm upgrade --install janus ./janus-helm-chart-0.2.0.tgz --namespace janus \
-  --set image.repository=registry.example.internal/janus --set image.tag=2026.10.3 \
+podman load -i janus-container-image-2026.10.4-linux-amd64.tar   # or: docker load -i …
+podman tag ghcr.io/torvanis/janus:2026.10.4 registry.example.internal/janus:2026.10.4
+podman push registry.example.internal/janus:2026.10.4
+helm upgrade --install janus ./janus-helm-chart-0.2.1.tgz --namespace janus \
+  --set image.repository=registry.example.internal/janus --set image.tag=2026.10.4 \
   --set image.digest= …
 ```
 

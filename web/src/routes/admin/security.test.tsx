@@ -11,7 +11,17 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { SecgwBinding, SecgwEffective, SecgwOverview, SecgwPolicy, SecgwTermList, SecgwViolation } from '../../lib/types';
+import type {
+  SecgwBinding,
+  SecgwEffective,
+  SecgwOverview,
+  SecgwPolicy,
+  SecgwTermList,
+  SecgwViolation,
+  SecurityCategoriesDoc,
+  SecurityCategory,
+} from '../../lib/types';
+import { categoryCalls, parentalControlsTemplate } from '../../lib/securityTemplates';
 import { ToastProvider } from '../../components/ui';
 import { SecurityPage } from './Security';
 
@@ -95,6 +105,50 @@ const violation: SecgwViolation = {
   created_at: '2026-08-02T00:00:00Z',
 };
 
+function cat(
+  slug: string,
+  name: string,
+  group: SecurityCategory['group'],
+  extra: Partial<SecurityCategory> = {},
+): SecurityCategory {
+  return {
+    id: `scat_${slug}`,
+    slug,
+    name,
+    includes: `${name} requests. More detail here.`,
+    excludes: '',
+    linked_slug: '',
+    min_confidence: 0.5,
+    examples: [],
+    group,
+    builtin: group !== 'custom',
+    enabled: true,
+    sort_order: 10,
+    used_by: [],
+    created_at: '2026-10-17T00:00:00Z',
+    updated_at: '2026-10-17T00:00:00Z',
+    ...extra,
+  };
+}
+
+const categoriesDoc: SecurityCategoriesDoc = {
+  categories: [
+    cat('violent_crimes', 'Violent crimes', 'safety', { tier: 'critical' }),
+    cat('sex_crimes', 'Sex-related crimes', 'safety', { tier: 'critical' }),
+    cat('child_sexual_exploitation', 'Child sexual exploitation', 'safety', { tier: 'critical' }),
+    cat('indiscriminate_weapons', 'Indiscriminate weapons', 'safety', { tier: 'critical' }),
+    cat('self_harm', 'Suicide and self-harm', 'safety', { tier: 'critical' }),
+    cat('elections', 'Elections', 'safety'),
+    cat('homework_shortcut', 'Homework done for them', 'family', { min_confidence: 0.6, used_by: ['Kids'] }),
+    cat('feeling_low', 'Feeling low or unsafe', 'family', { min_confidence: 0.35 }),
+    cat('crypto_scams', 'Crypto scams', 'custom', { linked_slug: 'finance', linked_name: 'Finance' }),
+  ],
+  insights_categories: [{ slug: 'finance', name: 'Finance', parent_slug: '' }],
+  classifiers: [{ id: 'm-jev', name: 'Jev', upstream_name: 'OpenRouter', status: 'enabled' }],
+  default_slugs: ['violent_crimes', 'sex_crimes', 'child_sexual_exploitation', 'indiscriminate_weapons', 'self_harm'],
+  max_per_check: 25,
+};
+
 /** Routes GET calls by path so each tab gets the fixtures it asks for. */
 function routeGets(extra: Record<string, unknown> = {}) {
   mocked.get.mockImplementation(async (path: string) => {
@@ -106,6 +160,7 @@ function routeGets(extra: Record<string, unknown> = {}) {
     if (path.endsWith('/secgw/term-lists')) return { term_lists: [termList] };
     if (path.includes('/secgw/violations?')) return { violations: [violation] };
     if (path.endsWith('/secgw/classifiers')) return { classifiers: [], protocols: [] };
+    if (path.endsWith('/secgw/categories')) return categoriesDoc;
     if (path.endsWith('/secgw/rules')) {
       return {
         secret_rules: [{ id: 'aws-access-key', description: 'AWS access key', severity: 'high', enabled: true }],
@@ -656,5 +711,321 @@ describe('security — bindings (upstream provider rung)', () => {
 
     await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
     expect(mocked.post.mock.calls[0]![1]).toEqual({ policy_id: 'p1', scope_type: 'upstream', scope_id: 'up-local' });
+  });
+});
+
+describe('security — categories', () => {
+  it('is a findable tab that lists the three groups by name, with the first sentence and who uses each', async () => {
+    renderPage('/admin/security/categories');
+    expect(screen.getByRole('tab', { name: 'Categories' }).getAttribute('aria-selected')).toBe('true');
+    const table = (await screen.findByText('Homework done for them')).closest('table')!;
+    for (const group of ['Safety', 'Family', 'Your categories']) {
+      expect(within(table).getByText(group)).toBeTruthy();
+    }
+    const row = within(table).getByText('Homework done for them').closest('tr')!;
+    expect(within(row).getByText('Homework done for them requests.')).toBeTruthy();
+    expect(within(row).getByText('60%')).toBeTruthy();
+    expect(within(row).getByText('Kids')).toBeTruthy();
+    // Built-ins reset, custom ones delete.
+    expect(within(row).getByRole('button', { name: 'Reset Homework done for them' })).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Delete Homework done for them' })).toBeNull();
+    const custom = within(table).getByText('Crypto scams').closest('tr')!;
+    expect(within(custom).getByText('Follows Usage insights: Finance')).toBeTruthy();
+    expect(within(custom).getByRole('button', { name: 'Delete Crypto scams' })).toBeTruthy();
+    // Never a hazard code.
+    expect(screen.queryByText(/\bS\d{1,2}\b/)).toBeNull();
+  });
+
+  it('creates a category from the editor drawer', async () => {
+    mocked.post.mockResolvedValue({ category: cat('gaming', 'Gaming in class', 'custom') });
+    renderPage('/admin/security/categories');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'New category' }));
+    const drawer = screen.getByRole('dialog');
+    await user.type(within(drawer).getByLabelText('Name', { selector: 'input' }), 'Gaming in class');
+    await user.type(within(drawer).getByLabelText('Includes', { selector: 'textarea' }), 'Playing games during a lesson.');
+    await user.type(
+      within(drawer).getByLabelText('Test examples (one per line)', { selector: 'textarea' }),
+      'best io games{enter}unblocked games',
+    );
+    await user.click(within(drawer).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
+    const [path, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/api/v1/admin/secgw/categories');
+    expect(body).toMatchObject({
+      name: 'Gaming in class',
+      includes: 'Playing games during a lesson.',
+      linked_slug: '',
+      min_confidence: 0.5,
+      enabled: true,
+      examples: ['best io games', 'unblocked games'],
+    });
+  });
+
+  it('tries a request and runs the batch test, showing names and misses', async () => {
+    mocked.post.mockImplementation(async (path: string) => {
+      if (path.endsWith('/categories/test')) {
+        return {
+          status: 'ok',
+          classifier: 'Jev · OpenRouter',
+          ask: 'together',
+          latency_ms: 120,
+          calls: 1,
+          scores: [
+            { slug: 'homework_shortcut', name: 'Homework done for them', probability: 0.82, min_confidence: 0.6, counts: true },
+            { slug: 'feeling_low', name: 'Feeling low or unsafe', probability: 0.1, min_confidence: 0.35, counts: false },
+          ],
+          counted: ['homework_shortcut'],
+        };
+      }
+      return {
+        classifier: 'Jev · OpenRouter',
+        total: 4,
+        correct: 3,
+        failed: 0,
+        accuracy: 0.75,
+        elapsed_ms: 900,
+        calls_per_example: 1,
+        categories: [
+          {
+            slug: 'feeling_low',
+            name: 'Feeling low or unsafe',
+            group: 'family',
+            total: 2,
+            correct: 1,
+            accuracy: 0.5,
+            misses: [
+              {
+                expected: 'feeling_low',
+                got: 'none',
+                got_name: 'None of these',
+                confidence: 0.7,
+                expected_probability: 0.2,
+                text: 'Everyone at school ignores me',
+              },
+            ],
+          },
+        ],
+      };
+    });
+    renderPage('/admin/security/categories');
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Request to test'), 'write my essay');
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+    expect(await screen.findByText('Would count: Homework done for them')).toBeTruthy();
+    const [path, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/api/v1/admin/secgw/categories/test');
+    expect(body).toMatchObject({ text: 'write my essay', classifier_model_id: 'm-jev' });
+
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+    expect(await screen.findByText(/75% caught \(3 of 4\)/)).toBeTruthy();
+    const missRow = screen.getByText('None of these').closest('tr')!;
+    await user.click(missRow);
+    expect(await screen.findByText(/Everyone at school ignores me/)).toBeTruthy();
+  });
+});
+
+describe('security — content safety method', () => {
+  const jev = { id: 'm-jev', name: 'jev', display_name: 'Jev', classifier_role: 'decision', status: 'enabled' };
+  const lg = {
+    id: 'm-lg',
+    name: 'llama-guard-4',
+    display_name: 'Llama Guard 4',
+    classifier_role: 'generative_guard',
+    status: 'enabled',
+  };
+
+  it('starts a new check on Categories with the critical safety categories and shows the call count', async () => {
+    routeGets({ '/api/v1/admin/secgw/classifiers': { classifiers: [jev, lg], protocols: [] } });
+    mocked.post.mockResolvedValue({ policy });
+    renderPage('/admin/security/policies');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'New policy' }));
+    const drawer = screen.getByRole('dialog');
+    await user.type(within(drawer).getByLabelText(/^Name/), 'Kids');
+    await user.click(within(drawer).getByLabelText('Content safety: Enabled'));
+    await user.click(within(drawer).getByRole('button', { name: 'Content safety: Details' }));
+    const method = within(drawer).getByRole('radiogroup', { name: 'Method' });
+    expect(within(method).getByRole('radio', { name: 'Categories' }).getAttribute('aria-checked')).toBe('true');
+    // Only decision models are offered for Categories.
+    const picker = within(drawer).getAllByLabelText('Classifier model', { selector: 'select' }).at(-1) as HTMLSelectElement;
+    expect(Array.from(picker.options).map((o) => o.value)).toEqual(['', 'm-jev']);
+    await user.selectOptions(picker, 'm-jev');
+    expect(await within(drawer).findByText('5 selected (at most 25)')).toBeTruthy();
+    expect(within(drawer).getByRole('button', { name: 'Violent crimes' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(drawer).getByRole('button', { name: 'Elections' }).getAttribute('aria-pressed')).toBe('false');
+    expect(within(drawer).getByText('One classifier call per request.')).toBeTruthy();
+    await user.click(within(drawer).getByRole('button', { name: 'Feeling low or unsafe' }));
+    await user.selectOptions(within(drawer).getByLabelText('Ask', { selector: 'select' }), 'separately');
+    expect(within(drawer).getByText('6 classifier calls per request, sent in parallel.')).toBeTruthy();
+    await user.click(within(drawer).getByRole('button', { name: 'Create policy' }));
+    await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
+    const [, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
+    const cs = (body.checks as Array<Record<string, unknown>>).find((c) => c.kind === 'content_safety')!;
+    expect(cs).toMatchObject({
+      enabled: true,
+      classifier_model_id: 'm-jev',
+      options: {
+        method: 'categories',
+        ask: 'separately',
+        safety: [
+          'violent_crimes',
+          'sex_crimes',
+          'child_sexual_exploitation',
+          'indiscriminate_weapons',
+          'self_harm',
+          'feeling_low',
+        ],
+      },
+    });
+  });
+
+  it('opens an existing check without a method as Llama Guard compatible, unchanged', async () => {
+    const legacy: SecgwPolicy = {
+      ...policy,
+      checks: [
+        {
+          kind: 'content_safety',
+          enabled: true,
+          mode: 'observe',
+          direction: 'ingress',
+          classifier_model_id: 'm-lg',
+          options: { categories: ['S9'], timeout_ms: 5000 },
+        },
+      ],
+    };
+    routeGets({
+      '/api/v1/admin/secgw/classifiers': {
+        classifiers: [jev, lg],
+        protocols: [],
+        taxonomy: [{ code: 'S9', name: 'Indiscriminate Weapons', tier: 'critical' }],
+      },
+      '/api/v1/admin/secgw/policies': { policies: [legacy] },
+    });
+    mocked.put.mockResolvedValue({ policy: legacy });
+    renderPage('/admin/security/policies');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const drawer = screen.getByRole('dialog');
+    await user.click(within(drawer).getByRole('button', { name: 'Content safety: Details' }));
+    const method = within(drawer).getByRole('radiogroup', { name: 'Method' });
+    expect(within(method).getByRole('radio', { name: 'Llama Guard compatible' }).getAttribute('aria-checked')).toBe('true');
+    await user.click(within(drawer).getByRole('button', { name: 'Save policy' }));
+    await waitFor(() => expect(mocked.put).toHaveBeenCalledTimes(1));
+    const [, body] = mocked.put.mock.calls[0] as [string, { checks: Array<Record<string, unknown>> }];
+    const cs = body.checks.find((c) => c.kind === 'content_safety')!;
+    expect(cs.options).toEqual({ categories: ['S9'], timeout_ms: 5000 });
+    expect(cs.classifier_model_id).toBe('m-lg');
+  });
+
+  it('switching to Categories drops a Llama Guard classifier', async () => {
+    const legacy: SecgwPolicy = {
+      ...policy,
+      checks: [
+        {
+          kind: 'content_safety',
+          enabled: true,
+          mode: 'observe',
+          direction: 'ingress',
+          classifier_model_id: 'm-lg',
+          options: {},
+        },
+      ],
+    };
+    routeGets({
+      '/api/v1/admin/secgw/classifiers': { classifiers: [jev, lg], protocols: [] },
+      '/api/v1/admin/secgw/policies': { policies: [legacy] },
+    });
+    mocked.put.mockResolvedValue({ policy: legacy });
+    renderPage('/admin/security/policies');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const drawer = screen.getByRole('dialog');
+    await user.click(within(drawer).getByRole('button', { name: 'Content safety: Details' }));
+    await user.click(within(drawer).getByRole('radio', { name: 'Categories' }));
+    await user.click(within(drawer).getByRole('button', { name: 'Save policy' }));
+    await waitFor(() => expect(mocked.put).toHaveBeenCalledTimes(1));
+    const [, body] = mocked.put.mock.calls[0] as [string, { checks: Array<Record<string, unknown>> }];
+    const cs = body.checks.find((c) => c.kind === 'content_safety')!;
+    expect(cs.classifier_model_id).toBeUndefined();
+    expect(cs.options).toMatchObject({ method: 'categories' });
+  });
+
+  it('opens the Parental controls template in the editor with Family and critical categories', async () => {
+    routeGets({ '/api/v1/admin/secgw/classifiers': { classifiers: [jev], protocols: [] } });
+    mocked.post.mockResolvedValue({ policy });
+    renderPage('/admin/security/policies');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Parental controls template' }));
+    const drawer = await screen.findByRole('dialog');
+    expect((within(drawer).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Parental controls');
+    await user.click(within(drawer).getByRole('button', { name: 'Create policy' }));
+    await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
+    const [path, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/api/v1/admin/secgw/policies');
+    const checks = body.checks as Array<Record<string, unknown>>;
+    const cs = checks.find((c) => c.kind === 'content_safety')!;
+    // No license in this fixture's session: the editor offers enforcement
+    // (the API is the authority), so the template blocks.
+    expect(cs).toMatchObject({ enabled: true, mode: 'block', direction: 'both', classifier_model_id: 'm-jev' });
+    expect((cs.options as { safety: string[] }).safety).toEqual([
+      'homework_shortcut',
+      'feeling_low',
+      'violent_crimes',
+      'sex_crimes',
+      'child_sexual_exploitation',
+      'indiscriminate_weapons',
+      'self_harm',
+    ]);
+    expect(checks.find((c) => c.kind === 'secrets')).toMatchObject({ enabled: true });
+    expect(checks.find((c) => c.kind === 'pii')).toMatchObject({
+      enabled: true,
+      options: { classes: ['email', 'phone', 'pan'] },
+    });
+  });
+
+  it('builds the template to block when enforcement is licensed', () => {
+    const tpl = parentalControlsTemplate({ name: 'P', description: '', categories: categoriesDoc.categories, enforce: true });
+    expect(tpl.checks.map((c) => `${c.kind}:${c.mode}`)).toEqual(['content_safety:block', 'secrets:block', 'pii:redact']);
+    expect(categoryCalls(26, 'together')).toBe(2);
+    expect(categoryCalls(3, 'separately')).toBe(3);
+  });
+});
+
+describe('security — violations by category', () => {
+  it('shows category names, never codes, and filters by category', async () => {
+    routeGets({
+      '/api/v1/admin/secgw/violations?': {
+        violations: [
+          {
+            ...violation,
+            kind: 'content_safety',
+            rule_id: 'homework_shortcut,feeling_low',
+            rule_names: ['Homework done for them', 'Feeling low or unsafe'],
+          },
+          { ...violation, id: 'v-legacy', kind: 'content_safety', rule_id: 'S9' },
+        ],
+      },
+    });
+    renderPage('/admin/security/violations');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Content safety: Homework done for them, Feeling low or unsafe')).toBeTruthy();
+    expect(screen.getByText('Content safety: Indiscriminate weapons')).toBeTruthy();
+    expect(screen.queryByText(/S9/)).toBeNull();
+    await user.selectOptions(screen.getByLabelText('Category', { selector: 'select' }), 'feeling_low');
+    await waitFor(() => expect(mocked.get.mock.calls.some(([p]) => (p as string).includes('category=feeling_low'))).toBe(true));
+  });
+
+  it('lists the top categories on the overview', async () => {
+    routeGets({
+      '/api/v1/admin/secgw/overview': {
+        ...overview,
+        top_categories_7d: [{ slug: 'feeling_low', name: 'Feeling low or unsafe', count: 3 }],
+      },
+    });
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Top categories (7 days)' });
+    expect(within(table).getByText('Feeling low or unsafe')).toBeTruthy();
+    expect(within(table).getByText('3')).toBeTruthy();
   });
 });

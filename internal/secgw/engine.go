@@ -721,13 +721,26 @@ func (e *Engine) EgressContentSafety(ctx context.Context, eff *Effective, reqBod
 				if len(msgs) == 0 || msgs[len(msgs)-1].Role != "assistant" {
 					return nil // no answer text to judge
 				}
-				vs, err := e.egressSafetyFromDecision(ctx, c, d, msgs)
+				var vs []Violation
+				var err error
+				if o := contentSafetyOptions(c); o.usesCategories() {
+					vs, err = e.egressCategoriesFromDecision(ctx, c, d, msgs, o)
+				} else {
+					vs, err = e.egressSafetyFromDecision(ctx, c, d, msgs)
+				}
 				if err != nil {
 					e.logger.WarnContext(ctx, "secgw: egress content guard call failed", "error", err.Error(), "model", c.ClassifierModelID)
 				}
 				return vs
 			}
 		}
+	}
+	if contentSafetyOptions(c).usesCategories() {
+		// Security categories are asked of decision models only; the
+		// policy API refuses anything else, so this is a model whose role
+		// changed after the policy was saved.
+		e.logger.WarnContext(ctx, "secgw: egress content guard call failed", "error", errCategoriesNeedDecision.Error(), "model", c.ClassifierModelID)
+		return nil
 	}
 	vs, _, err := e.judgeContentSafety(ctx, c, store.SecgwDirectionEgress, msgs)
 	if err != nil {

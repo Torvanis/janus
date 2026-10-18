@@ -23,16 +23,16 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.10.3
+## Release 2026.10.4
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.3`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.4`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.10.3` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.3): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.10.4` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.4): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus-helm-chart/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.2.0](https://github.com/Torvanis/janus/releases/download/v2026.10.3/janus-helm-chart-0.2.0.tgz)
-- Offline container images for air-gapped installs: `janus-container-image-2026.10.3-linux-amd64.tar` and `janus-container-image-2026.10.3-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.10.3) (`docker load -i` or `podman load -i`).
+- [Download Helm chart 0.2.1](https://github.com/Torvanis/janus/releases/download/v2026.10.4/janus-helm-chart-0.2.1.tgz)
+- Offline container images for air-gapped installs: `janus-container-image-2026.10.4-linux-amd64.tar` and `janus-container-image-2026.10.4-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.10.4) (`docker load -i` or `podman load -i`).
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -43,7 +43,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.3/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.4/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -61,11 +61,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.3` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.4` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.10.3 .
+docker build -t janus:2026.10.4 .
 ```
 
 This starts a **local evaluation** instance;
@@ -84,7 +84,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.10.3
+  janus:2026.10.4
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -164,7 +164,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.10.3
+git checkout v2026.10.4
 make web-deps
 make verify
 make build

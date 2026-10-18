@@ -52,6 +52,7 @@ func (s *Server) mountSecgwRoutes(r chi.Router) {
 	r.Get("/admin/secgw/classifiers", s.handleListSecgwClassifiers)
 	r.Put("/admin/secgw/classifiers/{modelID}", s.handleSetSecgwClassifier)
 	r.Get("/admin/secgw/rules", s.handleListSecgwRules)
+	s.mountSecgwCategoryRoutes(r)
 }
 
 // --- overview -----------------------------------------------------------------
@@ -79,6 +80,11 @@ func (s *Server) handleSecgwOverview(w http.ResponseWriter, r *http.Request) {
 		writeSecgwError(w, r, err)
 		return
 	}
+	top, err := s.Store.SecgwTopCategories(ctx, time.Now().UTC().Add(-7*24*time.Hour), 10)
+	if err != nil {
+		writeSecgwError(w, r, err)
+		return
+	}
 	enabled := 0
 	for _, p := range policies {
 		if p.Enabled {
@@ -86,14 +92,15 @@ func (s *Server) handleSecgwOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"enabled":          len(bindings) > 0,
-		"policies":         len(policies),
-		"policies_enabled": enabled,
-		"bindings":         len(bindings),
-		"classifiers":      len(classifiers),
-		"violations_24h":   counts,
-		"protocols":        classify.Protocols(),
-		"check_kinds":      store.SecgwCheckKinds(),
+		"enabled":           len(bindings) > 0,
+		"policies":          len(policies),
+		"policies_enabled":  enabled,
+		"bindings":          len(bindings),
+		"classifiers":       len(classifiers),
+		"violations_24h":    counts,
+		"protocols":         classify.Protocols(),
+		"check_kinds":       store.SecgwCheckKinds(),
+		"top_categories_7d": top,
 	})
 }
 
@@ -209,6 +216,7 @@ func secgwPolicyAudit(p *store.SecgwPolicy) map[string]any {
 // proxy never discovers a misconfiguration under load.
 func (s *Server) validateSecgwClassifierRefs(ctx context.Context, p *store.SecgwPolicy) error {
 	for i, c := range p.Checks {
+		var csOpts *secgw.ContentSafetyOptions
 		if c.Kind == store.SecgwCheckContentSafety && len(c.Options) > 0 {
 			// The taxonomy lives beside the guard protocol, not in store,
 			// so unknown codes are refused here rather than at scan time.
@@ -221,8 +229,14 @@ func (s *Server) validateSecgwClassifierRefs(ctx context.Context, p *store.Secgw
 					return ErrInvalidRequest("checks[" + strconv.Itoa(i) + "].options.categories: unknown category " + code).WithParam("checks")
 				}
 			}
+			csOpts = &o
 		}
 		if c.ClassifierModelID == "" {
+			if csOpts != nil {
+				if err := s.validateContentSafetyMethod(ctx, i, c, *csOpts, nil); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		m, err := s.Store.ModelByID(ctx, c.ClassifierModelID)
@@ -241,6 +255,11 @@ func (s *Server) validateSecgwClassifierRefs(ctx context.Context, p *store.Secgw
 		// generic "classifier failed". Refuse it here with the reason.
 		if want := store.ClassifierRoleForKind(c.Kind); want != "" && !store.ClassifierRoleServes(m.ClassifierRole, c.Kind) {
 			return ErrInvalidRequest("checks[" + strconv.Itoa(i) + "].classifier_model_id: " + m.PublicName() + " is a " + m.ClassifierRole + " classifier; " + string(c.Kind) + " needs a " + want + " or decision model.").WithParam("checks")
+		}
+		if csOpts != nil {
+			if err := s.validateContentSafetyMethod(ctx, i, c, *csOpts, m); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -480,7 +499,7 @@ func (s *Server) handleExportSecgwTermList(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleListSecgwViolations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.SecgwViolationFilter{Kind: q.Get("kind"), Action: q.Get("action"), UserID: q.Get("user_id"), ModelName: q.Get("model")}
+	f := store.SecgwViolationFilter{Kind: q.Get("kind"), Action: q.Get("action"), UserID: q.Get("user_id"), ModelName: q.Get("model"), Category: q.Get("category")}
 	if v := q.Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			f.Since = t
@@ -626,8 +645,13 @@ func (s *Server) handleSecgwDryRun(w http.ResponseWriter, r *http.Request) {
 			writeSecgwError(w, r, err)
 			return
 		}
+		cats, err := s.Store.SecgwCategoryMap(ctx)
+		if err != nil {
+			writeSecgwError(w, r, err)
+			return
+		}
 		snap := &store.SecgwSnapshot{Policies: map[string]*store.SecgwPolicy{p.ID: p},
-			Bindings: []*store.SecgwBinding{{ID: "dry-run", PolicyID: p.ID, ScopeType: store.SecgwScopeOrg}}, TermLists: lists}
+			Bindings: []*store.SecgwBinding{{ID: "dry-run", PolicyID: p.ID, ScopeType: store.SecgwScopeOrg}}, TermLists: lists, Categories: cats}
 		eng, err = secgw.NewEngine(snap, s.secgwClassifiers(), s.Logger)
 		if err != nil {
 			WriteError(w, r, ErrInvalidRequest("policy does not compile: "+err.Error()))
@@ -669,10 +693,26 @@ func (s *Server) handleSecgwDryRun(w http.ResponseWriter, r *http.Request) {
 		Offset       int     `json:"offset"`
 		Length       int     `json:"length"`
 		Score        float64 `json:"classifier_score,omitempty"`
+		// RuleNames names a content-safety finding's categories.
+		RuleNames []string `json:"rule_names,omitempty"`
 	}
 	out := make([]shown, 0, len(dec.Violations))
+	var catNames map[string]string
 	for _, v := range dec.Violations {
-		out = append(out, shown{Kind: string(v.Kind), RuleID: v.RuleID, Severity: v.Severity, Action: v.Action, MessageIndex: v.MessageIndex, Offset: v.Offset, Length: v.Length, Score: v.ClassifierScore})
+		sv := shown{Kind: string(v.Kind), RuleID: v.RuleID, Severity: v.Severity, Action: v.Action, MessageIndex: v.MessageIndex, Offset: v.Offset, Length: v.Length, Score: v.ClassifierScore}
+		if v.Kind == store.SecgwCheckContentSafety && v.RuleID != "" {
+			if catNames == nil {
+				catNames = s.Store.SecgwCategoryNames(ctx)
+			}
+			for _, part := range strings.Split(v.RuleID, ",") {
+				if name := catNames[part]; name != "" {
+					sv.RuleNames = append(sv.RuleNames, name)
+				} else {
+					sv.RuleNames = append(sv.RuleNames, part)
+				}
+			}
+		}
+		out = append(out, sv)
 	}
 	resp := map[string]any{"action": dec.Action, "violations": out, "redactions": dec.Redactions, "block_kind": dec.BlockKind, "classifier_failed": dec.ClassifierFailed}
 	if dec.Action == store.SecgwActionRedacted {

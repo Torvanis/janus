@@ -288,7 +288,12 @@ func (p *SecgwPolicy) Validate() error {
 				// streaming ones pass would be a control that only works
 				// when the caller happens not to stream. Say so at save
 				// time rather than let an admin believe they have it.
-				if c.Mode == SecgwModeBlock && c.Direction != SecgwDirectionIngress {
+				// A categories check on both directions may block: it
+				// blocks requests and observes replies, which the editor
+				// says in so many words. Egress alone would never block.
+				method, _ := SecgwContentSafetyCategories(c.Options)
+				blocksIngress := c.Direction == SecgwDirectionIngress || (method == SecgwMethodCategories && c.Direction == SecgwDirectionBoth)
+				if c.Mode == SecgwModeBlock && !blocksIngress {
 					return &ValidationError{Field: fmt.Sprintf("checks[%d].mode", i), Message: "content_safety can only block on ingress in this version; egress responses are observed and logged, never blocked"}
 				}
 			}
@@ -497,6 +502,11 @@ type SecgwViolation struct {
 	// never will be. Without it the UI can only say "no text was captured",
 	// which reads as a failure rather than the configured behaviour.
 	CaptureDisabled bool `json:"capture_disabled,omitempty"`
+	// RuleNames are the category names of a content-safety violation's
+	// rule_id, in the same order: security categories by their name, and
+	// legacy hazard codes by the safety category they correspond to, so
+	// the UI never shows a code.
+	RuleNames []string `json:"rule_names,omitempty"`
 
 	// matchTextEncrypted is the at-rest envelope; decrypted on demand by a
 	// caller holding the violations-read capability.
@@ -518,6 +528,9 @@ type SecgwViolationFilter struct {
 	Action    string
 	UserID    string
 	ModelName string
+	// Category narrows to content-safety violations naming one security
+	// category (by slug).
+	Category string
 	// RequestID narrows to the violations raised on one request, for the
 	// security section of that request's detail drawer.
 	RequestID string

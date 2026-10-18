@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026.10.4] — 2026-10-18
+
+### Added
+
+- **Security categories for content safety** (Security → Categories). Content safety checks now default to a new **Categories** method: a decision model checks the categories a policy selects, and each one counts when the classifier is at least as sure as that category's minimum confidence.
+  - Built in: 14 **Safety** categories (the standard hazard categories under plain names) and 5 **Family** categories for parental controls: Homework done for them, Not suitable for children, Getting around parental controls, Sharing personal information, Feeling low or unsafe. Add your own, edit or reset the built-in wording, or follow a Usage insights category instead of writing one.
+  - Each category has what it includes and does not include, a minimum confidence and test examples. **Try a request** shows the probability for every category that is on; **Test all examples** runs every example at once.
+  - A check can ask about all its categories in one question, or one yes/no question per category; the policy editor shows the resulting classifier calls.
+  - The fixed hazard list stays available as **Llama Guard compatible**; existing checks keep it unchanged. A category an enabled policy uses can't be deleted or turned off.
+  - Blocking stays a Business feature; observing works on every edition.
+- **Parental controls policy template** (Security → Policies). Opens a new policy with content safety on the Family and critical Safety categories (requests and replies), plus secrets and personal data checks, ready to bind to a group or a family router.
+- **Violations by category.** Content safety violations show category names, the Violations tab filters by category, and the Security overview lists the top categories of the last seven days.
+- **Router instructions** (Auto-routing). A router can add text to the system prompt of the requests it serves: router-wide instructions for every request, plus instructions per route and for the default, up to 8,000 characters each.
+  - Added before the caller's own system prompt on chat completions, Anthropic messages and Responses requests, on every turn including sticky ones, after the Security Gateway and the classifier have read the caller's text (instructions are not scanned). They count as input tokens and callers can't see or remove them.
+  - Shadow routers apply the router and default instructions; evaluations replay the default with its instructions.
+  - The request log shows which instructions were added (router, route, default), and routers that disclose routing send `X-Janus-Route-Instructions`.
+- **Family router template** (Auto-routing → New router). Six routes for children: a supportive listener for feeling low or unsafe (with a pointer to a trusted adult and the 988 Lifeline), kind refusals for content not suitable for children and for getting around parental controls, a privacy coach for personal information, a tutor that gives hints instead of answers for homework shortcuts, and normal help for homework learning. Router-wide instructions keep every answer age-appropriate, teach rather than hand over homework, and never repeat personal details a child shares. Sticky is off, so every message is judged; missing Family categories are created with the router.
+
+### Fixed
+
+- **Classifier benchmark:** starting a benchmark could race with the run that had just begun and return a half-written result.
+
 ## [2026.10.3] — 2026-10-16
 
 ### Added

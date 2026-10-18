@@ -218,8 +218,10 @@ func tighten(prev, cand ResolvedCheck) (ResolvedCheck, string) {
 		// may ADD hazard categories to a mandatory org set, never drop one.
 		// Otherwise a group-scoped binding could quietly un-block S4.
 		if prev.Kind == store.SecgwCheckContentSafety {
-			merged, dropped := mergeCategories(prev.Options, cand.Options)
-			if dropped != "" && relaxed == "" {
+			merged, dropped, forced := mergeCategories(prev.Options, cand.Options)
+			if forced && relaxed == "" {
+				relaxed = "method set by the mandatory policy"
+			} else if dropped != "" && relaxed == "" {
 				relaxed = "cannot remove mandatory category " + dropped
 			}
 			out.Options = merged
@@ -278,13 +280,23 @@ func floorCoverage(floor, merged json.RawMessage) (json.RawMessage, string) {
 
 // ContentSafetyOptions is the content_safety check's kind-specific config.
 type ContentSafetyOptions struct {
-	// Categories are the S-codes that ENFORCE (block/observe per mode). A
-	// verdict naming only codes outside this set is still recorded as
-	// observed so the admin can see what the guard flagged, but never
-	// blocks. Empty means "every category" — the safe default when an
-	// admin has not narrowed it.
+	// Categories are the S-codes that ENFORCE (block/observe per mode) with
+	// the Llama Guard compatible method. A verdict naming only codes
+	// outside this set is still recorded as observed so the admin can see
+	// what the guard flagged, but never blocks. Empty means "every
+	// category" — the safe default when an admin has not narrowed it.
 	Categories []string `json:"categories"`
 	TimeoutMs  int      `json:"timeout_ms,omitempty"`
+	// Method is how the check asks: store.SecgwMethodCategories (security
+	// categories, decision models only) or store.SecgwMethodLlamaGuard.
+	// Empty is Llama Guard compatible, so checks saved before categories
+	// existed behave exactly as before.
+	Method string `json:"method,omitempty"`
+	// Safety are the security category slugs a categories check asks.
+	Safety []string `json:"safety,omitempty"`
+	// Ask is store.SecgwAskTogether (one question, the default) or
+	// store.SecgwAskSeparately (one yes/no question per category).
+	Ask string `json:"ask,omitempty"`
 }
 
 // Enforces reports whether any of the verdict's codes is selected. An
@@ -303,31 +315,70 @@ func (o ContentSafetyOptions) Enforces(codes []string) bool {
 	return false
 }
 
+// methodOf normalizes a check's method: empty is Llama Guard compatible.
+func methodOf(o ContentSafetyOptions) string {
+	if o.Method == "" {
+		return store.SecgwMethodLlamaGuard
+	}
+	return o.Method
+}
+
 // mergeCategories unions the floor's categories into the candidate's and
 // reports the first floor category the candidate tried to drop. Non-
 // category fields (timeout) follow the candidate. An EMPTY floor means
 // "everything", which a candidate can only tighten to — never narrow.
-func mergeCategories(floor, cand json.RawMessage) (json.RawMessage, string) {
+//
+// With security categories the union is of slugs. A candidate that asks
+// with a different method than the floor cannot change it: the floor's
+// options apply whole, and forced reports it.
+func mergeCategories(floor, cand json.RawMessage) (merged json.RawMessage, dropped string, forced bool) {
 	var f, c ContentSafetyOptions
 	_ = json.Unmarshal(floor, &f)
 	_ = json.Unmarshal(cand, &c)
+	if methodOf(f) != methodOf(c) {
+		if len(floor) == 0 {
+			// A floor with no options at all is Llama Guard compatible
+			// over every category.
+			return json.RawMessage(`{"categories":null}`), "", true
+		}
+		return floor, "", true
+	}
+	if f.usesCategories() {
+		have := map[string]bool{}
+		for _, x := range c.Safety {
+			have[x] = true
+		}
+		for _, x := range f.Safety {
+			if !have[x] {
+				if dropped == "" {
+					dropped = x
+				}
+				have[x] = true
+				c.Safety = append(c.Safety, x)
+			}
+		}
+		if dropped == "" {
+			return cand, "", false
+		}
+		out, _ := json.Marshal(c)
+		return out, dropped, false
+	}
 	if len(f.Categories) == 0 {
 		// Floor enforces all categories; the candidate cannot narrow it.
 		if len(c.Categories) > 0 {
 			c.Categories = nil
 			out, _ := json.Marshal(c)
-			return out, "(all categories are mandatory)"
+			return out, "(all categories are mandatory)", false
 		}
-		return cand, ""
+		return cand, "", false
 	}
 	have := map[string]bool{}
 	for _, x := range c.Categories {
 		have[x] = true
 	}
-	dropped := ""
 	if len(c.Categories) == 0 {
 		// Candidate says "all": that is a superset, nothing dropped.
-		return cand, ""
+		return cand, "", false
 	}
 	for _, x := range f.Categories {
 		if !have[x] {
@@ -338,5 +389,5 @@ func mergeCategories(floor, cand json.RawMessage) (json.RawMessage, string) {
 		}
 	}
 	out, _ := json.Marshal(c)
-	return out, dropped
+	return out, dropped, false
 }

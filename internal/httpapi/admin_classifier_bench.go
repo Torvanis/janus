@@ -511,6 +511,9 @@ func (s *Server) handleStartClassifierBenchmark(w http.ResponseWriter, r *http.R
 		WriteError(w, r, err)
 		return
 	}
+	// The response is the run as it starts: the run goroutine below
+	// rewrites b as it goes, so encoding b itself would race with it.
+	started := *b
 	ctx, cancel := context.WithCancelCause(context.Background())
 	untrack := s.trackBenchmark(b.ID, cancel)
 	s.pending.Add(1)
@@ -523,7 +526,7 @@ func (s *Server) handleStartClassifierBenchmark(w http.ResponseWriter, r *http.R
 		defer stop()
 		s.runBenchmark(ctx, b, cfg, rig)
 	}()
-	WriteJSON(w, http.StatusAccepted, b)
+	WriteJSON(w, http.StatusAccepted, &started)
 }
 
 func (s *Server) handleListClassifierBenchmarks(w http.ResponseWriter, r *http.Request) {

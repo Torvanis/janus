@@ -24,7 +24,7 @@ import {
 } from '../../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../../components/ui';
 import { ChargedTeam } from '../../components/ChargedTeam';
-import { reasonLabel } from '../../lib/routing';
+import { instructionsLine, reasonLabel } from '../../lib/routing';
 import { RouteDecisionLine } from './Routing';
 import { useLocalPreference, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
@@ -784,6 +784,7 @@ function RequestClassificationSection({
               {event.requested_model_name ?? ''} → {event.model} · {reasonLabel(event.route_reason)}
             </span>
             {event.request_id ? <RouteDecisionLine requestId={event.request_id} /> : null}
+            {instructionsLine(event.route_reason) ? <span className="small">{instructionsLine(event.route_reason)}</span> : null}
           </span>
         </DetailRow>
       ) : null}

@@ -284,7 +284,7 @@ func (e *Engine) runModelChecks(ctx context.Context, eff *Effective, msgs []Mess
 	// planDecision adds a check's question to the group of every text it
 	// judges. A failure to plan (text too long to judge in full) is the
 	// check's failure.
-	planDecision := func(d decisionClassifier, c ResolvedCheck, q dec.Question, timeout time.Duration, kind store.SecgwCheckKind) (*decisionCheck, error) {
+	planDecision := func(d decisionClassifier, c ResolvedCheck, qs []dec.Question, timeout time.Duration, kind store.SecgwCheckKind) (*decisionCheck, error) {
 		texts, err := guardTexts(msgs, coverageOf(c))
 		if err != nil {
 			return nil, err
@@ -296,7 +296,11 @@ func (e *Engine) runModelChecks(ctx context.Context, eff *Effective, msgs []Mess
 				continue // a repeated window: one question per call
 			}
 			seen[t] = true
-			dc.groups = append(dc.groups, addDecision(d, t, q, timeout, string(kind)))
+			var g *decisionGroup
+			for _, q := range qs {
+				g = addDecision(d, t, q, timeout, string(kind))
+			}
+			dc.groups = append(dc.groups, g)
 		}
 		return dc, nil
 	}
@@ -312,7 +316,7 @@ func (e *Engine) runModelChecks(ctx context.Context, eff *Effective, msgs []Mess
 		case err != nil:
 			inj = checkOutcome{failed: true, err: err, ran: true}
 		case isDec && d.IsDecision():
-			if injDec, err = planDecision(d, injC, dec.InjectionQuestion(), injectionTimeout(injC), store.SecgwCheckPromptInjection); err != nil {
+			if injDec, err = planDecision(d, injC, []dec.Question{dec.InjectionQuestion()}, injectionTimeout(injC), store.SecgwCheckPromptInjection); err != nil {
 				inj = checkOutcome{failed: true, err: err, ran: true}
 			}
 		default:
@@ -327,15 +331,30 @@ func (e *Engine) runModelChecks(ctx context.Context, eff *Effective, msgs []Mess
 			}()
 		}
 	}
+	// A content-safety check with method "categories" asks its security
+	// categories instead of the hazard question; it needs a decision model.
+	safeOpts := contentSafetyOptions(safeC)
+	var safeCats []*store.SecgwCategory
 	if hasSafe {
 		safe.ran = true
 		cl, err := e.classify.For(ctx, safeC.ClassifierModelID)
 		d, isDec := cl.(decisionClassifier)
+		if err == nil && safeOpts.usesCategories() {
+			if safeCats = e.checkCategories(safeOpts); len(safeCats) == 0 {
+				err = errNoCategories
+			} else if !isDec || !d.IsDecision() {
+				err = errCategoriesNeedDecision
+			}
+		}
 		switch {
 		case err != nil:
 			safe = checkOutcome{failed: true, err: err, ran: true}
 		case isDec && d.IsDecision():
-			if safeDec, err = planDecision(d, safeC, dec.HarmQuestion(), safetyTimeout(safeC), store.SecgwCheckContentSafety); err != nil {
+			qs := []dec.Question{dec.HarmQuestion()}
+			if safeOpts.usesCategories() {
+				qs = CategoryQuestions(safeCats, safeOpts.Ask, false)
+			}
+			if safeDec, err = planDecision(d, safeC, qs, safetyTimeout(safeC), store.SecgwCheckContentSafety); err != nil {
 				safe = checkOutcome{failed: true, err: err, ran: true}
 			}
 		default:
@@ -423,7 +442,11 @@ func (e *Engine) runModelChecks(ctx context.Context, eff *Effective, msgs []Mess
 		inj = e.injectionFromDecision(injC, msgs, injDec)
 	}
 	if safeDec != nil {
-		safe = e.safetyFromDecision(safeC, store.SecgwDirectionIngress, msgs, safeDec)
+		if safeOpts.usesCategories() {
+			safe = e.categoriesFromDecision(safeC, store.SecgwDirectionIngress, msgs, safeDec, safeCats, safeOpts.Ask)
+		} else {
+			safe = e.safetyFromDecision(safeC, store.SecgwDirectionIngress, msgs, safeDec)
+		}
 	}
 	for _, o := range []checkOutcome{inj, safe} {
 		if o.failed {

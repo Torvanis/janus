@@ -24,6 +24,7 @@ import {
   DIFFICULTY_BANDS,
   difficultyLabel,
   FAILURE_REASONS,
+  MAX_INSTRUCTIONS,
   newRoute,
   pct,
   reasonLabel,
@@ -45,6 +46,7 @@ import {
   type RoutingTarget,
   type RoutingTestResult,
   type RouteEvalSummary,
+  type TemplateCategory,
 } from '../../lib/routing';
 import type { ClassificationCategory } from '../../lib/types';
 
@@ -578,8 +580,8 @@ function TemplatePicker({ onPick, blank }: { onPick: (t: RouterTemplate) => void
   return (
     <div className="stack" style={{ gap: 'var(--janus-space-3)' }}>
       <p className="small secondary" style={{ margin: 0 }}>
-        Templates fill in categories, difficulty and thinking. You choose the models: Janus does not know which of yours is local,
-        cheap or best. New routers start as drafts.
+        Templates fill in categories, difficulty, thinking and instructions. You choose the models: Janus does not know which of
+        yours is local, cheap or best. New routers start as drafts.
       </p>
       <div className="routing-templates">
         {ROUTER_TEMPLATES.map((t) => (
@@ -621,6 +623,7 @@ function emptyDraft(): BuilderDraft {
       sticky: true,
       sticky_minutes: 30,
       disclose: true,
+      instructions: '',
     },
   };
 }
@@ -630,7 +633,10 @@ function draftFromTemplate(t: RouterTemplate): BuilderDraft {
   d.name = t.modelName;
   d.description = t.summary;
   d.config.default.thinking = t.defaultThinking;
-  d.config.routes = t.routes.map((r) => ({ ...newRoute(), ...r }) as RouterRoute);
+  d.config.default.instructions = t.defaultInstructions ?? '';
+  d.config.instructions = t.instructions ?? '';
+  if (t.sticky !== undefined) d.config.sticky = t.sticky;
+  d.config.routes = t.routes.map(({ hint: _hint, ...r }) => ({ ...newRoute(), ...r }) as RouterRoute);
   return d;
 }
 
@@ -706,11 +712,19 @@ function RouterBuilder({
   const target = (mid: string) => targetList.find((t) => t.id === mid);
   const classifier = (doc.data?.classifiers ?? []).find((c) => c.id === doc.data?.settings.classifier_model_id);
 
+  // Categories a template needs that this gateway does not have yet (or
+  // has disabled): created or enabled when the router is created.
+  const templateCats = templateHints?.categories ?? [];
+  const existingCats = cats.data?.categories ?? [];
+  const missingCats = templateCats.filter((tc) => !existingCats.some((c) => c.slug === tc.slug && c.enabled));
+  const catLabel = (slug: string) => templateCats.find((c) => c.slug === slug)?.name ?? catName(slug);
   const save = useMutation({
-    mutationFn: (d: BuilderDraft) =>
-      routerId
+    mutationFn: async (d: BuilderDraft) => {
+      if (!routerId) await ensureTemplateCategories(templateCats, existingCats);
+      return routerId
         ? api.put<{ router: Router }>(`${BASE}/routers/${routerId}`, d)
-        : api.post<{ router: Router }>(`${BASE}/routers`, d),
+        : api.post<{ router: Router }>(`${BASE}/routers`, d);
+    },
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: KEY });
       void qc.invalidateQueries({ queryKey: ['admin', 'managed-models'] });
@@ -779,6 +793,13 @@ function RouterBuilder({
       {(problems ?? []).length > 0 && !dirty ? (
         <div className="banner banner-warning" style={{ marginBottom: 'var(--janus-space-4)' }}>
           <strong>Needs attention.</strong> {(problems ?? []).join(' ')}
+        </div>
+      ) : null}
+      {!routerId && missingCats.length > 0 ? (
+        <div className="banner banner-info" style={{ marginBottom: 'var(--janus-space-4)' }}>
+          Creating this router also adds{' '}
+          {missingCats.length === 1 ? 'a routing category' : `${missingCats.length} routing categories`} it uses:{' '}
+          {missingCats.map((c) => c.name).join(', ')}. You can edit their wording on the Categories tab.
         </div>
       ) : null}
       {onPremWithHostedClassifier ? (
@@ -890,7 +911,7 @@ function RouterBuilder({
                         <th scope="row" style={{ fontWeight: 400 }}>
                           {r.name ? <div style={{ fontWeight: 600 }}>{r.name}</div> : null}
                           <div className="small">
-                            {r.categories.length === 0 ? 'Any category' : r.categories.map(catName).join(', ')}
+                            {r.categories.length === 0 ? 'Any category' : r.categories.map(catLabel).join(', ')}
                             {r.difficulty_min || r.difficulty_max
                               ? ` · ${difficultyLabel(r.difficulty_min, r.difficulty_max)}`
                               : ''}
@@ -919,6 +940,7 @@ function RouterBuilder({
                           <div className="muted">
                             Thinking: {thinkingLabel(r.thinking)}
                             {r.eval.enabled ? ` · evaluating ${r.eval.sample_pct}%` : ''}
+                            {r.instructions?.trim() ? ' · instructions' : ''}
                           </div>
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
@@ -976,12 +998,41 @@ function RouterBuilder({
                           levels={doc.data?.thinking_levels ?? []}
                           onChange={(v) => setCfg({ default: { ...draft.config.default, thinking: v } })}
                         />
+                        <span className="small muted">
+                          {draft.config.default.instructions?.trim() ? 'Default instructions set' : 'No default instructions'} ·
+                          see Instructions below
+                        </span>
                       </div>
                     </td>
                     <td />
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </section>
+
+          <section className="card stack" style={{ gap: 'var(--janus-space-4)' }} aria-labelledby="router-instructions-heading">
+            <div>
+              <h2 id="router-instructions-heading">Instructions</h2>
+              <p className="small secondary" style={{ margin: 0 }}>
+                {INSTRUCTIONS_HELP}
+              </p>
+            </div>
+            <div className="routing-form-grid">
+              <InstructionsField
+                label="Router instructions"
+                hint="Added to every request this router serves, whichever route serves it."
+                value={draft.config.instructions ?? ''}
+                onChange={(v) => setCfg({ instructions: v })}
+                error={error?.field === 'instructions' ? error.message : undefined}
+              />
+              <InstructionsField
+                label="Default instructions"
+                hint="Added after the router instructions when the default serves. Shadow routers always serve the default."
+                value={draft.config.default.instructions ?? ''}
+                onChange={(v) => setCfg({ default: { ...draft.config.default, instructions: v } })}
+                error={error?.field === 'default' && /instructions/.test(error.message) ? error.message : undefined}
+              />
             </div>
           </section>
 
@@ -1036,7 +1087,7 @@ function RouterBuilder({
               </Field>
               <Field
                 label="Tell callers which route served"
-                hint="Adds X-Janus-Route, X-Janus-Route-Reason and X-Janus-Route-Model response headers."
+                hint="Adds X-Janus-Route, X-Janus-Route-Reason and X-Janus-Route-Model response headers, and X-Janus-Route-Instructions when instructions were added."
               >
                 <label className="switch">
                   <input
@@ -1130,12 +1181,70 @@ function RouterBuilder({
             judges={doc.data?.judge_models ?? []}
             defaultJudge={doc.data?.settings.eval_judge_model_id ?? ''}
             defaultModelId={draft.config.default.model_id}
+            pendingCategories={missingCats}
             onChange={(patch) => setRoute(editing, patch)}
           />
         ) : null}
       </Drawer>
     </div>
   );
+}
+
+const INSTRUCTIONS_HELP =
+  'Plain text added before the caller’s own system prompt, on every turn. It is sent to the model and counted in its input tokens. Callers can’t see or remove it. The Security Gateway and the routing classifier read only the caller’s text, so instructions are not scanned. Chat completions, Anthropic messages and responses requests only; other endpoints have no system prompt.';
+
+/** A multi-line instructions box with a character counter. */
+function InstructionsField({
+  label,
+  hint,
+  value,
+  error,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  error?: string;
+  onChange: (v: string) => void;
+}): ReactNode {
+  const n = value.trim().length;
+  const over = n > MAX_INSTRUCTIONS;
+  return (
+    <Field label={label} hint={hint} error={error ?? (over ? `${label} are limited to 8,000 characters.` : undefined)}>
+      <textarea className="textarea" rows={4} aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
+      <span
+        className="small muted"
+        data-testid={`${label.toLowerCase().replace(/ /g, '-')}-count`}
+        style={{ alignSelf: 'flex-end', color: over ? 'var(--janus-color-danger-fg)' : undefined }}
+      >
+        {formatNumber(n)} / {formatNumber(MAX_INSTRUCTIONS)}
+      </span>
+    </Field>
+  );
+}
+
+/**
+ * Creates (or re-enables) the routing categories a template needs before
+ * the router that uses them is saved. Existing enabled categories are left
+ * exactly as the admin has them.
+ */
+async function ensureTemplateCategories(needed: TemplateCategory[], existing: RoutingCategory[]): Promise<void> {
+  for (const tc of needed) {
+    const have = existing.find((c) => c.slug === tc.slug);
+    if (have?.enabled) continue;
+    if (have) {
+      await api.patch(`${BASE}/categories/${have.id}`, { enabled: true });
+      continue;
+    }
+    await api.post(`${BASE}/categories`, {
+      name: tc.name,
+      includes: tc.includes,
+      excludes: tc.excludes,
+      linked_slug: '',
+      min_confidence: tc.min_confidence,
+      examples: tc.examples,
+    });
+  }
 }
 
 function routeNeeds(cfg: RouterConfig): string {
@@ -1224,6 +1333,7 @@ function RouteEditor({
   judges,
   defaultJudge,
   defaultModelId,
+  pendingCategories,
   onChange,
 }: {
   route: RouterRoute;
@@ -1234,9 +1344,11 @@ function RouteEditor({
   judges: RoutingTarget[];
   defaultJudge: string;
   defaultModelId: string;
+  pendingCategories?: TemplateCategory[];
   onChange: (patch: Partial<RouterRoute>) => void;
 }): ReactNode {
   const band = bandOf(route.difficulty_min, route.difficulty_max);
+  const pending = (pendingCategories ?? []).filter((p) => !categories.some((c) => c.slug === p.slug));
   const set = new Set(route.categories);
   const judge = route.eval.judge_model_id || defaultJudge;
   const judgeIsContestant = judge !== '' && (judge === route.model_id || judge === defaultModelId);
@@ -1285,8 +1397,31 @@ function RouteEditor({
               {c.linked_slug ? ' ↗' : ''}
             </button>
           ))}
+          {pending.map((c) => (
+            <button
+              key={c.slug}
+              type="button"
+              className="secgw-chip"
+              aria-pressed={set.has(c.slug)}
+              title={`${c.includes} (added when the router is created)`}
+              onClick={() =>
+                onChange({
+                  categories: set.has(c.slug) ? route.categories.filter((x) => x !== c.slug) : [...route.categories, c.slug],
+                })
+              }
+            >
+              {c.name} (new)
+            </button>
+          ))}
         </div>
       </fieldset>
+
+      <InstructionsField
+        label="Route instructions"
+        hint="Added after the router instructions when this route serves."
+        value={route.instructions ?? ''}
+        onChange={(v) => onChange({ instructions: v })}
+      />
 
       <fieldset className="routing-fieldset">
         <legend>Difficulty</legend>

@@ -286,7 +286,11 @@ type SecgwSnapshot struct {
 	Bindings []*SecgwBinding
 	// TermLists is populated by the caller that holds the cipher.
 	TermLists []*SecgwTermList
-	LoadedAt  time.Time
+	// Categories are the enabled security categories by slug, linked
+	// Usage insights categories already resolved, so a content-safety
+	// check with method "categories" never reads the database per request.
+	Categories map[string]*SecgwCategory
+	LoadedAt   time.Time
 }
 
 // Empty reports whether no binding exists at all — the common case in a
@@ -315,7 +319,17 @@ func (s *Store) LoadSecgwSnapshot(ctx context.Context) (*SecgwSnapshot, error) {
 		}
 		snap.Bindings = append(snap.Bindings, b)
 	}
-	return snap, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(snap.Bindings) > 0 {
+		cats, err := s.SecgwCategoryMap(ctx)
+		if err != nil {
+			return nil, err
+		}
+		snap.Categories = cats
+	}
+	return snap, nil
 }
 
 // --- term lists ---------------------------------------------------------------
@@ -560,6 +574,24 @@ func (s *Store) ListSecgwViolations(ctx context.Context, f SecgwViolationFilter)
 		where = append(where, "model_name = ?")
 		args = append(args, f.ModelName)
 	}
+	if f.Category != "" {
+		// rule_id is the comma-joined category list of a content-safety
+		// violation; match the slug as a whole list element. A legacy
+		// hazard code matches the safety category it corresponds to.
+		terms := []string{f.Category}
+		for _, c := range BuiltinSecgwCategories {
+			if c.Slug == f.Category && c.LegacyCode != "" {
+				terms = append(terms, c.LegacyCode)
+			}
+		}
+		ors := []string{}
+		args = append(args, string(SecgwCheckContentSafety))
+		for _, term := range terms {
+			ors = append(ors, "(rule_id = ? OR rule_id LIKE ? OR rule_id LIKE ? OR rule_id LIKE ?)")
+			args = append(args, term, term+",%", "%,"+term, "%,"+term+",%")
+		}
+		where = append(where, "kind = ? AND ("+strings.Join(ors, " OR ")+")")
+	}
 	if !f.Since.IsZero() {
 		where = append(where, "created_at >= ?")
 		args = append(args, FormatTime(f.Since))
@@ -644,6 +676,22 @@ func (s *Store) resolveSecgwViolationLabels(ctx context.Context, vs []*SecgwViol
 			_ = json.Unmarshal([]byte(raw), &cfg)
 		}
 		captures[v.PolicyID] = cfg.PromptInjectionBodiesEnabled()
+	}
+	var catNames map[string]string
+	for _, v := range vs {
+		if v.Kind != string(SecgwCheckContentSafety) || v.RuleID == "" {
+			continue
+		}
+		if catNames == nil {
+			catNames = s.SecgwCategoryNames(ctx)
+		}
+		for _, part := range strings.Split(v.RuleID, ",") {
+			name := catNames[strings.TrimSpace(part)]
+			if name == "" {
+				name = strings.TrimSpace(part)
+			}
+			v.RuleNames = append(v.RuleNames, name)
+		}
 	}
 	for _, v := range vs {
 		if label := models[v.ClassifierModel]; label != "" {

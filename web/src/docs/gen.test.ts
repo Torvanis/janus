@@ -62,9 +62,9 @@ describe('generated changelog (gen-docs.mjs)', () => {
   it('ends the public history with the initial public release and leads with the newest', () => {
     expect(CHANGELOG.length).toBeGreaterThanOrEqual(2);
     const latest = CHANGELOG[0];
-    expect(latest?.version).toBe('2026.10.3');
-    expect(latest?.date).toBe('2026-10-16');
-    expect(JSON.stringify(latest)).toContain('Auto-routing');
+    expect(latest?.version).toBe('2026.10.4');
+    expect(latest?.date).toBe('2026-10-18');
+    expect(JSON.stringify(latest)).toContain('Family router template');
     const release = CHANGELOG[CHANGELOG.length - 1];
     expect(release?.version).toBe('2026.9.1');
     expect(release?.date).toBe('2026-09-20');

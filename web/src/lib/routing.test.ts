@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { bandOf, difficultyLabel, reasonLabel, routingHealth, type Router, type RoutingDocument } from './routing';
+import {
+  bandOf,
+  categorySlug,
+  difficultyLabel,
+  FAMILY_CATEGORIES,
+  instructionsLine,
+  reasonLabel,
+  ROUTER_TEMPLATES,
+  routingHealth,
+  splitRouteReason,
+  type Router,
+  type RoutingDocument,
+} from './routing';
 
 const doc = (over: Partial<RoutingDocument> = {}): RoutingDocument => ({
   settings: {
@@ -132,5 +144,58 @@ describe('labels', () => {
     expect(bandOf(3.5, 0)).toBe('hard');
     expect(bandOf(1, 2)).toBe('custom');
     expect(difficultyLabel(1, 2)).toBe('1–2');
+  });
+});
+
+describe('router instructions in the request log', () => {
+  it('splits the recorded route reason and words what was added', () => {
+    expect(splitRouteReason('matched:legal;instructions=router+route')).toEqual({
+      reason: 'matched:legal',
+      instructions: 'router+route',
+    });
+    expect(reasonLabel('matched:legal;instructions=router')).toBe('Matched a route');
+    expect(instructionsLine('matched:legal;instructions=router+route')).toBe('Router instructions added: router + route');
+    expect(instructionsLine('sticky;instructions=route')).toBe('Router instructions added: route');
+    expect(instructionsLine('no_match;instructions=not_applied')).toMatch(/not applied/);
+    expect(instructionsLine('matched:legal')).toBe('');
+  });
+});
+
+describe('Family template', () => {
+  it('uses slugs the server will give its categories', () => {
+    for (const c of FAMILY_CATEGORIES) expect(categorySlug(c.name)).toBe(c.slug);
+    expect(categorySlug('C++ & C#')).toBe('cplusplus_csharp');
+  });
+
+  it('routes the five Family categories, then homework learning, with sticky off', () => {
+    const t = ROUTER_TEMPLATES.find((x) => x.id === 'family')!;
+    expect(t.sticky).toBe(false);
+    expect(t.instructions).toMatch(/child/);
+    // Backstop for homework the classifier files elsewhere (dev test C01a).
+    expect(t.instructions).toMatch(/do not hand over finished homework, final answers to copy/);
+    expect(t.instructions).toMatch(/Practice questions, explanations and everyday facts are fine/);
+    expect(t.routes.find((r) => r.name === 'Sharing personal information')!.instructions).toMatch(
+      /Never quote the information back/,
+    );
+    expect(t.routes.find((r) => r.name === 'Sharing personal information')!.instructions).toMatch(
+      /do not call them by a name taken from/,
+    );
+    expect(t.instructions).toMatch(/tell them the correct word or answer and why/);
+    // Router-wide: personal details are often not routed to the privacy coach.
+    expect(t.instructions).toMatch(/never call them by a name taken from an email address, username/);
+    expect(t.instructions!.length).toBeLessThanOrEqual(8000);
+    expect(t.routes.map((r) => r.name)).toEqual([
+      'Feeling low',
+      'Not suitable for children',
+      'Getting around parental controls',
+      'Sharing personal information',
+      'Homework done for them',
+      'Homework learning',
+    ]);
+    const known = new Set([...FAMILY_CATEGORIES.map((c) => c.slug), 'homework_learning']);
+    for (const r of t.routes) for (const c of r.categories ?? []) expect(known.has(c)).toBe(true);
+    for (const r of t.routes) expect((r.instructions ?? '').length).toBeLessThanOrEqual(8000);
+    expect(FAMILY_CATEGORIES.find((c) => c.slug === 'feeling_low_or_unsafe')!.min_confidence).toBe(0.35);
+    expect(FAMILY_CATEGORIES.find((c) => c.slug === 'homework_done_for_them')!.min_confidence).toBe(0.6);
   });
 });

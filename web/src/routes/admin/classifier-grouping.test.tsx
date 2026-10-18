@@ -201,6 +201,32 @@ describe('request log — classification', () => {
     // No guard or inline wait on this request.
     expect(within(drawer).getByText('None')).toBeTruthy();
   });
+
+  it('shows that router instructions were added to a routed request', async () => {
+    const routed = {
+      ...base,
+      id: 'evt-routed',
+      request_id: 'req-routed',
+      user_name: 'Kid',
+      model: 'tutor-model',
+      requested_model_name: 'auto/family',
+      route_reason: 'matched:homework_done_for_them;instructions=router+route',
+    };
+    mocked.get.mockImplementation((path: string) => {
+      if (path.startsWith('/api/v1/requests')) return Promise.resolve({ requests: [routed], total_count: 1 });
+      if (path === '/api/v1/admin/classification/categories') return Promise.resolve({ categories });
+      if (path.startsWith('/api/v1/admin/models')) return Promise.resolve({ models: [], counts: {}, modalities: [] });
+      if (path.endsWith('/security')) return Promise.resolve({ classifier_runs: [], other_violations: [] });
+      if (path.startsWith('/api/v1/admin/routing/decisions')) return Promise.resolve({ decisions: [] });
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+    const user = userEvent.setup();
+    renderRequests();
+    await user.click(await screen.findByRole('cell', { name: /Kid/ }));
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByText(/auto\/family → tutor-model · Matched a route/)).toBeTruthy();
+    expect(within(drawer).getByText('Router instructions added: router + route')).toBeTruthy();
+  });
 });
 
 const profiles: ClassifierProfileView[] = [

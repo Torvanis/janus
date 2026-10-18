@@ -39,6 +39,8 @@ import type {
   SecgwSeverity,
   SecgwTermList,
   SecgwViolation,
+  SecurityCategoriesDoc,
+  SecurityCategory,
   ServiceTokenRow,
   Upstream,
 } from '../../lib/types';
@@ -46,11 +48,19 @@ import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { AsyncSection, Badge, Chevron, ConfirmDialog, Drawer, Field, Modal, useToast, type Tone } from '../../components/ui';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useLicensed, useSession } from '../../app/session';
+import { CATEGORIES_KEY, CategoriesTab, useSecurityCategories } from './SecurityCategories';
+import {
+  categoryCalls,
+  CRITICAL_SAFETY_SLUGS,
+  parentalControlsTemplate,
+  type PolicyDraftTemplate,
+} from '../../lib/securityTemplates';
 
 const BASE = '/api/v1/admin/secgw';
+const CATEGORIES_BASE = `${BASE}/categories`;
 const KEY = ['admin', 'secgw'] as const;
 
-const TABS = ['overview', 'policies', 'bindings', 'term-lists', 'violations', 'classifiers'] as const;
+const TABS = ['overview', 'policies', 'bindings', 'term-lists', 'categories', 'violations', 'classifiers'] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, MessageKey> = {
@@ -58,6 +68,7 @@ const TAB_LABELS: Record<Tab, MessageKey> = {
   policies: 'adminSecurity.tabs.policies',
   bindings: 'adminSecurity.tabs.bindings',
   'term-lists': 'adminSecurity.tabs.termLists',
+  categories: 'adminSecurity.tabs.categories',
   violations: 'adminSecurity.tabs.violations',
   classifiers: 'adminSecurity.tabs.classifiers',
 };
@@ -154,6 +165,7 @@ export function SecurityPage(): ReactNode {
       {tab === 'policies' ? <PoliciesTab /> : null}
       {tab === 'bindings' ? <BindingsTab /> : null}
       {tab === 'term-lists' ? <TermListsTab /> : null}
+      {tab === 'categories' ? <CategoriesTab /> : null}
       {tab === 'violations' ? <ViolationsTab /> : null}
       {tab === 'classifiers' ? <ClassifiersTab /> : null}
     </div>
@@ -420,6 +432,41 @@ function OverviewTab(): ReactNode {
             <section className="card">
               <div className="card-header">
                 <div>
+                  <h2>{t('adminSecurity.overview.topCategoriesTitle')}</h2>
+                  <p className="small secondary" style={{ margin: 0 }}>
+                    {t('adminSecurity.overview.topCategoriesIntro')}
+                  </p>
+                </div>
+              </div>
+              {(data.top_categories_7d ?? []).length === 0 ? (
+                <p className="muted small" style={{ margin: 0 }}>
+                  {t('adminSecurity.overview.topCategoriesEmpty')}
+                </p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data data-compact" aria-label={t('adminSecurity.overview.topCategoriesTitle')}>
+                    <tbody>
+                      {(data.top_categories_7d ?? []).map((c) => (
+                        <tr
+                          key={c.slug}
+                          data-clickable="true"
+                          onClick={() => navigate(`/admin/security/violations?kind=content_safety&category=${c.slug}&since=7d`)}
+                        >
+                          <th scope="row" className="small">
+                            {c.name}
+                          </th>
+                          <td className="num small">{formatNumber(c.count)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <section className="card">
+              <div className="card-header">
+                <div>
                   <h2>{t('adminSecurity.overview.explainerTitle')}</h2>
                   <p className="small secondary" style={{ margin: 0 }}>
                     {t('adminSecurity.overview.matrixIntro')}
@@ -471,14 +518,14 @@ function useTermLists() {
   });
 }
 
+function fetchClassifiers() {
+  return api.get<{ classifiers: Model[]; protocols: string[]; taxonomy: SecgwCategory[]; default_categories: string[] }>(
+    `${BASE}/classifiers`,
+  );
+}
+
 function useClassifiers() {
-  return useQuery({
-    queryKey: [...KEY, 'classifiers'],
-    queryFn: () =>
-      api.get<{ classifiers: Model[]; protocols: string[]; taxonomy: SecgwCategory[]; default_categories: string[] }>(
-        `${BASE}/classifiers`,
-      ),
-  });
+  return useQuery({ queryKey: [...KEY, 'classifiers'], queryFn: fetchClassifiers });
 }
 
 function modeTone(mode: SecgwMode): Tone {
@@ -503,7 +550,9 @@ function ChecksLine({ policy }: { policy: SecgwPolicy }): ReactNode {
 function PoliciesTab(): ReactNode {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const enforceLicensed = useLicensed('guardrails_enforce');
   const [creating, setCreating] = useState(false);
+  const [template, setTemplate] = useState<PolicyDraftTemplate | null>(null);
   const [editing, setEditing] = useState<SecgwPolicy | null>(null);
   const [deleting, setDeleting] = useState<SecgwPolicy | null>(null);
   const policies = usePolicies();
@@ -520,10 +569,49 @@ function PoliciesTab(): ReactNode {
     onError: (error: Error) => toast(error.message, 'danger'),
   });
 
+  // The Parental controls template is a policy body the normal create API
+  // takes; it opens in the editor unsaved, so the admin reviews it first.
+  const startTemplate = async () => {
+    try {
+      const [cats, cls] = await Promise.all([
+        queryClient.fetchQuery({ queryKey: CATEGORIES_KEY, queryFn: () => api.get<SecurityCategoriesDoc>(CATEGORIES_BASE) }),
+        queryClient.fetchQuery({ queryKey: [...KEY, 'classifiers'], queryFn: fetchClassifiers }),
+      ]);
+      const decision = (cls.classifiers ?? []).find((m) => m.classifier_role === 'decision');
+      setTemplate(
+        parentalControlsTemplate({
+          name: t('adminSecurity.policies.templateParentalName'),
+          description: t('adminSecurity.policies.templateParentalDescription'),
+          categories: cats.categories ?? [],
+          classifierId: decision?.id,
+          enforce: enforceLicensed,
+        }),
+      );
+      setCreating(true);
+    } catch (error) {
+      toast((error as Error).message, 'danger');
+    }
+  };
+
   return (
     <div className="stack">
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+      <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--janus-space-2)' }}>
+        <button
+          type="button"
+          className="btn"
+          title={t('adminSecurity.policies.fromTemplateHint')}
+          onClick={() => void startTemplate()}
+        >
+          {t('adminSecurity.policies.fromTemplate')}
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => {
+            setTemplate(null);
+            setCreating(true);
+          }}
+        >
           {t('adminSecurity.policies.newPolicy')}
         </button>
       </div>
@@ -608,15 +696,18 @@ function PoliciesTab(): ReactNode {
 
       {creating || editing ? (
         <PolicyDrawer
-          key={editing ? editing.id : 'new'}
+          key={editing ? editing.id : template ? 'template' : 'new'}
           policy={editing}
+          template={editing ? null : template}
           onClose={() => {
             setCreating(false);
             setEditing(null);
+            setTemplate(null);
           }}
           onSaved={() => {
             setCreating(false);
             setEditing(null);
+            setTemplate(null);
             invalidate();
           }}
         />
@@ -689,16 +780,17 @@ function defaultCheck(kind: SecgwCheckKind): SecgwCheck {
   }
   if (kind === 'content_safety') {
     check.fail = 'closed';
-    // No categories key: empty means EVERY category is enforced, the
-    // strictest setting. An admin narrows from there, never widens to it.
-    check.options = { timeout_ms: 5000 };
+    // A new check asks with security categories, the critical safety ones
+    // preselected. (No categories key: that is the Llama Guard compatible
+    // method's code list, where empty means every hazard code.)
+    check.options = { timeout_ms: 5000, method: 'categories', safety: [...CRITICAL_SAFETY_SLUGS] };
   }
   return check;
 }
 
-function seedChecks(policy: SecgwPolicy | null): SecgwCheck[] {
+function seedChecks(checks: SecgwCheck[] | undefined): SecgwCheck[] {
   return CHECK_KINDS.map((kind) => {
-    const existing = policy?.checks?.find((c) => c.kind === kind);
+    const existing = checks?.find((c) => c.kind === kind);
     return existing ? { ...existing, options: { ...(existing.options ?? {}) } } : defaultCheck(kind);
   });
 }
@@ -719,22 +811,24 @@ function toggleIn(list: string[], value: string, on: boolean): string[] {
 
 function PolicyDrawer({
   policy,
+  template,
   onClose,
   onSaved,
 }: {
   policy: SecgwPolicy | null;
+  template?: PolicyDraftTemplate | null;
   onClose: () => void;
   onSaved: () => void;
 }): ReactNode {
   const toast = useToast();
-  const [name, setName] = useState(policy?.name ?? '');
-  const [description, setDescription] = useState(policy?.description ?? '');
+  const [name, setName] = useState(policy?.name ?? template?.name ?? '');
+  const [description, setDescription] = useState(policy?.description ?? template?.description ?? '');
   const [enabled, setEnabled] = useState(policy?.enabled ?? true);
   const [mandatory, setMandatory] = useState(policy?.mandatory ?? false);
   const [syntheticRefusal, setSyntheticRefusal] = useState(policy?.synthetic_refusal ?? false);
   const [refusalText, setRefusalText] = useState(policy?.refusal_text ?? '');
   const [captureBodies, setCaptureBodies] = useState(policy?.capture?.prompt_injection_bodies ?? false);
-  const [checks, setChecks] = useState<SecgwCheck[]>(() => seedChecks(policy));
+  const [checks, setChecks] = useState<SecgwCheck[]>(() => seedChecks(policy?.checks ?? template?.checks));
   const [open, setOpen] = useState<SecgwCheckKind | null>(null);
   const [testing, setTesting] = useState(false);
 
@@ -976,12 +1070,34 @@ function CheckGate({
   // The API refuses a mismatch; the picker simply never offers one.
   const wantRole: ClassifierRole | null =
     kind === 'prompt_injection' ? 'text_classification' : kind === 'content_safety' ? 'generative_guard' : null;
+  // Content safety asks with security categories (decision models only)
+  // or with the Llama Guard compatible hazard list. Checks saved before
+  // categories existed carry no method and open as Llama Guard compatible.
+  const usesCategories = kind === 'content_safety' && check.options?.method === 'categories';
   const eligible = wantRole
     ? classifiers.filter((m) => {
         const role = m.classifier_role || 'text_classification';
+        if (usesCategories) return role === 'decision';
         return role === wantRole || role === 'decision';
       })
     : [];
+  const setMethod = (method: 'categories' | 'llama_guard') => {
+    const options: Record<string, unknown> = { ...(check.options ?? {}), method };
+    const next: Partial<SecgwCheck> = { options };
+    if (method === 'categories') {
+      if (optStrings(options, 'safety').length === 0) options.safety = [...CRITICAL_SAFETY_SLUGS];
+      const bound = classifiers.find((m) => m.id === check.classifier_model_id);
+      if (bound && bound.classifier_role !== 'decision') next.classifier_model_id = undefined;
+    } else if (check.mode === 'block' && check.direction !== 'ingress') {
+      // Llama Guard compatible blocks on requests only.
+      next.mode = 'observe';
+    }
+    onChange(next);
+  };
+  // A categories check on both directions blocks requests and observes
+  // replies; on replies alone it never blocks.
+  const blockNeedsIngress = (direction: SecgwDirection) =>
+    kind === 'content_safety' && (usesCategories ? direction === 'egress' : direction !== 'ingress');
   const boundIsDecision = classifiers.some((m) => m.id === check.classifier_model_id && m.classifier_role === 'decision');
   // Decision models answer with a calibrated yes-probability, not a label
   // score: Prompt Guard's 0.9 would let most attacks through, and a
@@ -1028,9 +1144,15 @@ function CheckGate({
         bits.push(check.fail === 'open' ? t('adminSecurity.policies.failOpen') : t('adminSecurity.policies.failClosed'));
       }
     }
-    if (kind === 'content_safety') {
+    if (kind === 'content_safety' && usesCategories) {
+      bits.push(
+        t('adminSecurity.policies.methodCategories'),
+        t('adminSecurity.policies.kindSecurityCategoriesCount', { count: optStrings(check.options, 'safety').length }),
+      );
+    } else if (kind === 'content_safety') {
       const n = optStrings(check.options, 'categories').length;
       bits.push(
+        t('adminSecurity.policies.methodLlamaGuard'),
         n ? t('adminSecurity.policies.kindCategoriesCount', { count: n }) : t('adminSecurity.policies.kindCategoriesAll'),
       );
     }
@@ -1069,7 +1191,7 @@ function CheckGate({
         </div>
         <div className="segmented" role="group" aria-label={`${kindLabel(kind)}: ${t('adminSecurity.policies.modeLabel')}`}>
           {MODE_OPTIONS.map(([mode, key]) => {
-            const noBlockEgress = mode === 'block' && kind === 'content_safety' && check.direction !== 'ingress';
+            const noBlockEgress = mode === 'block' && blockNeedsIngress(check.direction);
             const unlicensed = mode !== 'observe' && !enforceLicensed && check.mode !== mode;
             const disabled = (mode === 'redact' && noRedact) || noBlockEgress || unlicensed;
             const title = unlicensed
@@ -1119,7 +1241,7 @@ function CheckGate({
                     // off ingress while in block mode silently downgrades
                     // to observe, so the save is never refused for a mode
                     // the UI itself made unreachable.
-                    if (kind === 'content_safety' && direction !== 'ingress' && check.mode === 'block') {
+                    if (blockNeedsIngress(direction) && check.mode === 'block') {
                       onChange({ direction, mode: 'observe' });
                     } else {
                       onChange({ direction });
@@ -1273,15 +1395,48 @@ function CheckGate({
           {kind === 'prompt_injection' && boundIsDecision ? <DecisionCoverage check={check} onOption={onOption} /> : null}
           {kind === 'content_safety' ? (
             <>
+              <div className="field">
+                <span className="field-label">{t('adminSecurity.policies.methodLabel')}</span>
+                <div className="segmented" role="radiogroup" aria-label={t('adminSecurity.policies.methodLabel')}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={usesCategories}
+                    aria-pressed={usesCategories}
+                    title={t('adminSecurity.policies.methodCategoriesHint')}
+                    onClick={() => setMethod('categories')}
+                  >
+                    {t('adminSecurity.policies.methodCategories')}
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!usesCategories}
+                    aria-pressed={!usesCategories}
+                    title={t('adminSecurity.policies.methodLlamaGuardHint')}
+                    onClick={() => setMethod('llama_guard')}
+                  >
+                    {t('adminSecurity.policies.methodLlamaGuard')}
+                  </button>
+                </div>
+              </div>
+              <p className="field-hint" style={{ margin: '-8px 0 0' }}>
+                {usesCategories
+                  ? t('adminSecurity.policies.methodCategoriesHint')
+                  : t('adminSecurity.policies.methodLlamaGuardHint')}
+              </p>
               <div className="secgw-gate-row">
                 <Field label={t('adminSecurity.policies.classifierLabel')} required>
                   {eligible.length === 0 ? (
                     <p className="small muted" style={{ margin: 0 }}>
-                      {t('adminSecurity.policies.noGuardClassifiers')}
+                      {usesCategories
+                        ? t('adminSecurity.policies.noDecisionClassifiers')
+                        : t('adminSecurity.policies.noGuardClassifiers')}
                     </p>
                   ) : (
                     <select
                       className="select"
+                      aria-label={t('adminSecurity.policies.classifierLabel')}
                       value={check.classifier_model_id ?? ''}
                       onChange={(e) => pickClassifier(e.target.value)}
                     >
@@ -1304,18 +1459,46 @@ function CheckGate({
                     onChange={(e) => onOption('timeout_ms', e.target.value === '' ? undefined : Number(e.target.value))}
                   />
                 </Field>
+                {usesCategories ? (
+                  <Field label={t('adminSecurity.policies.askLabel')} hint={t('adminSecurity.policies.askHint')}>
+                    <select
+                      className="select"
+                      aria-label={t('adminSecurity.policies.askLabel')}
+                      value={check.options?.ask === 'separately' ? 'separately' : 'together'}
+                      onChange={(e) => onOption('ask', e.target.value === 'together' ? undefined : e.target.value)}
+                    >
+                      <option value="together">{t('adminSecurity.policies.askTogether')}</option>
+                      <option value="separately">{t('adminSecurity.policies.askSeparately')}</option>
+                    </select>
+                  </Field>
+                ) : null}
               </div>
+              {usesCategories ? <CallCount check={check} /> : null}
               {boundIsDecision ? <DecisionCoverage check={check} onOption={onOption} /> : null}
-              <GroupField label={t('adminSecurity.policies.categoriesLabel')} hint={t('adminSecurity.policies.categoriesHint')}>
-                <CategoryPicker
-                  taxonomy={taxonomy}
-                  value={optStrings(check.options, 'categories')}
-                  onChange={(next) => onOption('categories', next.length ? next : undefined)}
-                />
-              </GroupField>
+              {usesCategories ? (
+                <GroupField
+                  label={t('adminSecurity.policies.securityCategoriesLabel')}
+                  hint={t('adminSecurity.policies.securityCategoriesHint')}
+                >
+                  <SecurityCategoryPicker
+                    value={optStrings(check.options, 'safety')}
+                    onChange={(next) => onOption('safety', next)}
+                  />
+                </GroupField>
+              ) : (
+                <GroupField label={t('adminSecurity.policies.categoriesLabel')} hint={t('adminSecurity.policies.categoriesHint')}>
+                  <CategoryPicker
+                    taxonomy={taxonomy}
+                    value={optStrings(check.options, 'categories')}
+                    onChange={(next) => onOption('categories', next.length ? next : undefined)}
+                  />
+                </GroupField>
+              )}
               {check.direction !== 'ingress' ? (
                 <p className="field-hint" style={{ margin: 0 }}>
-                  {t('adminSecurity.policies.contentSafetyEgressObserveOnly')}
+                  {usesCategories
+                    ? t('adminSecurity.policies.contentSafetyEgressCategories')
+                    : t('adminSecurity.policies.contentSafetyEgressObserveOnly')}
                 </p>
               ) : null}
             </>
@@ -1381,6 +1564,85 @@ function GroupField({ label, hint, children }: { label: string; hint?: string; c
       <span className="field-label">{label}</span>
       {children}
       {hint ? <span className="field-hint">{hint}</span> : null}
+    </div>
+  );
+}
+
+/** How many classifier calls a categories check makes, from its settings. */
+function CallCount({ check }: { check: SecgwCheck }): ReactNode {
+  const n = optStrings(check.options, 'safety').length;
+  const calls = categoryCalls(n, typeof check.options?.ask === 'string' ? check.options.ask : undefined);
+  if (n === 0) return null;
+  return (
+    <p className="small secondary" role="status" style={{ margin: 0 }}>
+      {calls === 1 ? t('adminSecurity.policies.callsOne') : t('adminSecurity.policies.callsMany', { count: calls })}
+      {check.options?.long_text === 'windows' ? ` ${t('adminSecurity.policies.callsWindows')}` : ''}
+    </p>
+  );
+}
+
+const CATEGORY_GROUPS: Array<[SecurityCategory['group'], MessageKey]> = [
+  ['safety', 'adminSecurity.categories.groupSafety'],
+  ['family', 'adminSecurity.categories.groupFamily'],
+  ['custom', 'adminSecurity.categories.groupCustom'],
+];
+
+/**
+ * SecurityCategoryPicker lists the security categories that are on, in
+ * their three groups, by name. A selected category that has since been
+ * turned off still shows, so the admin can remove it.
+ */
+function SecurityCategoryPicker({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): ReactNode {
+  const cats = useSecurityCategories();
+  const set = new Set(value);
+  const all = cats.data?.categories ?? [];
+  const known = new Set(all.map((c) => c.slug));
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <p className="small muted" style={{ margin: 0 }}>
+        {value.length === 0
+          ? t('adminSecurity.policies.securityCategoriesNone')
+          : t('adminSecurity.policies.securityCategoriesCount', { count: value.length })}
+      </p>
+      {CATEGORY_GROUPS.map(([group, key]) => {
+        const items = all.filter((c) => c.group === group && (c.enabled || set.has(c.slug)));
+        if (items.length === 0) return null;
+        return (
+          <div key={group}>
+            <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>
+              {t(key)}
+            </div>
+            <div className="secgw-chips">
+              {items.map((c) => (
+                <button
+                  key={c.slug}
+                  type="button"
+                  className={`secgw-chip${c.tier === 'critical' ? ' is-danger' : ''}`}
+                  aria-pressed={set.has(c.slug)}
+                  title={c.includes}
+                  disabled={!set.has(c.slug) && value.length >= 25}
+                  onClick={() => onChange(toggleIn(value, c.slug, !set.has(c.slug)))}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {value
+        .filter((slug) => cats.data && !known.has(slug))
+        .map((slug) => (
+          <button
+            key={slug}
+            type="button"
+            className="secgw-chip"
+            aria-pressed
+            onClick={() => onChange(toggleIn(value, slug, false))}
+          >
+            {slug}
+          </button>
+        ))}
     </div>
   );
 }
@@ -1596,7 +1858,9 @@ function DryRunDialog({ policy, onClose }: { policy: SecgwPolicy; onClose: () =>
                       <td>
                         <code>{v.kind}</code>
                       </td>
-                      <td className="small">{v.kind === 'content_safety' ? <CategoryChips ruleId={v.rule_id} /> : v.rule_id}</td>
+                      <td className="small">
+                        {v.kind === 'content_safety' ? <CategoryChips ruleId={v.rule_id} names={v.rule_names} /> : v.rule_id}
+                      </td>
                       <td>
                         <Badge tone={severityTone(v.severity)}>{v.severity}</Badge>
                       </td>
@@ -2545,7 +2809,7 @@ function violationHeadline(v: SecgwViolation): string {
     case 'shape':
       return t('adminSecurity.violations.headlineShape', { rule: v.rule_id });
     case 'content_safety':
-      return t('adminSecurity.violations.headlineContentSafety', { rule: v.rule_id.split(',').join(', ') });
+      return t('adminSecurity.violations.headlineContentSafety', { rule: categoryNames(v.rule_id, v.rule_names).join(', ') });
     default:
       return v.rule_id;
   }
@@ -2565,13 +2829,40 @@ function noTextReason(v: SecgwViolation): string {
   return t('adminSecurity.violations.noCapturedText');
 }
 
-/** Llama Guard categories on a violation row, one chip per S-code. */
-function CategoryChips({ ruleId }: { ruleId: string }): ReactNode {
+/**
+ * The category names of a content-safety finding. The server sends them
+ * (rule_names); the hazard-code fallback covers rows from a server that did
+ * not, so a code is never what an admin reads.
+ */
+function categoryNames(ruleId: string, names?: string[]): string[] {
+  const parts = ruleId.split(',').filter(Boolean);
+  return parts.map((part, i) => names?.[i] || LEGACY_CATEGORY_NAMES[part] || part.replace(/_/g, ' '));
+}
+
+const LEGACY_CATEGORY_NAMES: Record<string, string> = {
+  S1: 'Violent crimes',
+  S2: 'Non-violent crimes',
+  S3: 'Sex-related crimes',
+  S4: 'Child sexual exploitation',
+  S5: 'Defamation',
+  S6: 'Specialized advice',
+  S7: 'Privacy',
+  S8: 'Intellectual property',
+  S9: 'Indiscriminate weapons',
+  S10: 'Hate',
+  S11: 'Suicide and self-harm',
+  S12: 'Sexual content',
+  S13: 'Elections',
+  S14: 'Code interpreter abuse',
+};
+
+/** Content-safety categories on a violation row, one chip per category, by name. */
+function CategoryChips({ ruleId, names }: { ruleId: string; names?: string[] }): ReactNode {
   return (
     <span className="secgw-chips" style={{ display: 'inline-flex', gap: 4 }}>
-      {ruleId.split(',').map((code) => (
-        <Badge key={code} tone="danger">
-          {code}
+      {categoryNames(ruleId, names).map((name) => (
+        <Badge key={name} tone="danger">
+          {name}
         </Badge>
       ))}
     </span>
@@ -2595,15 +2886,17 @@ function ViolationsTab(): ReactNode {
   const [kind, setKind] = useCollectionState('kind', '');
   const [action, setAction] = useCollectionState('action', '');
   const [since, setSince] = useCollectionState('since', '24h');
+  const [category, setCategory] = useCollectionState('category', '');
   const [page, setPage] = useUrlState('page', '0');
+  const cats = useSecurityCategories();
   const offset = pageOffset(page, 200);
   const [selected, setSelected] = useState<SecgwViolation | null>(null);
 
   const violations = useQuery({
-    queryKey: [...KEY, 'violations', kind, action, since, offset],
+    queryKey: [...KEY, 'violations', kind, action, since, category, offset],
     queryFn: () =>
       api.get<{ violations: SecgwViolation[]; has_more: boolean }>(
-        `${BASE}/violations${qs({ kind, action, since, limit: 200, offset })}`,
+        `${BASE}/violations${qs({ kind, action, since, category, limit: 200, offset })}`,
       ),
   });
 
@@ -2618,6 +2911,22 @@ function ViolationsTab(): ReactNode {
               {CHECK_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {kindLabel(k)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field" style={{ minWidth: 180 }}>
+            <span className="field-label">{t('adminSecurity.violations.filterCategory')}</span>
+            <select
+              className="select"
+              aria-label={t('adminSecurity.violations.filterCategory')}
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              <option value="">{t('adminSecurity.violations.any')}</option>
+              {(cats.data?.categories ?? []).map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.name}
                 </option>
               ))}
             </select>
@@ -2796,7 +3105,13 @@ function ViolationDrawer({ violation, onClose }: { violation: SecgwViolation; on
           </div>
           <div className="secgw-fact">
             <span className="secgw-fact-k">{t('adminSecurity.violations.colRule')}</span>
-            <span className="secgw-fact-v mono">{v.kind === 'terms' ? v.term_list_name || v.rule_id : v.rule_id}</span>
+            {v.kind === 'content_safety' ? (
+              <span className="secgw-fact-v">
+                <CategoryChips ruleId={v.rule_id} names={v.rule_names} />
+              </span>
+            ) : (
+              <span className="secgw-fact-v mono">{v.kind === 'terms' ? v.term_list_name || v.rule_id : v.rule_id}</span>
+            )}
           </div>
           <div className="secgw-fact">
             <span className="secgw-fact-k">{t('adminSecurity.violations.matchOffset')}</span>

@@ -540,3 +540,145 @@ describe('Router builder in the section', () => {
     expect(screen.getByRole('link', { name: 'Back to all routers' }).getAttribute('href')).toBe('/admin/routing/routers');
   });
 });
+
+describe('Router instructions', () => {
+  it('saves router, default and route instructions with a counter', async () => {
+    mocked.put.mockResolvedValue({ router });
+    renderAt('/admin/routing/routers/r-1');
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'auto/legal' });
+    expect(screen.getByText(/added before the caller’s own system prompt/)).toBeTruthy();
+    expect(screen.getByText(/are not scanned/)).toBeTruthy();
+    const routerBox = screen.getByRole('textbox', { name: 'Router instructions' });
+    await user.type(routerBox, 'You are talking with a child.');
+    expect(screen.getByTestId('router-instructions-count').textContent).toBe('29 / 8,000');
+    await user.type(screen.getByRole('textbox', { name: 'Default instructions' }), 'Be brief.');
+    await user.click(screen.getByRole('button', { name: 'Edit route 1' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Route instructions' }), 'Cite the clause.');
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.getByText(/· instructions/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocked.put).toHaveBeenCalled());
+    const body = mocked.put.mock.calls[0]![1] as { config: Router['config'] };
+    expect(body.config.instructions).toBe('You are talking with a child.');
+    expect(body.config.default.instructions).toBe('Be brief.');
+    expect(body.config.routes[0]!.instructions).toBe('Cite the clause.');
+  });
+
+  it('flags instructions over 8,000 characters', async () => {
+    renderAt('/admin/routing/routers/r-1');
+    await screen.findByRole('heading', { name: 'auto/legal' });
+    const box = screen.getByRole('textbox', { name: 'Router instructions' });
+    // Typing 8,001 characters key by key is slow; paste them.
+    const user = userEvent.setup();
+    box.focus();
+    await user.paste('x'.repeat(8001));
+    expect(screen.getByTestId('router-instructions-count').textContent).toBe('8,001 / 8,000');
+    expect(screen.getByText('Router instructions are limited to 8,000 characters.')).toBeTruthy();
+  });
+
+  it('shows the server’s validation message', async () => {
+    const { ApiError } = await import('../../lib/api');
+    mocked.put.mockRejectedValue(
+      new ApiError(400, {
+        code: 'invalid_request',
+        message: 'Router instructions are limited to 8,000 characters (they have 9,000).',
+        param: 'instructions',
+      } as never),
+    );
+    renderAt('/admin/routing/routers/r-1');
+    const user = userEvent.setup();
+    await screen.findByRole('heading', { name: 'auto/legal' });
+    await user.type(screen.getByRole('textbox', { name: 'Router instructions' }), 'x');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect((await screen.findAllByText(/they have 9,000/)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Family template', () => {
+  it('fills instructions, turns sticky off and creates its categories before the router', async () => {
+    const created: string[] = [];
+    mocked.post.mockImplementation(async (path: string, body?: unknown) => {
+      if (path.endsWith('/routing/categories')) {
+        created.push((body as { name: string }).name);
+        return {};
+      }
+      if (path.endsWith('/routing/routers')) return { router: { ...router, id: 'r-new' } };
+      throw new Error(`unexpected POST ${path}`);
+    });
+    renderAt('/admin/routing/routers/new?template=family');
+    const user = userEvent.setup();
+    expect(await screen.findByRole('heading', { name: 'auto/family' })).toBeTruthy();
+    const routerBox = screen.getByRole('textbox', { name: 'Router instructions' }) as HTMLTextAreaElement;
+    expect(routerBox.value).toMatch(/talking with a child/);
+    expect(routerBox.value).toMatch(/trusted adult/);
+    expect((screen.getByRole('textbox', { name: 'Default instructions' }) as HTMLTextAreaElement).value).toBe('');
+    expect(await screen.findByText(/also adds 5 routing categories/)).toBeTruthy();
+    for (const route of [
+      'Feeling low',
+      'Not suitable for children',
+      'Getting around parental controls',
+      'Sharing personal information',
+      'Homework done for them',
+      'Homework learning',
+    ]) {
+      expect(screen.getAllByText(route).length).toBeGreaterThan(0);
+    }
+    expect((screen.getByRole('checkbox', { name: 'Keep conversations on one route' }) as HTMLInputElement).checked).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Create router' }));
+    await waitFor(() => expect(mocked.post.mock.calls.some(([p]) => String(p).endsWith('/routing/routers'))).toBe(true));
+    expect(created).toEqual([
+      'Feeling low or unsafe',
+      'Not suitable for children',
+      'Getting around parental controls',
+      'Sharing personal information',
+      'Homework done for them',
+    ]);
+    const calls = mocked.post.mock.calls.map(([p]) => String(p));
+    expect(calls.findIndex((p) => p.endsWith('/routing/routers'))).toBe(calls.length - 1);
+    const body = mocked.post.mock.calls.find(([p]) => String(p).endsWith('/routing/routers'))![1] as {
+      config: Router['config'];
+    };
+    expect(body.config.sticky).toBe(false);
+    expect(body.config.routes.map((r) => r.categories[0])).toEqual([
+      'feeling_low_or_unsafe',
+      'not_suitable_for_children',
+      'getting_around_parental_controls',
+      'sharing_personal_information',
+      'homework_done_for_them',
+      'homework_learning',
+    ]);
+    expect(body.config.routes[0]!.instructions).toMatch(/988/);
+    expect(body.config.routes[4]!.instructions).toMatch(/Never give the final answer/);
+    expect(body.config.routes[5]!.instructions).toBe('');
+    expect(body.config.routes.every((r) => !('hint' in r))).toBe(true);
+  });
+
+  it('leaves categories the admin already has alone', async () => {
+    const feeling: RoutingCategory = {
+      ...legal,
+      id: 'cat-feel',
+      slug: 'feeling_low_or_unsafe',
+      name: 'Feeling low or unsafe',
+      includes: 'My own wording.',
+    };
+    mocked.get.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/admin/routing') return doc;
+      if (path.endsWith('/routing/categories'))
+        return { categories: [legal, coding, feeling], insights_categories: [], max_enabled: 25 };
+      if (path.endsWith('/routing/targets')) return { targets };
+      throw new Error(`unexpected GET ${path}`);
+    });
+    const created: string[] = [];
+    mocked.post.mockImplementation(async (path: string, body?: unknown) => {
+      if (path.endsWith('/routing/categories')) created.push((body as { name: string }).name);
+      return { router: { ...router, id: 'r-new' } };
+    });
+    renderAt('/admin/routing/routers/new?template=family');
+    const user = userEvent.setup();
+    expect(await screen.findByText(/also adds 4 routing categories/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Create router' }));
+    await waitFor(() => expect(created.length).toBe(4));
+    expect(created).not.toContain('Feeling low or unsafe');
+  });
+});

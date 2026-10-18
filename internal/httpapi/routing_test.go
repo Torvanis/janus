@@ -23,8 +23,10 @@ type routeDecider struct {
 	*httptest.Server
 	mu      sync.Mutex
 	batches [][]string
-	delay   time.Duration
-	fail    bool
+	// states are the texts the classifier was asked about.
+	states []string
+	delay  time.Duration
+	fail   bool
 }
 
 func newRouteDecider(t *testing.T) *routeDecider {
@@ -46,6 +48,7 @@ func newRouteDecider(t *testing.T) *routeDecider {
 		sort.Strings(ids)
 		f.mu.Lock()
 		f.batches = append(f.batches, ids)
+		f.states = append(f.states, req.State)
 		delay, fail := f.delay, f.fail
 		f.mu.Unlock()
 		time.Sleep(delay)

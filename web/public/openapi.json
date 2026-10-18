@@ -5066,7 +5066,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "name, description, status (draft|shadow|live), config {routes[], default {model_id, thinking}, budget_ms, sticky, sticky_minutes, disclose}."
+                "description": "name, description, status (draft|shadow|live), config {routes[] (each with optional instructions), default {model_id, thinking, instructions}, budget_ms, sticky, sticky_minutes, disclose, instructions}. Instructions are trimmed, up to 8,000 characters each, and are added before the caller's system prompt of the requests the router serves."
               }
             }
           }
@@ -6846,6 +6846,208 @@
         ]
       }
     },
+    "/api/v1/admin/secgw/categories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List security categories",
+        "description": "Every security category in display order (safety, family, custom) with used_by (the policies whose content-safety check selects it), plus the Usage insights categories a category can follow, the decision models that can be tested with, the default selection for a new check and the per-check limit (25).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a security category",
+        "description": "Body: name, includes, excludes, linked_slug (follow a Usage insights category instead of writing a description), min_confidence (0.01-0.99, default 0.5), examples, enabled. Audited as secgw_category_created.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/secgw/categories/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Try a request against security categories",
+        "description": "Body: text, classifier_model_id (a decision model), slugs (optional; default every enabled category), ask (together | separately). Returns every category's probability and which ones would count at their minimum confidence. Nothing is stored; classifier calls are metered as overhead. A classifier failure answers 200 with status error and a description that never quotes the classifier.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/secgw/categories/test-batch": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test every category's examples",
+        "description": "Body: classifier_model_id, slugs (optional), ask (together | separately). Runs each category's test examples (up to 300) through the classifier and reports accuracy per category and each miss (expected category, what the classifier rated highest, its confidence). Nothing is stored.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/secgw/categories/{id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a security category",
+        "description": "Any subset of the create fields. A category a policy selects cannot be turned off; the error names the policy. Audited as secgw_category_updated.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Category id."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a custom security category",
+        "description": "Built-in categories cannot be deleted (turn them off instead), and a category a policy selects cannot be deleted; the error names the policy. Audited as secgw_category_deleted.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Category id."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/secgw/categories/{id}/reset": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restore a built-in security category",
+        "description": "Restores the shipped name, description, minimum confidence and examples. Audited as secgw_category_reset.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Category id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/v1/admin/secgw/violations": {
       "get": {
         "tags": [
@@ -6881,6 +7083,15 @@
               "type": "string"
             },
             "description": "observed | redacted | blocked | stream_cut"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Security category slug: content-safety violations naming that category. A safety category also matches the hazard code it corresponds to."
           },
           {
             "name": "user_id",

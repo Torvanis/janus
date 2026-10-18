@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Auto-routing (migration 0049).
@@ -806,6 +808,9 @@ type RouterRoute struct {
 	// over a quota on this route's model, rather than refusing the request.
 	SkipWhenOverQuota bool      `json:"skip_when_over_quota"`
 	Eval              RouteEval `json:"eval"`
+	// Instructions is text added to the system prompt when this route
+	// serves, after the router's own instructions.
+	Instructions string `json:"instructions"`
 
 	// Read-time presentation.
 	ModelKind     string `json:"model_kind,omitempty"`
@@ -821,6 +826,9 @@ type RouterRoute struct {
 type RouterDefault struct {
 	ModelID  string `json:"model_id"`
 	Thinking string `json:"thinking"`
+	// Instructions is text added to the system prompt when the default
+	// serves (shadow routers always serve it), after the router's own.
+	Instructions string `json:"instructions"`
 
 	ModelKind     string `json:"model_kind,omitempty"`
 	ModelName     string `json:"model_name,omitempty"`
@@ -845,6 +853,32 @@ type RouterConfig struct {
 	StickyMinutes int  `json:"sticky_minutes"`
 	// Disclose adds X-Janus-Route headers naming the route and model.
 	Disclose bool `json:"disclose"`
+	// Instructions is text added to the system prompt of every request the
+	// router serves, whichever route serves it. Admin-authored: it is added
+	// after the Security Gateway and the classifier have read the caller's
+	// text, and is never scanned.
+	Instructions string `json:"instructions"`
+}
+
+// MaxRouterInstructions bounds each instructions field, in characters.
+const MaxRouterInstructions = 8000
+
+// normalizeInstructions trims instructions and checks their length.
+func normalizeInstructions(v, field, whose string) (string, error) {
+	v = strings.TrimSpace(v)
+	if utf8.RuneCountInString(v) > MaxRouterInstructions {
+		return v, &ValidationError{Field: field, Message: fmt.Sprintf("%s instructions are limited to 8,000 characters (they have %s)", whose, formatThousands(utf8.RuneCountInString(v)))}
+	}
+	return v, nil
+}
+
+// formatThousands writes n with comma thousands separators.
+func formatThousands(n int) string {
+	s := strconv.Itoa(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 // MaxRouterRoutes bounds the builder.
@@ -919,6 +953,13 @@ func (s *Store) normalizeRouterConfig(ctx context.Context, c RouterConfig) (Rout
 	if c.Default.Thinking, ok = normalizeThinking(c.Default.Thinking); !ok {
 		return c, &ValidationError{Field: "default", Message: "unknown thinking setting " + c.Default.Thinking}
 	}
+	var err error
+	if c.Instructions, err = normalizeInstructions(c.Instructions, "instructions", "Router"); err != nil {
+		return c, err
+	}
+	if c.Default.Instructions, err = normalizeInstructions(c.Default.Instructions, "default", "The default's"); err != nil {
+		return c, err
+	}
 	cats, err := s.ListRoutingCategories(ctx)
 	if err != nil {
 		return c, err
@@ -970,6 +1011,9 @@ func (s *Store) normalizeRouterConfig(ctx context.Context, c RouterConfig) (Rout
 		if r.Thinking, ok = normalizeThinking(r.Thinking); !ok {
 			return c, &ValidationError{Field: field, Message: "unknown thinking setting " + r.Thinking}
 		}
+		if r.Instructions, err = normalizeInstructions(r.Instructions, field, fmt.Sprintf("Route %d's", i+1)); err != nil {
+			return c, err
+		}
 		if r.Eval.Enabled {
 			if r.Eval.SamplePct <= 0 {
 				r.Eval.SamplePct = 5
@@ -998,8 +1042,12 @@ func (s *Store) normalizeRouterConfig(ctx context.Context, c RouterConfig) (Rout
 				}
 			}
 		}
-		if r.ModelID == c.Default.ModelID && r.Thinking == c.Default.Thinking {
-			return c, &ValidationError{Field: field, Message: fmt.Sprintf("route %d sends requests to the default model with the default thinking setting, so it changes nothing; pick another model or thinking level", i+1)}
+		// A route that serves exactly like the default changes nothing,
+		// unless it is named: a named route still labels its requests in
+		// the request log and the route mix (a Family router's "Homework
+		// learning" route on the same model as its default).
+		if r.ModelID == c.Default.ModelID && r.Thinking == c.Default.Thinking && r.Instructions == c.Default.Instructions && r.Name == "" {
+			return c, &ValidationError{Field: field, Message: fmt.Sprintf("route %d sends requests to the default model with the default thinking setting and instructions, so it changes nothing; pick another model, thinking level or instructions, or give it a name", i+1)}
 		}
 		r.ModelKind, r.ModelName, r.UpstreamName, r.Broken, r.BrokenReason = "", "", "", false, ""
 		routes = append(routes, r)

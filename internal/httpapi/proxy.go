@@ -593,6 +593,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				secgwActionHeader(w, dec.Action, dec.Redactions)
 			}
 		}
+		// Router instructions go on the final body, exactly once: after
+		// both ingress passes (the guards judge the caller's text only)
+		// and after any fall back to the default chose who serves.
+		body = s.applyRouteInstructions(w, pendRoute, event, body)
 		if pendRoute.mode == store.RouterModeLive || pendRoute.extra == nil {
 			defer s.recordRouteDecision(pendRoute, event, model)
 		} else {

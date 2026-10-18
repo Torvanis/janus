@@ -53,7 +53,10 @@ type evalJob struct {
 	// defaultThinking is the reasoning effort the router's default would
 	// have been given for this request ("" = the caller's own setting).
 	defaultThinking string
-	cfg             store.RouteEval
+	// defaultInstructions is the router-wide plus default instructions the
+	// default would have been given ("" = none).
+	defaultInstructions string
+	cfg                 store.RouteEval
 	// body is the caller's request as it stood before the route rewrote it
 	// (after any router-level redaction).
 	body          []byte
@@ -198,7 +201,7 @@ func (r *evalRunner) run(j *evalJob) {
 	// Reserve against today's count and budget atomically, at a
 	// conservative estimate, so concurrent jobs (on any replica) cannot all
 	// pass the check and all spend.
-	estimate := s.evalEstimate(ctx, def.Model, judge.Model, replay, prompt, j.routedAnswer, settings.EvalMaxOutputTokens)
+	estimate := s.evalEstimate(ctx, def.Model, judge.Model, withDefaultInstructions(replay, j.defaultInstructions), prompt, j.routedAnswer, settings.EvalMaxOutputTokens)
 	ok, err := s.Store.ReserveRouteEval(ctx, res, j.cfg.MaxPerDay, usage.NanoFromUSD(j.cfg.DailyBudgetUSD), estimate, time.Now().UTC())
 	if err != nil {
 		s.Logger.Warn("routing eval: reserve", "error", err.Error())
@@ -223,9 +226,11 @@ func (r *evalRunner) run(j *evalJob) {
 		res.Status, res.Error = "error", "default model: "+defErr.Error()
 		return
 	}
-	// 1. The default model's answer to the same request.
+	// 1. The default model's answer to the same request, with the
+	// instructions the default would have added (after the policy check,
+	// as on the request path: admin-written text is not scanned).
 	started := time.Now()
-	defAnswer, defCost, err := s.internalChatTo(ctx, def, replay, j.requestID)
+	defAnswer, defCost, err := s.internalChatTo(ctx, def, withDefaultInstructions(replay, j.defaultInstructions), j.requestID)
 	res.DefaultLatencyMs = int(time.Since(started).Milliseconds())
 	res.DefaultCostNano = defCost
 	res.EvalCostNano += defCost
@@ -319,6 +324,15 @@ func (s *Server) evalDefaultBody(ctx context.Context, j *evalJob, def store.Reso
 	}
 	if out, _, ok := applyThinking(body, effort, adapterType); ok {
 		body = out
+	}
+	return body
+}
+
+// withDefaultInstructions adds the default's instructions to a replayed
+// chat request.
+func withDefaultInstructions(body []byte, text string) []byte {
+	if out, ok := injectInstructions("/v1/chat/completions", body, text); ok {
+		return out
 	}
 	return body
 }

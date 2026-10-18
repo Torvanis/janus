@@ -844,6 +844,7 @@ var migrations = []migration{
 	decisionModelsMigration,
 	servedManagedModelMigration,
 	decisionStaleStatusMigration,
+	secgwCategoryMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serialises

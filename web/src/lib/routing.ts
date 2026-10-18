@@ -22,6 +22,8 @@ export interface RouterRoute {
   restrict_to_granted: boolean;
   skip_when_over_quota: boolean;
   eval: RouteEval;
+  /** Text added to the system prompt when this route serves, after the router's. */
+  instructions?: string;
   model_kind?: string;
   model_name?: string;
   upstream_name?: string;
@@ -34,6 +36,8 @@ export interface RouterRoute {
 export interface RouterDefault {
   model_id: string;
   thinking: string;
+  /** Text added to the system prompt when the default serves, after the router's. */
+  instructions?: string;
   model_kind?: string;
   model_name?: string;
   upstream_name?: string;
@@ -49,6 +53,36 @@ export interface RouterConfig {
   sticky: boolean;
   sticky_minutes: number;
   disclose: boolean;
+  /** Text added to the system prompt of every request the router serves. */
+  instructions?: string;
+}
+
+/** Most characters each instructions field may hold (the server trims, then checks). */
+export const MAX_INSTRUCTIONS = 8000;
+
+export const INSTRUCTIONS_LABELS: Record<string, string> = {
+  router: 'router',
+  route: 'route',
+  'router+route': 'router + route',
+};
+
+/**
+ * Splits a stored route reason ("matched:legal;instructions=router+route")
+ * into the decision reason and what router instructions did: router,
+ * route, router+route, not_applied, or '' when none are set.
+ */
+export function splitRouteReason(reason: string): { reason: string; instructions: string } {
+  const i = reason.indexOf(';instructions=');
+  if (i < 0) return { reason, instructions: '' };
+  return { reason: reason.slice(0, i), instructions: reason.slice(i + ';instructions='.length) };
+}
+
+/** The request-log line for router instructions, or '' when none were set. */
+export function instructionsLine(reason: string): string {
+  const { instructions } = splitRouteReason(reason);
+  if (!instructions) return '';
+  if (instructions === 'not_applied') return 'Router instructions not applied: this endpoint has no system prompt';
+  return `Router instructions added: ${INSTRUCTIONS_LABELS[instructions] ?? instructions}`;
 }
 
 export interface RouteMixRow {
@@ -323,7 +357,7 @@ export const REASON_LABELS: Record<string, string> = {
 };
 
 export function reasonLabel(reason: string): string {
-  const base = reason.split(':')[0] ?? reason;
+  const base = splitRouteReason(reason).reason.split(':')[0] ?? reason;
   return REASON_LABELS[base] ?? reason;
 }
 
@@ -452,7 +486,18 @@ export function newRoute(): RouterRoute {
     restrict_to_granted: false,
     skip_when_over_quota: false,
     eval: { enabled: false, sample_pct: 5, max_per_day: 200, daily_budget_usd: 5, until: '', judge_model_id: '' },
+    instructions: '',
   };
+}
+
+/** A routing category a template needs; saving the router creates it if missing. */
+export interface TemplateCategory {
+  slug: string;
+  name: string;
+  includes: string;
+  excludes: string;
+  min_confidence: number;
+  examples: string[];
 }
 
 export interface RouterTemplate {
@@ -463,7 +508,114 @@ export interface RouterTemplate {
   routes: Array<Partial<RouterRoute> & { hint: string }>;
   defaultThinking: string;
   defaultHint: string;
+  /** Router-wide instructions and the default's own. */
+  instructions?: string;
+  defaultInstructions?: string;
+  /** Overrides the builder's sticky default (on). */
+  sticky?: boolean;
+  /** Routing categories the routes use that Janus does not ship. */
+  categories?: TemplateCategory[];
 }
+
+/**
+ * The slug the server gives a category of this name (store.ClassificationSlug):
+ * lowercase letters and digits, anything else one underscore, at most 48.
+ */
+export function categorySlug(name: string): string {
+  let out = '';
+  let underscore = false;
+  for (const ch of name.trim().toLowerCase()) {
+    if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+      out += ch;
+      underscore = false;
+    } else if (ch === '+') {
+      out += 'plus';
+      underscore = false;
+    } else if (ch === '#') {
+      out += 'sharp';
+      underscore = false;
+    } else if (!underscore && out.length > 0) {
+      out += '_';
+      underscore = true;
+    }
+  }
+  out = out.replace(/^_+|_+$/g, '');
+  if (out.length > 48) out = out.slice(0, 48).replace(/^_+|_+$/g, '');
+  return out;
+}
+
+/**
+ * Family routing categories: the parental-control wording Janus ships for
+ * security categories, as routing categories, so a Family router can send
+ * each kind of request to a route with fitting instructions.
+ */
+export const FAMILY_CATEGORIES: TemplateCategory[] = [
+  {
+    slug: 'feeling_low_or_unsafe',
+    name: 'Feeling low or unsafe',
+    includes:
+      'Sadness, loneliness, being bullied, worry about home or friends, trouble sleeping or eating, thoughts of self-harm, or someone making them feel unsafe.',
+    excludes: 'Schoolwork about mental health as a subject.',
+    min_confidence: 0.35,
+    examples: ['Everyone at school ignores me', "I don't want to be here anymore"],
+  },
+  {
+    slug: 'not_suitable_for_children',
+    name: 'Not suitable for children',
+    includes:
+      'Sexual or romantic roleplay, graphic violence or gore, buying or using drugs, alcohol, vapes or weapons, gambling, dangerous stunts or online challenges.',
+    excludes: 'Age-appropriate health or sex education, history or news asked for school, or questions about staying safe.',
+    min_confidence: 0.5,
+    examples: ['How do I get a vape without ID?', 'Describe the goriest horror scene you can'],
+  },
+  {
+    slug: 'getting_around_parental_controls',
+    name: 'Getting around parental controls',
+    includes:
+      'Turning off or getting around screen-time limits, content filters, parental controls or school device management, hiding activity from parents, or making secret accounts.',
+    excludes: 'Questions about how parental controls work in general.',
+    min_confidence: 0.5,
+    examples: ["How do I turn off Screen Time without my parents' passcode?", 'How can I hide apps from my mom?'],
+  },
+  {
+    slug: 'sharing_personal_information',
+    name: 'Sharing personal information',
+    includes:
+      'Giving out their home address, school, full name with location, phone number, passwords or login details, or photos of themselves, or arranging to meet someone they met online.',
+    excludes: 'General questions about privacy or how to make a strong password.',
+    min_confidence: 0.5,
+    examples: [
+      'My password is sunshine123, can you remember it?',
+      "I'm meeting a guy from Discord at the mall tomorrow, what should I wear?",
+    ],
+  },
+  {
+    slug: 'homework_done_for_them',
+    name: 'Homework done for them',
+    includes:
+      'Asking for completed homework or an assignment to hand in, a full essay, report or story written for them, answers to every question on a worksheet, test or quiz, or rewording ("humanizing") text to avoid plagiarism or AI detection.',
+    excludes:
+      'Asking for an explanation, a hint or the next step, checking their own answer, feedback on their own draft, practice questions, or an example on a different topic.',
+    min_confidence: 0.6,
+    examples: [
+      'Write a 500-word essay on the causes of World War I for my history class',
+      'Answer all ten questions on this worksheet',
+      "Reword this so my teacher can't tell it's from AI",
+    ],
+  },
+];
+
+// The privacy sentence is router-wide because requests with a detail in them
+// (an email, a username) are often not filed as "Sharing personal information"
+// and reach the default, which has no route instructions (dev round 3: two of
+// two "Hi Sophia!" from an email address on the default route).
+// The schoolwork sentence is a backstop for homework requests the classifier
+// files elsewhere ("solve 2x + 5 = 17, I just need the answer" reads as maths,
+// not homework, and lands on the default): tested on dev, without it Haiku
+// handed over the answer, with it the reply taught and quick facts, poems and
+// practice questions were still answered.
+const FAMILY_ROUTER_INSTRUCTIONS =
+  'You are talking with a child. Keep every answer age-appropriate, friendly and easy to understand. If they mention anything worrying, unsafe or upsetting, gently encourage them to talk to a parent or another trusted adult. Help with schoolwork by teaching: do not hand over finished homework, final answers to copy, or a rewritten or corrected version of their work; give hints, steps and feedback so they do it themselves. When they ask you to check an answer or a word they already wrote, that is not cheating: say plainly whether it is right and, if not, tell them the correct word or answer and why. Practice questions, explanations and everyday facts are fine. Never repeat personal details they share (full name, address, school, phone number, email, username or password), and never call them by a name taken from an email address, username or other detail; only use a first name they introduce themselves with.';
 
 /**
  * Starting points. Templates fill categories, difficulty and thinking; the
@@ -542,6 +694,61 @@ export const ROUTER_TEMPLATES: RouterTemplate[] = [
     ],
     defaultThinking: 'passthrough',
     defaultHint: 'a general model for non-coding requests',
+  },
+  {
+    id: 'family',
+    name: 'Family',
+    modelName: 'auto/family',
+    summary:
+      'For children: supportive answers when they feel low, kind refusals for grown-up topics, a privacy coach, and a tutor that gives hints instead of answers.',
+    instructions: FAMILY_ROUTER_INSTRUCTIONS,
+    defaultInstructions: '',
+    sticky: false,
+    categories: FAMILY_CATEGORIES,
+    routes: [
+      {
+        name: 'Feeling low',
+        categories: ['feeling_low_or_unsafe'],
+        instructions:
+          'The child may be sad, lonely, worried or feeling unsafe. Be a warm, patient listener: acknowledge their feelings, ask gently what is going on, and never give instructions that could hurt them or anyone else. Encourage them to talk to a parent, a teacher or a school counselor. If they mention hurting themselves or not wanting to be alive, tell them clearly that they deserve help right now, ask them to tell a trusted adult today, and give them the 988 Suicide & Crisis Lifeline (call or text 988) if they are in the US.',
+        hint: 'a careful general model',
+      },
+      {
+        name: 'Not suitable for children',
+        categories: ['not_suitable_for_children'],
+        instructions:
+          'The child asked about something that is not suitable for their age. Kindly say you can’t help with that, without lecturing or shaming them, and do not give any of the details they asked for. If it fits, offer a safe, age-appropriate alternative, or suggest they talk to a parent or trusted adult.',
+        hint: 'a careful general model',
+      },
+      {
+        name: 'Getting around parental controls',
+        categories: ['getting_around_parental_controls'],
+        instructions:
+          'The child wants to get around parental controls, screen-time limits or school device rules, or hide what they do online. Kindly say you can’t help with that and give no steps or workarounds. Suggest they talk to their parent about the rule that bothers them: explaining why they want more time or access often works better than going around it.',
+        hint: 'a careful general model',
+      },
+      {
+        name: 'Sharing personal information',
+        categories: ['sharing_personal_information'],
+        instructions:
+          'Act as a friendly privacy coach. The child may be sharing or about to share personal information (address, school, phone number, passwords, photos) or planning to meet someone they met online. Never quote the information back, not even in part (do not write out their password, address, school or full name), do not call them by a name taken from an email address, username or other detail they shared, and do not store or ask for it. Explain simply why it should stay private, tell them never to meet someone from the internet without a parent, and encourage them to tell a parent or trusted adult.',
+        hint: 'a careful general model',
+      },
+      {
+        name: 'Homework done for them',
+        categories: ['homework_done_for_them'],
+        instructions:
+          'Act as a patient tutor. Never give the final answer, a finished essay or completed homework, and do not reword text to get past plagiarism or AI checks. Instead, explain the idea, give a hint or the next step, ask a question that helps them think, and offer to check their work once they have tried.',
+        hint: 'a good teaching model',
+      },
+      {
+        name: 'Homework learning',
+        categories: ['homework_learning'],
+        hint: 'a good teaching model',
+      },
+    ],
+    defaultThinking: 'passthrough',
+    defaultHint: 'a careful general model',
   },
 ];
 
