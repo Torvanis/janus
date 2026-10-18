@@ -6,7 +6,7 @@ fullnameOverride: ""
 image:
   repository: ghcr.io/torvanis/janus
   tag: "2026.10.4"
-  digest: sha256:da888b13e51e9f58d40101859e76831aff5caec2a2dd8b1fcb28da8ad83e620d
+  digest: sha256:8a3a7c1a70e14734b0913ad2cc15005256c199fe5531b4d1adacac651d6cc420
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 # Loopback evaluation by default. Set an HTTPS origin before remote exposure.
