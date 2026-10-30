@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
 import type { AdminUserDetail, AdminUserRow, Group, Team } from '../../lib/types';
-import { formatNumber, formatRelative, formatUSD, statusTone, titleCase } from '../../lib/format';
+import { formatDate, formatNumber, formatRelative, formatUSD, statusTone, titleCase } from '../../lib/format';
 import { AreaChart, type MetricKey } from '../../components/charts';
 import { ChargedTeam } from '../../components/ChargedTeam';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, EmptyState, Field, Modal, Pagination, useToast } from '../../components/ui';
@@ -343,14 +343,20 @@ function UsersTab(): ReactNode {
                                 {t('adminPeople.active')}
                               </Badge>
                             ) : (
-                              <Badge tone="danger">{t('adminPeople.disabled')}</Badge>
+                              <UserInactiveBadge user={user} />
                             )}
                           </td>
                           <td>
                             <RowActions>
                               <IconButton
                                 icon={user.is_active ? 'disable' : 'enable'}
-                                label={user.is_active ? t('adminPeople.disable') : t('adminPeople.enable')}
+                                label={
+                                  user.is_active
+                                    ? t('adminPeople.disable')
+                                    : isHeld(user)
+                                      ? t('adminPeople.restore')
+                                      : t('adminPeople.enable')
+                                }
                                 onClick={() => setPendingChange({ user, is_active: !user.is_active })}
                                 disabled={user.id === me?.id}
                               />
@@ -408,18 +414,22 @@ function UsersTab(): ReactNode {
                 name: pendingChange.user.name || pendingChange.user.email,
                 role: titleCase(pendingChange.role),
               })
-            : pendingChange?.is_active
-              ? t('adminPeople.reEnableTitle', { name: pendingChange.user.name || pendingChange.user.email })
-              : t('adminPeople.disableTitle', { name: pendingChange?.user.name || pendingChange?.user.email || '' })
+            : pendingChange?.is_active && isHeld(pendingChange.user)
+              ? t('adminPeople.restoreTitle', { name: pendingChange.user.name || pendingChange.user.email })
+              : pendingChange?.is_active
+                ? t('adminPeople.reEnableTitle', { name: pendingChange.user.name || pendingChange.user.email })
+                : t('adminPeople.disableTitle', { name: pendingChange?.user.name || pendingChange?.user.email || '' })
         }
         consequence={
           pendingChange?.role === 'admin'
             ? t('adminPeople.adminConsequence')
             : pendingChange?.role
               ? t('adminPeople.roleConsequence')
-              : pendingChange?.is_active
-                ? t('adminPeople.enableConsequence')
-                : t('adminPeople.disableConsequence')
+              : pendingChange?.is_active && isHeld(pendingChange.user)
+                ? t('adminPeople.restoreConsequence')
+                : pendingChange?.is_active
+                  ? t('adminPeople.enableConsequence')
+                  : t('adminPeople.disableConsequence')
         }
         confirmLabel={t('adminPeople.applyChange')}
         busy={patch.isPending}
@@ -446,6 +456,20 @@ function UsersTab(): ReactNode {
 
 // AdminUserDetail in lib/types keeps the drawer and user list on one contract.
 
+/** A deleted account whose content is still held (it can be restored). */
+function isHeld(user: AdminUserRow): boolean {
+  return !user.is_active && Boolean(user.held_until) && !user.content_purged_at;
+}
+
+/** Status of a disabled account: disabled, deleted and held, or deleted. */
+function UserInactiveBadge({ user }: { user: AdminUserRow }): ReactNode {
+  if (isHeld(user)) {
+    return <Badge tone="warning">{t('adminPeople.heldUntil', { date: formatDate(user.held_until) })}</Badge>;
+  }
+  if (user.content_purged_at) return <Badge tone="danger">{t('adminPeople.contentDeleted')}</Badge>;
+  return <Badge tone="danger">{t('adminPeople.disabled')}</Badge>;
+}
+
 function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose: () => void }): ReactNode {
   const localOnly = useLocalOnly();
   // Local-only mode has no spend surface, so the drawer graph opens on
@@ -471,6 +495,17 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
     placeholderData: (previous) => previous,
   });
   const hasRequestFilters = Boolean(tokensIn || tokensOut);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const purge = useMutation({
+    mutationFn: (id: string) => api.post(`/api/v1/admin/users/${id}/purge`, {}),
+    onSuccess: () => {
+      toast(t('adminPeople.purgedToast'));
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error: Error) => toast(error.message, 'danger'),
+  });
 
   if (!userId) return null;
 
@@ -486,8 +521,18 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
                 {data.user.is_active ? (
                   <Badge tone="success">{t('adminPeople.active')}</Badge>
                 ) : (
-                  <Badge tone="danger">{t('adminPeople.disabled')}</Badge>
+                  <UserInactiveBadge user={data.user} />
                 )}
+                {isHeld(data.user) ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    style={{ marginLeft: 'var(--janus-space-2)' }}
+                    onClick={() => setConfirmPurge(true)}
+                  >
+                    {t('adminPeople.purgeNow')}
+                  </button>
+                ) : null}
               </DetailRow>
               <DetailRow label={t('adminPeople.colGroups')}>{data.groups.length ? data.groups.join(', ') : '—'}</DetailRow>
               <DetailRow label={t('adminPeople.teams')}>
@@ -655,6 +700,21 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
           </>
         )}
       </AsyncSection>
+      <ConfirmDialog
+        open={confirmPurge}
+        onClose={() => setConfirmPurge(false)}
+        onConfirm={() => {
+          purge.mutate(userId);
+          setConfirmPurge(false);
+        }}
+        danger
+        title={t('adminPeople.purgeTitle', {
+          name: detail.data?.user.name || detail.data?.user.email || t('adminPeople.personFallback'),
+        })}
+        consequence={t('adminPeople.purgeConsequence')}
+        confirmLabel={t('adminPeople.purgeNow')}
+        busy={purge.isPending}
+      />
     </Drawer>
   );
 }

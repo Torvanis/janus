@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -165,7 +166,7 @@ func (a *OpenAICompatible) Prepare(up Upstream, req *Request) (*Prepared, error)
 		header.Del("Authorization")
 	}
 	body := req.Body
-	if req.Streaming && isJSON(header) {
+	if req.Streaming && isJSON(header) && streamUsagePath(req.Path) {
 		body = ensureStreamUsage(body)
 	}
 	if a.name == "openai_compatible" && isJSON(header) && strings.HasPrefix(req.Path, "/v1/chat/completions") {
@@ -374,6 +375,10 @@ type openAIUsageEnvelope struct {
 		} `json:"input_tokens_details"`
 		// X.ai: request cost in USD ticks (see xaiTicksPerNanoUSD).
 		CostInUSDTicks *int64 `json:"cost_in_usd_ticks"`
+		// Whisper (/audio/transcriptions, /audio/translations) bills audio
+		// duration: {"type":"duration","seconds":4}. See parseOpenAIUsage.
+		UsageType string  `json:"type"`
+		Seconds   float64 `json:"seconds"`
 		// Groq: wall-clock seconds spent on the prompt and the completion.
 		PromptTime     float64 `json:"prompt_time"`
 		CompletionTime float64 `json:"completion_time"`
@@ -443,6 +448,14 @@ func parseOpenAIUsage(body []byte) (Usage, bool) {
 	if len(env.Choices) > 0 {
 		u.FinishReason = env.Choices[0].FinishReason
 	}
+	if !(u.TokensIn > 0 || u.TokensOut > 0) && env.Usage.UsageType == "duration" && env.Usage.Seconds > 0 {
+		// Duration-billed speech-to-text: one input unit per started second
+		// of audio, so quotas and the request log see the real size of the
+		// request (a 4-second clip is 4, not ~46,000 bytes/4 "tokens").
+		// A rate card's input rate is then a per-second price.
+		u.TokensIn = int64(math.Ceil(env.Usage.Seconds))
+		u.DurationBilled = true
+	}
 	u.Reported = u.TokensIn > 0 || u.TokensOut > 0
 
 	ticks := env.Usage.CostInUSDTicks
@@ -509,12 +522,17 @@ func (c *openAIStreamCollector) Feed(line []byte) {
 func (c *openAIStreamCollector) Usage() Usage { return c.usage }
 
 // ensureStreamUsage opts a streaming chat request into upstream usage reporting
-// so token counts are available on the final frame. It is the one body edit the
-// gateway makes, and it is additive and idempotent.
+// so token counts are available on the final frame. The edit is additive and
+// idempotent. (It is one of several body edits the gateway may make; see the
+// "Proxy endpoints" docs page.)
 func ensureStreamUsage(body []byte) []byte {
 	if len(body) == 0 {
 		return body
 	}
+	// Only Chat Completions (and legacy Completions) take stream_options.
+	// The Responses API reports usage on response.completed by itself and
+	// REFUSES the field ("Unknown parameter: 'stream_options.include_usage'"),
+	// as do the audio endpoints; callers gate on the path (streamUsagePath).
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
@@ -531,6 +549,13 @@ func ensureStreamUsage(body []byte) []byte {
 		return body
 	}
 	return out
+}
+
+// streamUsagePath reports whether a streaming request to path accepts
+// stream_options.include_usage: Chat Completions and legacy Completions only.
+func streamUsagePath(path string) bool {
+	p := strings.TrimSuffix(path, "/")
+	return strings.HasSuffix(p, "/chat/completions") || strings.HasSuffix(p, "/v1/completions") || p == "/completions"
 }
 
 func sseData(line []byte) ([]byte, bool) {
@@ -630,13 +655,23 @@ func doDiscovery(client *http.Client, req *http.Request) ([]byte, error) {
 	return body, nil
 }
 
+// GuessModalities is the name-based modality guess discovery uses (for
+// models a provider lists without capabilities, e.g. a personal plan's).
+func GuessModalities(name string) []string { return guessModalities(name) }
+
 func guessModalities(name string) []string {
 	n := strings.ToLower(name)
 	switch {
 	case strings.Contains(n, "embed"):
 		return []string{ModalityEmbedding}
-	case strings.Contains(n, "whisper"):
+	// Speech-to-text: whisper and OpenAI's *-transcribe family (served on
+	// /audio/transcriptions, never chat). "-diarize" variants are STT too.
+	case strings.Contains(n, "whisper"), strings.Contains(n, "transcribe"):
 		return []string{ModalitySTT}
+	// Realtime models speak WebSocket/WebRTC sessions only; listing them as
+	// chat models offers them where every request fails.
+	case hasNameToken(n, "realtime"), strings.Contains(n, "-realtime"):
+		return []string{ModalityAudio}
 	case strings.Contains(n, "tts"):
 		return []string{ModalityTTS}
 	// Video generation before image: "grok-imagine-video" must not fall

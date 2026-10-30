@@ -34,7 +34,7 @@ func (s *Server) handleAuthProviders(w http.ResponseWriter, r *http.Request) {
 	if s.OIDC != nil && !s.Config.DevAuthEnabled {
 		out = append(out, publicProvider{Slug: "", Name: "Corporate SSO", URL: "/auth/start?redirect_uri=" + url.QueryEscape(redirectTo)})
 	}
-	if s.Registry != nil && s.requireFeature("multi_oidc") == nil {
+	if s.Registry != nil && s.featureRuns("multi_oidc") {
 		rows, err := s.Store.ListIdentityProviders(r.Context())
 		if err == nil {
 			for _, p := range rows {
@@ -95,8 +95,8 @@ func (s *Server) providerFor(r *http.Request, slug string) (*auth.OIDCProvider, 
 	if s.Registry == nil || !slugRe.MatchString(slug) {
 		return nil, nil, store.ErrNotFound
 	}
-	if err := s.requireFeature("multi_oidc"); err != nil {
-		return nil, nil, err
+	if !s.featureRuns("multi_oidc") {
+		return nil, nil, ErrFeatureNotLicensed("multi_oidc")
 	}
 	return s.Registry.Provider(r.Context(), slug)
 }
@@ -223,6 +223,7 @@ func (s *Server) handleAdminUpdateIdentityProvider(w http.ResponseWriter, r *htt
 	if s.Registry != nil {
 		s.Registry.Forget(before.Slug)
 	}
+	s.reevaluateGroupAdmins(r.Context())
 	s.audit(r, "identity_provider.update", "identity_provider", p.ID, map[string]any{"slug": before.Slug, "enabled": before.Enabled}, map[string]any{"slug": p.Slug, "enabled": p.Enabled})
 	WriteJSON(w, http.StatusOK, s.withCallback(p))
 }
@@ -241,6 +242,7 @@ func (s *Server) handleAdminDeleteIdentityProvider(w http.ResponseWriter, r *htt
 	if s.Registry != nil {
 		s.Registry.Forget(before.Slug)
 	}
+	s.reevaluateGroupAdmins(r.Context())
 	s.audit(r, "identity_provider.delete", "identity_provider", id, map[string]any{"slug": before.Slug}, nil)
 	w.WriteHeader(http.StatusNoContent)
 }

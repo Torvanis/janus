@@ -235,6 +235,21 @@ func reportUnique(v []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// reportBillingSource is who paid for a request: the organization, or the
+// caller's own fixed-price vendor plan (my/<provider>/<model>), which Janus
+// records at $0 but still counts.
+func reportBillingSource(subscriptionID, model string) string {
+	if subscriptionID == "" {
+		return "organization"
+	}
+	parts := strings.SplitN(model, "/", 3)
+	if len(parts) == 3 && parts[0] == "my" && parts[1] != "" {
+		return "plan:" + parts[1]
+	}
+	return "plan"
+}
+
 func reportDimension(f *reportFact, dim string, loc *time.Location) []string {
 	e := f.e
 	v := ""
@@ -276,6 +291,8 @@ func reportDimension(f *reportFact, dim string, loc *time.Location) []string {
 		v = f.center
 	case "client_app":
 		v = e.ClientApp
+	case "billing_source":
+		v = reportBillingSource(e.SubscriptionID, e.ModelName)
 	case "service_token":
 		v = e.ServiceTokenID
 	case "status":

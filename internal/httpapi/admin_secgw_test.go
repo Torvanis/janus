@@ -66,6 +66,11 @@ func TestAdminSecgwPolicyAndBindingLifecycle(t *testing.T) {
 	if created.Policy.ID == "" || created.Policy.Checks[1].Fail != store.SecgwFailClosed {
 		t.Fatalf("created: %+v", created.Policy)
 	}
+	// Created without a capture setting: text capture is off, as in the
+	// editor (it used to default on through the API).
+	if c := created.Policy.Capture.PromptInjectionBodies; c == nil || *c {
+		t.Fatalf("API-created policy must not capture text by default: %v", c)
+	}
 
 	rec = h.doAsSession(sess, http.MethodPost, "/api/v1/admin/secgw/bindings", map[string]any{"policy_id": created.Policy.ID, "scope_type": "org"})
 	if rec.Code != http.StatusCreated {

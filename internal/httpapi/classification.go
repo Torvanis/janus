@@ -301,6 +301,11 @@ func (s *Server) prepareClassification(ctx context.Context, event *store.UsageEv
 	if !classificationEligible(event.EndpointPath, overflow) {
 		return nil
 	}
+	if chatInsightsSkips(chatCallFrom(ctx)) {
+		// Chat's own plumbing (auto-title, describe, transcribe, music)
+		// is not a request the person made.
+		return nil
+	}
 	st, err := s.classificationState(ctx)
 	if err != nil {
 		s.Logger.WarnContext(ctx, "classification: settings unavailable", "error", err.Error())
@@ -326,13 +331,15 @@ func (s *Server) prepareClassification(ctx context.Context, event *store.UsageEv
 	// A decision classifier that takes combined questions answers this
 	// question alongside the guards' at no extra wait, so offer it to
 	// them. It rides along only if a guard calls the same classifier
-	// about the same text (the latest user message).
+	// about the same text (the latest user message: a first turn, or any
+	// turn when the scope is the latest message alone; a follow-up with
+	// its conversation as context is asked separately).
 	// Only when that one question is the whole classification: a
 	// two-stage plan (subcategories on, taxonomy above the classifier's
 	// option limit) would get its category on the guard call and never be
 	// asked for the subcategory.
 	oneQuestion := !st.plan.Subcategories || st.plan.Flat()
-	if st.plan.Key != "" && st.plan.Style == classify.StyleCombined && st.plan.TextScope == classify.ScopeLastUser && !st.plan.IncludeSystem && oneQuestion {
+	if st.plan.Key != "" && st.plan.Style == classify.StyleCombined && (st.plan.TextScope == classify.ScopeLastUser || st.plan.TextScope == classify.ScopeContext) && !st.plan.IncludeSystem && oneQuestion {
 		pc.extra = &secgw.Extra{ClassifierKey: st.plan.Key, Text: classify.TrimText(text, st.plan.MaxChars), Questions: st.plan.Questions(), Feature: "usage_insights"}
 	}
 	return pc

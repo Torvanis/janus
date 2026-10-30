@@ -341,11 +341,18 @@ describe('Classifier', () => {
     renderAt('/admin/routing/classifier');
     const user = userEvent.setup();
     await user.click(await screen.findByRole('radio', { name: /clef-27b/ }));
-    await user.type(screen.getByRole('textbox', { name: 'Prompt to classify' }), 'write a lock-free queue');
+    await user.type(screen.getByRole('textbox', { name: 'Prompt to classify' }), 'keep going');
+    // A follow-up is tried with its earlier conversation, as live requests are.
+    await user.click(screen.getByRole('button', { name: '+ Earlier conversation' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'Earlier conversation (optional)' }),
+      'User: write a lock-free queue{enter}Assistant: Here is the ring buffer',
+    );
     await user.click(screen.getByRole('button', { name: 'Classify and route' }));
     await screen.findByText('4.2');
     expect(mocked.post).toHaveBeenCalledWith('/api/v1/admin/routing/test', {
-      text: 'write a lock-free queue',
+      text: 'keep going',
+      history: 'User: write a lock-free queue\nAssistant: Here is the ring buffer',
       classifier_model_id: 'clef',
     });
   });
@@ -596,89 +603,10 @@ describe('Router instructions', () => {
 });
 
 describe('Family template', () => {
-  it('fills instructions, turns sticky off and creates its categories before the router', async () => {
-    const created: string[] = [];
-    mocked.post.mockImplementation(async (path: string, body?: unknown) => {
-      if (path.endsWith('/routing/categories')) {
-        created.push((body as { name: string }).name);
-        return {};
-      }
-      if (path.endsWith('/routing/routers')) return { router: { ...router, id: 'r-new' } };
-      throw new Error(`unexpected POST ${path}`);
-    });
+  it('is gone: a template id from an old link opens an empty builder', async () => {
     renderAt('/admin/routing/routers/new?template=family');
-    const user = userEvent.setup();
-    expect(await screen.findByRole('heading', { name: 'auto/family' })).toBeTruthy();
-    const routerBox = screen.getByRole('textbox', { name: 'Router instructions' }) as HTMLTextAreaElement;
-    expect(routerBox.value).toMatch(/talking with a child/);
-    expect(routerBox.value).toMatch(/trusted adult/);
-    expect((screen.getByRole('textbox', { name: 'Default instructions' }) as HTMLTextAreaElement).value).toBe('');
-    expect(await screen.findByText(/also adds 5 routing categories/)).toBeTruthy();
-    for (const route of [
-      'Feeling low',
-      'Not suitable for children',
-      'Getting around parental controls',
-      'Sharing personal information',
-      'Homework done for them',
-      'Homework learning',
-    ]) {
-      expect(screen.getAllByText(route).length).toBeGreaterThan(0);
-    }
-    expect((screen.getByRole('checkbox', { name: 'Keep conversations on one route' }) as HTMLInputElement).checked).toBe(false);
-    await user.click(screen.getByRole('button', { name: 'Create router' }));
-    await waitFor(() => expect(mocked.post.mock.calls.some(([p]) => String(p).endsWith('/routing/routers'))).toBe(true));
-    expect(created).toEqual([
-      'Feeling low or unsafe',
-      'Not suitable for children',
-      'Getting around parental controls',
-      'Sharing personal information',
-      'Homework done for them',
-    ]);
-    const calls = mocked.post.mock.calls.map(([p]) => String(p));
-    expect(calls.findIndex((p) => p.endsWith('/routing/routers'))).toBe(calls.length - 1);
-    const body = mocked.post.mock.calls.find(([p]) => String(p).endsWith('/routing/routers'))![1] as {
-      config: Router['config'];
-    };
-    expect(body.config.sticky).toBe(false);
-    expect(body.config.routes.map((r) => r.categories[0])).toEqual([
-      'feeling_low_or_unsafe',
-      'not_suitable_for_children',
-      'getting_around_parental_controls',
-      'sharing_personal_information',
-      'homework_done_for_them',
-      'homework_learning',
-    ]);
-    expect(body.config.routes[0]!.instructions).toMatch(/988/);
-    expect(body.config.routes[4]!.instructions).toMatch(/Never give the final answer/);
-    expect(body.config.routes[5]!.instructions).toBe('');
-    expect(body.config.routes.every((r) => !('hint' in r))).toBe(true);
-  });
-
-  it('leaves categories the admin already has alone', async () => {
-    const feeling: RoutingCategory = {
-      ...legal,
-      id: 'cat-feel',
-      slug: 'feeling_low_or_unsafe',
-      name: 'Feeling low or unsafe',
-      includes: 'My own wording.',
-    };
-    mocked.get.mockImplementation(async (path: string) => {
-      if (path === '/api/v1/admin/routing') return doc;
-      if (path.endsWith('/routing/categories'))
-        return { categories: [legal, coding, feeling], insights_categories: [], max_enabled: 25 };
-      if (path.endsWith('/routing/targets')) return { targets };
-      throw new Error(`unexpected GET ${path}`);
-    });
-    const created: string[] = [];
-    mocked.post.mockImplementation(async (path: string, body?: unknown) => {
-      if (path.endsWith('/routing/categories')) created.push((body as { name: string }).name);
-      return { router: { ...router, id: 'r-new' } };
-    });
-    renderAt('/admin/routing/routers/new?template=family');
-    const user = userEvent.setup();
-    expect(await screen.findByText(/also adds 4 routing categories/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Create router' }));
-    await waitFor(() => expect(created.length).toBe(4));
-    expect(created).not.toContain('Feeling low or unsafe');
+    expect(await screen.findByRole('button', { name: 'Create router' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'auto/family' })).toBeNull();
+    expect(screen.queryByText(/also adds 5 routing categories/)).toBeNull();
   });
 });

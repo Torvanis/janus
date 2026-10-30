@@ -104,6 +104,20 @@ func (s *Store) SaveSCIMResource(ctx context.Context, kind, id string, resource 
 		}
 		creating := id == ""
 		created := FormatTime(nowUTC())
+		if creating && kind == "Users" {
+			// The same person provisioned again while a deleted account's
+			// content is still held gets that account back.
+			held, err := s.scimHeldUser(ctx, scimString(r, "externalId"), scimNormalize(scimString(r, "userName")))
+			if err != nil {
+				return err
+			}
+			if held != "" {
+				if err := s.exec(ctx, `UPDATE scim_resource SET deleted_at='' WHERE id=? AND kind='Users'`, held); err != nil {
+					return err
+				}
+				id, creating = held, false
+			}
+		}
 		if !creating {
 			if _, err := s.SCIMResource(ctx, kind, id); err != nil {
 				return err
@@ -234,6 +248,11 @@ func (s *Store) SaveSCIMResource(ctx context.Context, kind, id string, resource 
 			if err := s.exec(ctx, `UPDATE app_user SET email=?,name=?,is_active=? WHERE id=?`, email, name, boolInt(active), id); err != nil {
 				return err
 			}
+			if active {
+				if err := s.clearUserDeleted(ctx, id); err != nil {
+					return err
+				}
+			}
 			if !active {
 				if err := s.scimDeactivate(ctx, id); err != nil {
 					return err
@@ -344,6 +363,39 @@ func (s *Store) SaveSCIMResource(ctx context.Context, kind, id string, resource 
 	return out, nil
 }
 
+// scimHeldUser finds a deleted directory user whose content is still held
+// and who is the same person as an incoming create: the same externalId
+// (or sign-in subject), or the same userName / email (case-insensitive). Two different held accounts
+// matching is a conflict.
+func (s *Store) scimHeldUser(ctx context.Context, external, username string) (string, error) {
+	var conds []string
+	var args []any
+	if external != "" {
+		conds = append(conds, `r.external_id = ? OR u.auth_provider_id = ?`)
+		args = append(args, external, external)
+	}
+	if username != "" {
+		conds = append(conds, `r.username_norm = ? OR LOWER(TRIM(u.email)) = ?`)
+		args = append(args, username, username)
+	}
+	if len(conds) == 0 {
+		return "", nil
+	}
+	ids, err := s.teamStringIDs(ctx, `SELECT r.id FROM scim_resource r JOIN app_user u ON u.id = r.id
+		WHERE r.kind = 'Users' AND r.deleted_at <> '' AND u.deleted_at <> '' AND u.content_purged_at = ''
+		AND (`+strings.Join(conds, " OR ")+`) ORDER BY r.id`, args...)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) > 1 {
+		return "", scimConflict("externalId and userName identify different deleted users")
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
+	return "", nil
+}
+
 func (s *Store) scimDeactivate(ctx context.Context, id string) error {
 	if err := s.exec(ctx, `UPDATE app_user SET is_active=0 WHERE id=?`, id); err != nil {
 		return err
@@ -381,6 +433,10 @@ func (s *Store) DeleteSCIMResource(ctx context.Context, kind, id string) error {
 		}
 		if kind == "Users" {
 			if err := s.scimDeactivate(ctx, id); err != nil {
+				return err
+			}
+			// Content is held, then purged (UserDeleteHold).
+			if err := s.MarkUserDeleted(ctx, id); err != nil {
 				return err
 			}
 		} else {

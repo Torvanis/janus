@@ -12,7 +12,7 @@ import (
 // History reassignment is therefore visible on every replica immediately after
 // commit. CSV delimiters prevent partial-ID matches and count each event once.
 func (s *Store) SumTeamMetricSince(ctx context.Context, teamID, modelID, metric string, since time.Time) (int64, error) {
-	expr := map[string]string{MetricTokensIn: "COALESCE(SUM(tokens_in),0)", MetricTokensOut: "COALESCE(SUM(tokens_out),0)", MetricCostUSD: "COALESCE(SUM(cost_nanousd),0)", MetricRequests: "COUNT(*)"}[metric]
+	expr := map[string]string{MetricTokensIn: "COALESCE(SUM(tokens_in),0)", MetricTokensOut: "COALESCE(SUM(tokens_out),0)", MetricCostUSD: "COALESCE(SUM(cost_nanousd),0)", MetricRequests: requestCountExpr}[metric]
 	if expr == "" {
 		return 0, fmt.Errorf("unsupported quota metric %q", metric)
 	}
@@ -63,7 +63,7 @@ func (s *Store) ChangeTokenTeam(ctx context.Context, tokenID, ownerID, teamID st
 		if err != nil {
 			return err
 		}
-		if token.UserID != ownerID {
+		if token.UserID != ownerID || token.Kind != "" {
 			return ErrNotFound
 		}
 		if !token.RevokedAt.IsZero() {

@@ -65,6 +65,10 @@ type Prepared struct {
 	URL    string
 	Header http.Header
 	Body   []byte
+	// OnRedirect, when set, adjusts the headers of a redirected request
+	// before it is sent (Gemini's video download redirects to an endpoint
+	// that takes only its own key header). nil = Go's default behaviour.
+	OnRedirect func(h http.Header)
 }
 
 // Usage is the token accounting extracted from an upstream response.
@@ -128,11 +132,23 @@ type Usage struct {
 	CostNano     int64
 	CostReported bool
 
+	// ToolFeeNano is what the provider charges per hosted tool call (web
+	// searches, fetches) on top of tokens, in nano-USD, when the provider
+	// reports the calls but not the cost (Anthropic, OpenAI, Gemini). It
+	// is added to the token cost; a reported CostNano already includes it.
+	ToolFeeNano int64
+	// ToolCalls counts hosted tool calls by kind ("web_search", …).
+	ToolCalls map[string]int64
+
 	// Upstream-reported throughput in tokens per second; valid only when
 	// ThroughputReported is true.
 	TokensInPerSecond  float64
 	TokensOutPerSecond float64
 	ThroughputReported bool
+
+	// DurationBilled is set when TokensIn counts seconds of audio (Whisper's
+	// {"type":"duration"} usage), not tokens.
+	DurationBilled bool
 
 	// HiddenReasoning is set when TokensOut includes reasoning the provider
 	// generated but did not stream (Gemini's thinking tokens). They are
@@ -159,6 +175,17 @@ func (u *Usage) MergeStream(frame Usage) {
 	if frame.CostReported {
 		u.CostNano = frame.CostNano
 		u.CostReported = true
+	}
+	if frame.ToolFeeNano > u.ToolFeeNano {
+		u.ToolFeeNano = frame.ToolFeeNano
+	}
+	for k, n := range frame.ToolCalls {
+		if u.ToolCalls == nil {
+			u.ToolCalls = map[string]int64{}
+		}
+		if n > u.ToolCalls[k] {
+			u.ToolCalls[k] = n
+		}
 	}
 	if frame.ThroughputReported {
 		u.TokensInPerSecond = frame.TokensInPerSecond
@@ -223,6 +250,13 @@ const (
 // payload the client cannot read.
 type StreamTransformer interface {
 	TransformStreamLine(line []byte) ([]byte, error)
+}
+
+// StreamFinisher is an optional StreamTransformer method: what to emit when
+// the upstream closes the stream cleanly (for providers whose SSE has no
+// [DONE] sentinel, so the translation's closing frames come from here).
+type StreamFinisher interface {
+	FinishStream() []byte
 }
 
 // Adapter normalises one provider's protocol.

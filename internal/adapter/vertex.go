@@ -117,7 +117,7 @@ func (a *Vertex) Prepare(up Upstream, req *Request) (*Prepared, error) {
 	header := cloneHeader(req.Header)
 	header.Set("Authorization", "Bearer "+token)
 	body := req.Body
-	if req.Streaming && isJSON(header) {
+	if req.Streaming && isJSON(header) && streamUsagePath(req.Path) {
 		body = ensureStreamUsage(body)
 	}
 	target := strings.TrimRight(up.BaseURL, "/") + "/endpoints/openapi" + req.Path

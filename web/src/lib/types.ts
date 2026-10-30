@@ -75,6 +75,10 @@ export interface Me {
    */
   local_only?: boolean;
   /** Personal subscriptions are on for this organization (never offline). */
+  /** Janus Chat is available to this person (gateway switch, instance switch, access). */
+  chat_preview?: boolean;
+  /** Why Chat is unavailable, when it is (instance off, not in the allowed groups). */
+  chat_unavailable_reason?: string;
   personal_subscriptions?: boolean;
   /**
    * License banner state. edition community|business|enterprise; status
@@ -534,6 +538,9 @@ export interface Grant {
   grantee_id: string;
   grantee_name: string;
   created_at: string;
+  /** How this grant names the model in the Janus Chat picker (optional). */
+  chat_name?: string;
+  chat_description?: string;
 }
 
 /** Lifecycle state of a service credential, computed server-side. */
@@ -740,6 +747,10 @@ export interface AdminUserRow {
   requests_30d: number;
   /** Output tokens produced by this user in the trailing 30 days. */
   tokens_out_30d: number;
+  /** Set on a deleted account: its content is held until then, then deleted. */
+  held_until?: string;
+  /** Set once a deleted account's content has been deleted. */
+  content_purged_at?: string;
 }
 
 /** Payload of GET /api/v1/admin/users/{id} — the People detail drawer. */
@@ -1039,7 +1050,7 @@ interface TroubleshootingRetention {
 export interface TroubleshootingConfig {
   filter: TroubleshootingFilter;
   retention: TroubleshootingRetention;
-  storage: 'database' | 'disk';
+  storage: 'database' | 'disk' | 'object';
   capture_request_body: boolean;
   capture_response_body: boolean;
   encrypt: boolean;
@@ -1065,12 +1076,43 @@ interface TroubleshootingStats {
   newest_at: string;
 }
 
+/** S3 settings in GET /api/v1/admin/storage; the secret is never returned. */
+export interface FileStorageS3 {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  path_style: boolean;
+  prefix: string;
+  access_key_id: string;
+  secret_set: boolean;
+  ca_bundle: string;
+}
+
+/** Response of GET/PUT /api/v1/admin/storage. */
+export interface FileStorageDocument {
+  mode: 'database' | 's3';
+  s3: FileStorageS3;
+  env_managed: string[];
+  max_object_bytes: number;
+  usage: { database: { objects: number; bytes: number } };
+  updated_at?: string;
+  backends: string[];
+}
+
+/** Response of POST /api/v1/admin/storage/test. */
+export interface FileStorageTestResult {
+  ok: boolean;
+  mode: string;
+  latency_ms?: number;
+  error?: string;
+}
+
 /** Response of GET/PUT/DELETE /api/v1/admin/troubleshooting. */
 export interface TroubleshootingStatus {
   active: boolean;
   session: TroubleshootingSession | null;
   stats: TroubleshootingStats;
-  backends: Array<'database' | 'disk'>;
+  backends: Array<'database' | 'disk' | 'object'>;
   encryption_available: boolean;
   max_body_bytes_ceiling: number;
   max_session_hours: number;
@@ -1231,7 +1273,7 @@ export interface SecgwTermList {
   updated_at: string;
 }
 
-type SecgwViolationAction = 'observed' | 'redacted' | 'blocked' | 'stream_cut';
+type SecgwViolationAction = 'observed' | 'redacted' | 'blocked' | 'stream_cut' | 'supported' | 'withheld';
 
 export interface SecgwViolation {
   id: string;
@@ -1297,10 +1339,102 @@ export interface SecgwOverview {
   top_categories_7d?: Array<{ slug: string; name: string; count: number }>;
 }
 
+/* --- Family safety (built-in, every edition) ------------------------------- */
+
+export type FamilyState = 'protecting' | 'not_protecting' | 'off';
+export type FamilyReason = 'no_model' | 'model_unavailable' | 'model_down' | 'no_one_assigned';
+
+export interface FamilyAssignment {
+  scope_type: 'user' | 'team';
+  scope_id: string;
+  /** The age range (Child Safety profile) it gets. */
+  profile_id: string;
+  name?: string;
+  created_at?: string;
+}
+
+export type ChildOutcome = 'off' | 'answer' | 'block';
+
+export interface ChildCategorySetting {
+  outcome: ChildOutcome;
+  /** '' = the built-in text. */
+  instructions?: string;
+}
+
+/** One age range's rules (Child Safety profile). */
+export interface ChildProfile {
+  id: string;
+  name: string;
+  builtin: boolean;
+  /** '' = the built-in text. */
+  base?: string;
+  categories: Record<string, ChildCategorySetting>;
+  blocked_models: string[];
+  /** Media tools the range may use in Chat (all off unless switched on). */
+  media?: ChildMedia;
+  sort_order?: number;
+}
+
+/** An age range's media switches (Child Safety). */
+export interface ChildMedia {
+  image: boolean;
+  video: boolean;
+  music: boolean;
+  transcription: boolean;
+}
+
+export interface ChildBuiltinText {
+  base: string;
+  categories: Record<string, string>;
+  outcomes: Record<string, ChildOutcome>;
+}
+
+export interface FamilyConfig {
+  enabled: boolean;
+  classifier_model_id: string;
+  profiles: ChildProfile[];
+  ask: 'together' | 'separately';
+  timeout_ms: number;
+  assignments: FamilyAssignment[];
+  updated_at: string;
+}
+
+export interface FamilyCategory {
+  slug: string;
+  name: string;
+  includes: string;
+  excludes?: string;
+}
+
+export interface FamilyClassifier {
+  id: string;
+  name: string;
+  classifier_role: ClassifierRole;
+  upstream_id: string;
+  upstream_name: string;
+  hosted: boolean;
+  recommended?: 'hosted_fastest' | 'local_fast' | 'local' | 'legacy' | 'hosted';
+}
+
+export interface FamilyDoc {
+  family: FamilyConfig;
+  categories: FamilyCategory[];
+  safety_categories: FamilyCategory[];
+  classifiers: FamilyClassifier[];
+  /** Built-in text and default outcomes per age range (custom ranges: Kids). */
+  builtin: Record<string, ChildBuiltinText>;
+  tutor_rule: string;
+  status: { state: FamilyState; reasons: FamilyReason[]; covered_users: number };
+  recent: SecgwViolation[];
+  support_message: string;
+  withheld_note: string;
+}
+
 export interface SecgwEffective {
   subject: Record<string, unknown>;
   checks: SecgwResolvedCheck[];
   trace: SecgwTraceEntry[];
+  family_covered?: boolean;
 }
 
 interface SecgwDryRunViolation {
@@ -1474,7 +1608,7 @@ export interface ClassificationSettings {
   model: string;
   sample_rate: number;
   timeout_ms: number;
-  text_scope: 'last_user' | 'all_user' | 'conversation';
+  text_scope: 'context' | 'last_user' | 'all_user' | 'conversation';
   include_system_prompt: boolean;
   max_chars: number;
   include_service_tokens: boolean;

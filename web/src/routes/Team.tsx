@@ -332,6 +332,30 @@ export function TeamQuotaManagement({ teamId, readOnly = false }: { teamId?: str
     onError: (error: Error) => toast(error.message, 'danger'),
   });
 
+  const [editing, setEditing] = useState<{ id: string; limit: string; hardKill: boolean } | null>(null);
+  const update = useMutation({
+    mutationFn: (e: { id: string; limit: number; hardKill: boolean }) =>
+      api.put(`/api/v1/lead/teams/${team?.id}/quotas/${e.id}`, {
+        limit_value: e.limit,
+        breach_behavior: e.hardKill ? 'hard_kill' : 'let_finish',
+      }),
+    onSuccess: () => {
+      toast(t('team.quotaUpdated'));
+      setEditing(null);
+      refresh();
+    },
+    onError: (error: Error) => toast(error.message, 'danger'),
+  });
+  const saveEdit = (): void => {
+    if (!editing) return;
+    const value = Number(editing.limit);
+    if (!Number.isFinite(value) || value <= 0) {
+      toast(t('team.limitValidation'), 'danger');
+      return;
+    }
+    update.mutate({ id: editing.id, limit: value, hardKill: editing.hardKill });
+  };
+
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/v1/lead/teams/${team?.id}/quotas/${id}`),
     onSuccess: () => {
@@ -394,7 +418,22 @@ export function TeamQuotaManagement({ teamId, readOnly = false }: { teamId?: str
                     {quota.metric_label} <span className="muted">{quota.window_label}</span>
                   </td>
                   <td className="num small">
-                    {quota.unit === 'usd' ? formatUSD(quota.limit_value) : formatNumber(quota.limit_value)}
+                    {editing?.id === quota.id ? (
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="any"
+                        style={{ width: 120 }}
+                        aria-label={t('team.newLimit')}
+                        value={editing.limit}
+                        onChange={(event) => setEditing({ ...editing, limit: event.target.value })}
+                      />
+                    ) : quota.unit === 'usd' ? (
+                      formatUSD(quota.limit_value)
+                    ) : (
+                      formatNumber(quota.limit_value)
+                    )}
                   </td>
                   <td style={{ minWidth: 140 }}>
                     <div className="row" style={{ gap: 8 }}>
@@ -410,22 +449,57 @@ export function TeamQuotaManagement({ teamId, readOnly = false }: { teamId?: str
                   </td>
                   <td className="small muted">{formatDateTime(quota.reset_at)}</td>
                   <td>
-                    {quota.breach_behavior === 'hard_kill' ? (
+                    {editing?.id === quota.id ? (
+                      <label className="row small" style={{ gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={editing.hardKill}
+                          onChange={(event) => setEditing({ ...editing, hardKill: event.target.checked })}
+                        />
+                        {t('team.cutStreams')}
+                      </label>
+                    ) : quota.breach_behavior === 'hard_kill' ? (
                       <Badge tone="danger">{t('team.cutStreams')}</Badge>
                     ) : (
                       <Badge tone="neutral">{t('team.letFinish')}</Badge>
                     )}
                   </td>
                   {!readOnly ? (
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        disabled={remove.isPending}
-                        onClick={() => remove.mutate(quota.id)}
-                      >
-                        {t('tables.delete')}
-                      </button>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {editing?.id === quota.id ? (
+                        <>
+                          <button type="button" className="btn btn-primary btn-sm" disabled={update.isPending} onClick={saveEdit}>
+                            {t('common.save')}
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                            {t('common.cancel')}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() =>
+                              setEditing({
+                                id: quota.id,
+                                limit: String(quota.limit_value),
+                                hardKill: quota.breach_behavior === 'hard_kill',
+                              })
+                            }
+                          >
+                            {t('team.editQuota')}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={remove.isPending}
+                            onClick={() => remove.mutate(quota.id)}
+                          >
+                            {t('tables.delete')}
+                          </button>
+                        </>
+                      )}
                     </td>
                   ) : null}
                 </tr>

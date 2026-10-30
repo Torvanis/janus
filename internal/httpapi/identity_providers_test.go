@@ -181,6 +181,38 @@ func TestIdentityProviderEndToEndSignIn(t *testing.T) {
 	}
 }
 
+// Expiry never disrupts work: an identity provider configured while the key
+// was valid keeps signing people in after the grace period ends. Only
+// adding a new one waits for a renewed key.
+func TestIdentityProviderKeepsWorkingAfterGrace(t *testing.T) {
+	h, idp := idpHarness(t)
+	ctx := context.Background()
+	if _, err := h.store.CreateIdentityProvider(ctx, h.server.Cipher, store.IdentityProviderInput{
+		Slug: "acme", Name: "Acme ID", IssuerURL: idp.srv.URL, ClientID: "janus", ClientSecret: "shh", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exp := time.Now().Add(-60 * 24 * time.Hour)
+	installLicense(t, h, license.Claims{LicenseID: "JNS-IDP-EXP", Org: "T", IssuedTo: "t@t", Edition: license.EditionBusiness,
+		Features: license.BusinessFeatures, Seats: 100, Exp: &exp, GraceDays: 30, Term: license.TermSubscription})
+	if !h.server.licenseState().Restricted() {
+		t.Fatal("license should be past its grace period")
+	}
+	if rec := h.do(http.MethodGet, "/auth/providers", nil); !strings.Contains(rec.Body.String(), `/auth/start/acme`) {
+		t.Fatalf("configured provider must stay on the sign-in page: %s", rec.Body)
+	}
+	rec := h.do(http.MethodGet, "/auth/start/acme?redirect_uri=/models", nil)
+	if loc := rec.Header().Get("Location"); rec.Code != http.StatusFound || !strings.HasPrefix(loc, idp.srv.URL+"/authorize") {
+		t.Fatalf("configured provider must still start sign-in: %d %s", rec.Code, loc)
+	}
+	body := `{"slug":"okta","name":"Okta","issuer_url":"https://okta.example.com","client_id":"c","client_secret":"s"}`
+	var in map[string]any
+	_ = json.Unmarshal([]byte(body), &in)
+	if rec := h.do(http.MethodPost, "/api/v1/admin/identity-providers", in); rec.Code != http.StatusPaymentRequired {
+		t.Fatalf("adding a provider after grace = %d, want 402", rec.Code)
+	}
+}
+
 func TestIdentityProviderTestEndpoint(t *testing.T) {
 	h, idp := idpHarness(t)
 	rec := h.do(http.MethodPost, "/api/v1/admin/identity-providers/test", map[string]string{"issuer_url": idp.srv.URL})

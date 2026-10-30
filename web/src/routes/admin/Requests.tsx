@@ -24,7 +24,7 @@ import {
 } from '../../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../../components/ui';
 import { ChargedTeam } from '../../components/ChargedTeam';
-import { instructionsLine, reasonLabel } from '../../lib/routing';
+import { childSafetyLine, instructionsLine, reasonLabel, splitRouteReason } from '../../lib/routing';
 import { RouteDecisionLine } from './Routing';
 import { useLocalPreference, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
@@ -777,7 +777,10 @@ function RequestClassificationSection({
   const calls = event.classifier_calls ?? 0;
   return (
     <div className="stack" style={{ gap: 8 }}>
-      {event.route_reason ? (
+      {event.route_reason && childSafetyLine(event.route_reason) ? (
+        <DetailRow label="Child Safety">{childSafetyLine(event.route_reason)}</DetailRow>
+      ) : null}
+      {event.route_reason && !splitRouteReason(event.route_reason).reason.startsWith('child=') ? (
         <DetailRow label="Auto-routing">
           <span className="stack" style={{ gap: 2 }}>
             <span>
@@ -949,10 +952,16 @@ function EventCell({
       return (
         <td
           className="truncate"
-          title={event.route_reason ? `${event.requested_model_name ?? ''} · ${reasonLabel(event.route_reason)}` : undefined}
+          title={
+            event.route_reason && !splitRouteReason(event.route_reason).reason.startsWith('child=')
+              ? `${event.requested_model_name ?? ''} · ${reasonLabel(event.route_reason)}`
+              : undefined
+          }
         >
           {event.model || '—'}
-          {event.route_reason ? <span className="small muted"> ⇶</span> : null}
+          {event.route_reason && !splitRouteReason(event.route_reason).reason.startsWith('child=') ? (
+            <span className="small muted"> ⇶</span>
+          ) : null}
         </td>
       );
     case 'chargedTo':

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/torvanis/janus/internal/blobstore"
 	"github.com/torvanis/janus/internal/classtrace"
 	"github.com/torvanis/janus/internal/store"
 )
@@ -42,7 +43,10 @@ type Recorder struct {
 	Cipher Cipher
 	// Dir is the disk backend root (JANUS_TROUBLESHOOT_DIR); empty disables
 	// the disk backend.
-	Dir    string
+	Dir string
+	// Blobs is the shared file storage; when it is set to S3 the "object"
+	// backend may be chosen. Nil disables the object backend.
+	Blobs  *blobstore.Manager
 	Logger *slog.Logger
 
 	mu      sync.Mutex
@@ -59,6 +63,12 @@ func New(s *store.Store, cipher Cipher, dir string, logger *slog.Logger) *Record
 
 // DiskAvailable reports whether the disk backend may be chosen.
 func (r *Recorder) DiskAvailable() bool { return r != nil && r.Dir != "" }
+
+// ObjectAvailable reports whether the object backend may be chosen: file
+// storage is configured and set to S3-compatible.
+func (r *Recorder) ObjectAvailable(ctx context.Context) bool {
+	return r != nil && r.Blobs != nil && r.Blobs.ActiveKind(ctx) == blobstore.KindS3
+}
 
 // EncryptionAvailable reports whether bodies can be encrypted at rest.
 func (r *Recorder) EncryptionAvailable() bool { return r != nil && r.Cipher != nil }
@@ -181,6 +191,13 @@ func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSe
 			return ""
 		}
 		c.StorageRef = ref
+	case store.TroubleshootStorageObject:
+		ref, err := r.writeObject(ctx, c.ID, encReq, encResp)
+		if err != nil {
+			r.Logger.ErrorContext(ctx, "troubleshooting: write capture to object storage", "error", err.Error(), "request_id", event.RequestID)
+			return ""
+		}
+		c.StorageRef = ref
 	default:
 		c.StorageBackend = store.TroubleshootStorageDatabase
 		c.RequestBody, c.ResponseBody = encReq, encResp
@@ -188,7 +205,7 @@ func (r *Recorder) Capture(ctx context.Context, session *store.TroubleshootingSe
 	if err := r.Store.InsertTroubleshootingCapture(ctx, c); err != nil {
 		r.Logger.ErrorContext(ctx, "troubleshooting: persist capture", "error", err.Error(), "request_id", event.RequestID)
 		if c.StorageRef != "" {
-			r.removeDisk(c.StorageRef)
+			r.RemoveFiles([]string{c.StorageRef})
 		}
 		return ""
 	}
@@ -334,18 +351,97 @@ func (r *Recorder) removeDisk(ref string) {
 	_ = os.Remove(filepath.Dir(dir))
 }
 
-// RemoveFiles deletes the on-disk files for a set of storage refs, after the
-// rows have gone.
+// Object layout mirrors the disk one: troubleshoot/<yyyy-mm-dd>/<id>/
+// {request,response}. storage_ref is blobstore.Ref(kind, prefix), so the
+// capture is read back from the backend that holds it even after the
+// file storage mode changes.
+func (r *Recorder) writeObject(ctx context.Context, captureID, encReq, encResp string) (string, error) {
+	if r.Blobs == nil {
+		return "", errors.New("file storage is not configured")
+	}
+	st, err := r.Blobs.Active(ctx)
+	if err != nil {
+		return "", err
+	}
+	if st.Kind() != blobstore.KindS3 {
+		return "", errors.New("object backend selected but file storage is not set to S3-compatible; capture dropped")
+	}
+	prefix := "troubleshoot/" + time.Now().UTC().Format("2006-01-02") + "/" + captureID
+	if err := st.Put(ctx, prefix+"/request", []byte(encReq), "application/octet-stream"); err != nil {
+		return "", err
+	}
+	if err := st.Put(ctx, prefix+"/response", []byte(encResp), "application/octet-stream"); err != nil {
+		_ = st.Delete(ctx, prefix+"/request")
+		return "", err
+	}
+	return blobstore.Ref(st.Kind(), prefix), nil
+}
+
+func (r *Recorder) readObject(ctx context.Context, ref string) (string, string, error) {
+	kind, prefix, ok := blobstore.ParseRef(ref)
+	if !ok {
+		return "", "", fmt.Errorf("capture has an invalid object reference")
+	}
+	if r.Blobs == nil {
+		return "", "", errors.New("capture is in object storage but file storage is not configured on this gateway")
+	}
+	st, err := r.Blobs.For(ctx, kind)
+	if err != nil {
+		return "", "", err
+	}
+	req, err := st.Get(ctx, prefix+"/request")
+	if err != nil && !errors.Is(err, blobstore.ErrNotFound) {
+		return "", "", err
+	}
+	resp, err := st.Get(ctx, prefix+"/response")
+	if err != nil && !errors.Is(err, blobstore.ErrNotFound) {
+		return "", "", err
+	}
+	return string(req), string(resp), nil
+}
+
+func (r *Recorder) removeObject(ctx context.Context, ref string) {
+	kind, prefix, ok := blobstore.ParseRef(ref)
+	if !ok || r.Blobs == nil {
+		return
+	}
+	st, err := r.Blobs.For(ctx, kind)
+	if err != nil {
+		r.Logger.Warn("troubleshooting: remove capture objects", "ref", ref, "error", err.Error())
+		return
+	}
+	for _, part := range []string{"/request", "/response"} {
+		if err := st.Delete(ctx, prefix+part); err != nil {
+			r.Logger.Warn("troubleshooting: remove capture object", "ref", ref, "error", err.Error())
+		}
+	}
+}
+
+// RemoveFiles deletes the stored bodies (disk files or objects) for a set
+// of storage refs, after the rows have gone.
 func (r *Recorder) RemoveFiles(refs []string) {
 	for _, ref := range refs {
+		if _, _, ok := blobstore.ParseRef(ref); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			r.removeObject(ctx, ref)
+			cancel()
+			continue
+		}
 		r.removeDisk(ref)
 	}
 }
 
 // Bodies returns the decoded request and response bodies of a capture,
-// reading files for the disk backend and decrypting when needed.
-func (r *Recorder) Bodies(c *store.TroubleshootingCapture) ([]byte, []byte, error) {
+// reading files (disk) or objects (object storage) and decrypting when
+// needed.
+func (r *Recorder) Bodies(ctx context.Context, c *store.TroubleshootingCapture) ([]byte, []byte, error) {
 	encReq, encResp := c.RequestBody, c.ResponseBody
+	if c.StorageBackend == store.TroubleshootStorageObject {
+		var err error
+		if encReq, encResp, err = r.readObject(ctx, c.StorageRef); err != nil {
+			return nil, nil, fmt.Errorf("read capture objects: %w", err)
+		}
+	}
 	if c.StorageBackend == store.TroubleshootStorageDisk {
 		if !r.DiskAvailable() {
 			return nil, nil, errors.New("capture is disk-backed but JANUS_TROUBLESHOOT_DIR is unset on this gateway")

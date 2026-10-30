@@ -338,8 +338,8 @@ func (s *Server) handleRevokeServiceToken(w http.ResponseWriter, r *http.Request
 		WriteError(w, r, err)
 		return
 	}
-	// Revocation must be immediate on this replica; others converge within
-	// the token cache TTL.
+	// Revocation is immediate on every replica: each re-reads the token
+	// row on every request. Dropping this replica's cache only frees memory.
 	s.InvalidateTokenCache()
 	s.InvalidateConfigCache()
 	s.audit(r, "service_token_revoked", "service_token", id,
@@ -390,7 +390,7 @@ func (s *Server) handleServiceTokenUsage(w http.ResponseWriter, r *http.Request)
 		WriteError(w, r, err)
 		return
 	}
-	recent, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{ServiceTokenID: id, Limit: 20})
+	recent, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{ServiceTokenID: id, Limit: 20, SkipTotal: true})
 	if err != nil {
 		WriteError(w, r, err)
 		return

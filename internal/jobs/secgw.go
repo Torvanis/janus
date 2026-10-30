@@ -23,6 +23,10 @@ var SecgwRetention = map[store.SecgwCheckKind]store.SecgwRetention{
 	store.SecgwCheckPII:             {MaxAgeHours: 30 * 24, MaxCount: 100_000},
 	store.SecgwCheckTerms:           {MaxAgeHours: 30 * 24, MaxCount: 100_000},
 	store.SecgwCheckShape:           {MaxAgeHours: 30 * 24, MaxCount: 100_000},
+	// Content safety (Security Gateway categories and every Child Safety
+	// event) may keep the matched text when its policy captures it, like
+	// prompt injection: the same 90 days.
+	store.SecgwCheckContentSafety: {MaxAgeHours: 90 * 24, MaxCount: 100_000},
 }
 
 // StartSecgwRetention prunes violation rows on a fixed interval. The first

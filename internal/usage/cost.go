@@ -217,6 +217,18 @@ func ByteEstimatable(modality string) bool {
 	}
 }
 
+// ByteEstimatableOutput reports whether a byte-estimated request of this
+// modality has output tokens at all. Embeddings answer with vectors and
+// moderation with a verdict; the response bytes are not generated text, so
+// a byte estimate counts input only.
+func ByteEstimatableOutput(modality string) bool {
+	switch modality {
+	case adapter.ModalityEmbedding, adapter.ModalityModeration:
+		return false
+	}
+	return true
+}
+
 // ModalityForPath classifies a request path into the canonical 14-value
 // modality enum. Classification happens at request time and is stored
 // explicitly, so analytics never has to re-parse paths.

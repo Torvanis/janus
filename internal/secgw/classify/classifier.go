@@ -55,8 +55,10 @@ type Upstream struct {
 	Client    *http.Client
 	// Meter is invoked after every call with the wall time and the number of
 	// input characters, so the gateway can write a usage event on the
-	// overhead subject. Optional.
-	Meter func(ctx context.Context, elapsed time.Duration, inputChars int, err error)
+	// overhead subject. u is the token usage the backend reported (zero
+	// when it reports none, as TEI /predict does), so the call can be
+	// priced from the model's rate card. Optional.
+	Meter func(ctx context.Context, elapsed time.Duration, inputChars int, u dec.Usage, err error)
 	// DecisionMeter, when set, replaces Meter for decision models: it also
 	// receives what the call consumed, so the call can be priced.
 	DecisionMeter func(ctx context.Context, elapsed time.Duration, inputChars int, res dec.Result, err error)
@@ -169,11 +171,15 @@ type Breaker struct {
 	Threshold int           // consecutive failures that open the breaker
 	Cooldown  time.Duration // how long it stays open
 	OnOpen    func(modelID string, err error)
-	ModelID   string
+	// OnClose, when set, runs once when a call succeeds after the breaker
+	// had opened: the classifier recovered.
+	OnClose func(modelID string)
+	ModelID string
 
 	mu        sync.Mutex
 	failures  int
 	openUntil time.Time
+	tripped   bool
 }
 
 // Protocol delegates.
@@ -262,6 +268,12 @@ func (b *Breaker) record(ctx context.Context, err error, guardOnly bool) {
 	defer b.mu.Unlock()
 	if err == nil {
 		b.failures = 0
+		if b.tripped {
+			b.tripped = false
+			if b.OnClose != nil {
+				go b.OnClose(b.ModelID)
+			}
+		}
 		return
 	}
 	b.failures++
@@ -276,6 +288,7 @@ func (b *Breaker) record(ctx context.Context, err error, guardOnly bool) {
 		}
 		b.openUntil = time.Now().Add(cooldown)
 		b.failures = 0
+		b.tripped = true
 		if b.OnOpen != nil {
 			go b.OnOpen(b.ModelID, err)
 		}

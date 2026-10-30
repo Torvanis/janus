@@ -49,6 +49,11 @@ const (
 	SecgwDirectionIngress = "ingress"
 	SecgwDirectionEgress  = "egress"
 	SecgwDirectionBoth    = "both"
+	// SecgwDirectionToolOutput marks a violation found in tool output
+	// (a page, search results, a transcript or description) that a tool
+	// fed to the model, never in what the person wrote. It is a violation
+	// row's direction only, never a check's.
+	SecgwDirectionToolOutput = "tool_output"
 
 	SecgwScopeOrg          = "org"
 	SecgwScopeGroup        = "group"
@@ -181,8 +186,9 @@ type SecgwCheck struct {
 // Validate, not left to the UI. Only prompt_injection may capture bodies.
 type SecgwCaptureConfig struct {
 	// PromptInjectionBodies stores the full matched message(s) for
-	// prompt_injection violations. Default true: the attack text is the
-	// intelligence, and the corpus is what tunes the classifier.
+	// prompt_injection and content_safety violations. New policies are
+	// created with it off (explicit false, from the editor and the API); a
+	// stored policy without the field reads as on, as it always has.
 	PromptInjectionBodies *bool `json:"prompt_injection_bodies,omitempty"`
 }
 
@@ -534,9 +540,12 @@ type SecgwViolationFilter struct {
 	// RequestID narrows to the violations raised on one request, for the
 	// security section of that request's detail drawer.
 	RequestID string
-	Since     time.Time
-	Limit     int
-	Offset    int
+	// PolicyID narrows to one policy's violations (the Family safety
+	// card lists only its own events).
+	PolicyID string
+	Since    time.Time
+	Limit    int
+	Offset   int
 }
 
 // SecgwClassifierRun is one classifier call made while inspecting a single

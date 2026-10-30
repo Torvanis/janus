@@ -239,12 +239,26 @@ func containsID(ids []string, id string) bool {
 // usage is only recorded post-flight, so without the pending delta a lone
 // large stream would never be cut by what it is itself consuming.
 func (e *Engine) CheckWithPending(ctx context.Context, subject Subject, modelID string, pending Delta, also ...string) (Decision, error) {
+	return e.check(ctx, subject, modelID, pending, "", also...)
+}
+
+// CheckIgnoring is Check without the quotas on one metric. A Janus Chat
+// sub-call skips request-count quotas: the user's message that started it
+// was admitted (and counted) once.
+func (e *Engine) CheckIgnoring(ctx context.Context, subject Subject, modelID, metric string, also ...string) (Decision, error) {
+	return e.check(ctx, subject, modelID, Delta{}, metric, also...)
+}
+
+func (e *Engine) check(ctx context.Context, subject Subject, modelID string, pending Delta, ignore string, also ...string) (Decision, error) {
 	quotas, err := e.Applicable(ctx, subject, modelID, also...)
 	if err != nil {
 		return Decision{Allowed: true}, err
 	}
 	now := time.Now().UTC()
 	for _, q := range quotas {
+		if ignore != "" && q.Metric == ignore {
+			continue
+		}
 		status, err := e.status(ctx, q, now)
 		if err != nil {
 			// A quota that cannot be evaluated must not silently permit spend.

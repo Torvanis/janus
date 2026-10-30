@@ -80,7 +80,7 @@ type DecisionClassifier struct {
 	Backend *dec.SystemOne
 	// ID is the grouping key (DecisionKey).
 	ID            string
-	meter         func(ctx context.Context, elapsed time.Duration, inputChars int, err error)
+	meter         func(ctx context.Context, elapsed time.Duration, inputChars int, u dec.Usage, err error)
 	decisionMeter func(ctx context.Context, elapsed time.Duration, inputChars int, res dec.Result, err error)
 }
 
@@ -100,7 +100,7 @@ func (d *DecisionClassifier) Decide(ctx context.Context, text string, questions 
 	if d.decisionMeter != nil {
 		d.decisionMeter(ctx, time.Since(started), len(text), r, err)
 	} else if d.meter != nil {
-		d.meter(ctx, time.Since(started), len(text), err)
+		d.meter(ctx, time.Since(started), len(text), r.Usage, err)
 	}
 	return r, err
 }

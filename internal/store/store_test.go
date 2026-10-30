@@ -653,7 +653,16 @@ func TestCacheWriteTokenAggregation(t *testing.T) {
 	if len(series) != 2 {
 		t.Fatalf("series has %d buckets, want 2", len(series))
 	}
-	last := series[1].Totals
+	// The events sit a minute before now, so in the first minute after an
+	// hour boundary they fall in the previous bucket: sum the window.
+	var last Totals
+	for _, b := range series {
+		last.TokensIn += b.Totals.TokensIn
+		last.TokensCached += b.Totals.TokensCached
+		last.TokensCacheWrite5m += b.Totals.TokensCacheWrite5m
+		last.TokensCacheWrite1h += b.Totals.TokensCacheWrite1h
+		last.Requests += b.Totals.Requests
+	}
 	if last.TokensCacheWrite5m != 125 || last.TokensCacheWrite1h != 75 || last.TokensCached != 250 {
 		t.Fatalf("series bucket totals = %+v, want cache 250 / writes 125+75", last)
 	}
@@ -1959,6 +1968,39 @@ func TestSetModelRatesUnknownModel(t *testing.T) {
 // TestListRequestsTokenSizeFiltersAndSort proves the request log can be
 // narrowed by strict token-size thresholds on each direction independently
 // and ordered by either token column in both directions.
+// A "recent requests" panel asks for the newest rows without the total:
+// the rows and their order are unchanged, the total reports -1, and the
+// Requests page (SkipTotal unset) still gets its count.
+func TestListRequestsSkipTotal(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 8; i++ {
+		ev := &UsageEvent{UserID: "u1", ModelName: "m", Modality: "chat", HTTPStatus: 200, TokensIn: int64(i), CreatedAt: base.Add(time.Duration(i) * time.Minute)}
+		if err := s.InsertUsageEvent(ctx, ev); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	recent, total, err := s.ListRequests(ctx, RequestFilter{UserID: "u1", Limit: 5, SkipTotal: true})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != -1 {
+		t.Fatalf("SkipTotal: total = %d, want -1 (not counted)", total)
+	}
+	if len(recent) != 5 || recent[0].TokensIn != 7 || recent[4].TokensIn != 3 {
+		got := []int64{}
+		for _, e := range recent {
+			got = append(got, e.TokensIn)
+		}
+		t.Fatalf("SkipTotal rows = %v, want the 5 newest (7..3)", got)
+	}
+	page, total, err := s.ListRequests(ctx, RequestFilter{UserID: "u1", Limit: 5})
+	if err != nil || total != 8 || len(page) != 5 {
+		t.Fatalf("paged list: %d rows, total %d, err %v; want 5 rows of 8", len(page), total, err)
+	}
+}
+
 func TestListRequestsTokenSizeFiltersAndSort(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

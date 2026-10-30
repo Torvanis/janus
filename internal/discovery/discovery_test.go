@@ -349,3 +349,50 @@ func titles(notes []*store.Notification) []string {
 	}
 	return out
 }
+
+// Every replica runs discovery. N replicas seeing the same outage must send
+// one "unreachable" alert between them, and the next outage after a
+// recovery is announced again.
+func TestUpstreamDownAlertsOnceAcrossReplicas(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	admin, _, err := h.store.UpsertUserFromIdentity(ctx, "admin-sub", "admin@example.com", "Admin", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := h.createUpstream(t, "ha-upstream")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	metrics := telemetry.New("test", "test")
+	replica2 := discovery.New(h.store, h.cipher, h.server.Client(), metrics,
+		alerting.New(h.store, alerting.SMTPConfig{}, h.server.Client(), metrics, logger), logger, time.Hour)
+	count := func() int {
+		notes, _, _ := h.store.ListNotifications(ctx, admin.ID, false, 100)
+		n := 0
+		for _, x := range notes {
+			if strings.Contains(x.Title, "ha-upstream") && strings.Contains(x.Title, "unreachable") {
+				n++
+			}
+		}
+		return n
+	}
+	h.provider.set(http.StatusInternalServerError)
+	for i := 0; i < 3; i++ {
+		h.svc.RunFor(ctx, up)
+		replica2.RunFor(ctx, up)
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("unreachable alerts = %d across two replicas, want 1", got)
+	}
+	// Recovery on one replica, then a new outage: announced once more.
+	h.provider.set(http.StatusOK, "gpt-a")
+	h.svc.RunFor(ctx, up)
+	replica2.RunFor(ctx, up)
+	h.provider.set(http.StatusInternalServerError)
+	for i := 0; i < 3; i++ {
+		h.svc.RunFor(ctx, up)
+		replica2.RunFor(ctx, up)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("unreachable alerts = %d after a recovery and a second outage, want 2", got)
+	}
+}

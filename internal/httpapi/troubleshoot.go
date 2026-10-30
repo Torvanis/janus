@@ -54,6 +54,9 @@ func (s *Server) recorder() *troubleshoot.Recorder {
 		}
 		s.Troubleshoot = troubleshoot.New(s.Store, cipher, dir, s.Logger)
 	})
+	if s.Troubleshoot != nil && s.Troubleshoot.Blobs == nil {
+		s.troubleshootBlobsOnce.Do(func() { s.Troubleshoot.Blobs = s.blobs() })
+	}
 	return s.Troubleshoot
 }
 
@@ -243,9 +246,12 @@ func (s *Server) troubleshootingStatusDocument(ctx context.Context) (*troublesho
 	if rec.DiskAvailable() {
 		doc.Backends = append(doc.Backends, store.TroubleshootStorageDisk)
 	}
+	if rec.ObjectAvailable(ctx) {
+		doc.Backends = append(doc.Backends, store.TroubleshootStorageObject)
+	}
 	if session != nil && session.Enabled {
 		cfg := session.Config
-		if (cfg.CaptureRequestBody || cfg.CaptureResponseBody) && !cfg.Encrypt {
+		if (cfg.CaptureRequestBody || cfg.CaptureResponseBody) && !cfg.Encrypt && cfg.Storage != store.TroubleshootStorageObject {
 			doc.Warnings = append(doc.Warnings, "Captured bodies are stored unencrypted. Anyone with database or disk access can read prompts and completions verbatim.")
 		}
 		if cfg.Filter.IsEmpty() {
@@ -294,7 +300,7 @@ func (s *Server) handlePutTroubleshooting(w http.ResponseWriter, r *http.Request
 		}
 	}
 	rec := s.recorder()
-	if err := body.Config.Validate(rec.DiskAvailable()); err != nil {
+	if err := body.Config.ValidateBackends(rec.DiskAvailable(), rec.ObjectAvailable(r.Context())); err != nil {
 		WriteError(w, r, ErrInvalidRequest(err.Error()))
 		return
 	}
@@ -521,7 +527,7 @@ func (s *Server) handleDownloadRequestCapture(w http.ResponseWriter, r *http.Req
 		WriteError(w, r, err)
 		return
 	}
-	reqBody, respBody, err := s.recorder().Bodies(capture)
+	reqBody, respBody, err := s.recorder().Bodies(r.Context(), capture)
 	if err != nil {
 		s.Logger.ErrorContext(r.Context(), "troubleshooting: read capture bodies", "error", err.Error(), "capture_id", capture.ID)
 		WriteError(w, r, ErrInternal().WithReason("The captured bodies could not be read."))
@@ -571,7 +577,7 @@ func (s *Server) handleExportTroubleshooting(w http.ResponseWriter, r *http.Requ
 		}
 		c := page[idx]
 		idx++
-		reqBody, respBody, err := rec.Bodies(c)
+		reqBody, respBody, err := rec.Bodies(r.Context(), c)
 		if err != nil {
 			// A single unreadable capture must not abort a bulk export;
 			// the manifest still carries its metadata.

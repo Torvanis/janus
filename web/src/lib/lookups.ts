@@ -7,7 +7,7 @@
  * behaviour is identical wherever a user/model/upstream picker appears.
  */
 import { api } from './api';
-import type { AdminUserRow, Group, Model, ServiceTokenRow, Upstream } from './types';
+import type { AdminUserRow, Group, ManagedModel, Model, ServiceTokenRow, Upstream } from './types';
 import type { LookupOption } from '../components/LookupInput';
 
 const LIMIT = 12;
@@ -120,6 +120,40 @@ export const modelNameLookup = {
   },
 };
 
+/**
+ * Models and managed models (aliases, pools, routers) by ID, shown by
+ * name: Child Safety stores blocked models by id so a rename never lifts a
+ * block. Personal-plan names (my/...) and anything else typed stay as typed.
+ */
+async function blockableModels(): Promise<LookupOption[]> {
+  const [models, managed] = await Promise.all([
+    api.get<{ models: Model[] }>('/api/v1/admin/models?limit=500'),
+    api.get<{ managed_models: ManagedModel[] }>('/api/v1/admin/managed-models'),
+  ]);
+  const out: LookupOption[] = (managed.managed_models ?? []).map((m) => ({
+    id: m.id,
+    label: m.name,
+    detail: m.kind === 'router' ? 'Router' : `Alias → ${m.target_public_name || m.target_model_name}`,
+  }));
+  for (const m of models.models ?? []) {
+    if (m.classifier_role) continue;
+    out.push({
+      id: m.id,
+      label: m.display_name || m.name,
+      detail: m.display_name ? `${m.name} · ${m.upstream_name}` : m.upstream_name,
+    });
+  }
+  return out;
+}
+
+export const blockedModelLookup = {
+  search: async (query: string): Promise<LookupOption[]> => matchAll(await blockableModels(), query),
+  resolve: async (ids: string[]): Promise<LookupOption[]> => {
+    const byId = new Map((await blockableModels()).map((o) => [o.id, o]));
+    return ids.map((id) => byId.get(id) ?? { id, label: id });
+  },
+};
+
 export const upstreamLookup = {
   search: async (query: string): Promise<LookupOption[]> => {
     const res = await api.get<{ upstreams: Upstream[] }>('/api/v1/admin/upstreams');
@@ -167,7 +201,11 @@ const ERROR_CODES: LookupOption[] = [
   { id: 'permission_error', label: 'permission_error', detail: 'Forbidden' },
   { id: 'not_found_error', label: 'not_found_error', detail: 'Unknown route or model' },
   { id: 'server_error', label: 'server_error', detail: 'Gateway fault' },
-  { id: 'policy.subscription_reauth_required', label: 'policy.subscription_reauth_required', detail: 'Subscription needs reconnecting' },
+  {
+    id: 'policy.subscription_reauth_required',
+    label: 'policy.subscription_reauth_required',
+    detail: 'Subscription needs reconnecting',
+  },
 ];
 
 export const errorCodeLookup = {
@@ -216,5 +254,29 @@ export const groupLookup = {
     const res = await api.get<{ groups: Group[] }>('/api/v1/admin/groups');
     const want = new Set(ids);
     return res.groups.filter((g) => want.has(g.id)).map((g) => ({ id: g.id, label: g.name }));
+  },
+};
+
+interface TeamListRow {
+  id: string;
+  name: string;
+  member_count: number;
+}
+
+/** Teams, by name. The admin list is small and fetched whole. */
+export const teamLookup = {
+  search: async (query: string): Promise<LookupOption[]> => {
+    const res = await api.get<{ teams: TeamListRow[] }>('/api/v1/admin/teams');
+    const q = query.trim().toLowerCase();
+    return (res.teams ?? [])
+      .filter((tm) => !q || tm.name.toLowerCase().includes(q))
+      .slice(0, 20)
+      .map((tm) => ({ id: tm.id, label: tm.name, detail: `${tm.member_count} members` }));
+  },
+  resolve: async (ids: string[]): Promise<LookupOption[]> => {
+    if (ids.length === 0) return [];
+    const res = await api.get<{ teams: TeamListRow[] }>('/api/v1/admin/teams');
+    const want = new Set(ids);
+    return (res.teams ?? []).filter((tm) => want.has(tm.id)).map((tm) => ({ id: tm.id, label: tm.name }));
   },
 };

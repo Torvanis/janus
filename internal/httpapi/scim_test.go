@@ -213,6 +213,7 @@ func TestSCIMHTTPRequiredAndImmutable(t *testing.T) {
 }
 func TestSCIMHTTPAuditAndRotation(t *testing.T) {
 	h := newHarness(t)
+	withBusinessLicense(t, h) // rotating mints a secret: gated like create
 	r := chi.NewRouter()
 	h.server.mountSCIMRoutes(r)
 	h.server.mountSCIMAdminRoutes(r)

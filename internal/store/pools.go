@@ -253,11 +253,15 @@ func (s *Store) NormalizePool(ctx context.Context, in PoolInput, fallbackModelID
 		} else if !errors.Is(err, ErrNotFound) {
 			return out, err
 		}
-		if _, err := s.ModelByID(ctx, id); err != nil {
+		member, err := s.ModelByID(ctx, id)
+		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return out, &ValidationError{Field: "members", Message: "one of the pool's models does not exist"}
 			}
 			return out, err
+		}
+		if guardClassifier(member) {
+			return out, &ValidationError{Field: "members", Message: guardServeMessage(member)}
 		}
 		weight := m.Weight
 		if weight == 0 {

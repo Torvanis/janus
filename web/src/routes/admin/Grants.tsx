@@ -107,6 +107,7 @@ export function GrantsPage(): ReactNode {
   const location = useLocation();
   const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<Grant | null>(null);
+  const [labeling, setLabeling] = useState<Grant | null>(null);
   // Per-card open/closed overrides on top of the automatic default; the
   // "expand/collapse all" buttons replace the default and reset overrides.
   const [expandMode, setExpandMode] = useState<'auto' | 'all' | 'none'>('auto');
@@ -487,8 +488,21 @@ export function GrantsPage(): ReactNode {
                                     </td>
                                   </>
                                 )}
+                                <td className="small grants-chat-cell">
+                                  {grant.chat_name || grant.chat_description ? (
+                                    <span title={grant.chat_description || undefined}>
+                                      <span className="muted">Chat: </span>
+                                      {grant.chat_name || <span className="muted">(description only)</span>}
+                                    </span>
+                                  ) : null}
+                                </td>
                                 <td>
                                   <RowActions>
+                                    <IconButton
+                                      icon="edit"
+                                      label="Chat name and description"
+                                      onClick={() => setLabeling(grant)}
+                                    />
                                     <IconButton
                                       icon="revoke"
                                       label={t('adminGrants.revoke')}
@@ -633,6 +647,8 @@ export function GrantsPage(): ReactNode {
         }}
       />
 
+      <GrantChatLabelModal grant={labeling} onClose={() => setLabeling(null)} />
+
       <ConfirmDialog
         open={Boolean(deleting)}
         onClose={() => setDeleting(null)}
@@ -653,6 +669,82 @@ export function GrantsPage(): ReactNode {
         busy={remove.isPending}
       />
     </div>
+  );
+}
+
+/** Edits how one grant names its model in the Janus Chat picker. */
+function GrantChatLabelModal({ grant, onClose }: { grant: Grant | null; onClose: () => void }): ReactNode {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  useEffect(() => {
+    setName(grant?.chat_name ?? '');
+    setDescription(grant?.chat_description ?? '');
+  }, [grant]);
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/api/v1/admin/grants/${encodeURIComponent(grant?.id ?? '')}/chat`, {
+        chat_name: name,
+        chat_description: description,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'grants'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat'] });
+      toast('Chat label saved.');
+      onClose();
+    },
+    onError: (error: Error) => toast(error.message, 'danger'),
+  });
+  const who = grant
+    ? grant.grantee_type === 'all_users'
+      ? 'everyone'
+      : grant.grantee_name || granteeTypeLabel(grant.grantee_type)
+    : '';
+  return (
+    <Modal
+      open={Boolean(grant)}
+      onClose={onClose}
+      title="Chat name and description"
+      description={
+        grant
+          ? `How ${grant.model_name} appears in the Janus Chat picker for ${who}. Leave blank to show the model's own name. The most specific grant wins (a person's own grant, then their group's, then everyone's).`
+          : undefined
+      }
+      footer={
+        <>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <Field label="Chat name" hint="Up to 60 characters, for example: Fast & private.">
+          <input
+            className="input"
+            aria-label="Chat name"
+            maxLength={60}
+            value={name}
+            placeholder={grant?.model_name ?? ''}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field label="Description" hint="One line under the name in the picker. Up to 200 characters.">
+          <input
+            className="input"
+            aria-label="Description"
+            maxLength={200}
+            value={description}
+            placeholder="For example: Runs on our own servers. Good for quick questions."
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
   );
 }
 

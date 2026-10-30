@@ -418,10 +418,17 @@ func (s *Server) scimResources(w http.ResponseWriter, r *http.Request, kind, id 
 		scimJSON(w, 200, scimProject(s.scimPresent(kind, resource), r.URL.Query()))
 		return
 	}
+	// Directory changes can take a child out of a team that puts them under
+	// Child Safety: administrators are told.
+	covered := s.childCoveredNow(r.Context())
+	defer s.childCoverageLost(r.Context(), covered, "the directory (SCIM) removed them from a team")
 	if r.Method == "DELETE" {
 		if err := s.Store.DeleteSCIMResource(r.Context(), kind, id); err != nil {
 			scimStoreFailure(w, err)
 			return
+		}
+		if kind == "Groups" {
+			s.reevaluateGroupAdmins(r.Context())
 		}
 		s.scimAudit(r, "scim.delete", kind, id)
 		scimJSON(w, 204, nil)
@@ -505,6 +512,15 @@ func (s *Server) scimResources(w http.ResponseWriter, r *http.Request, kind, id 
 	delete(body, "id")
 	delete(body, "meta")
 	delete(body, "groups")
+	if kind == "Users" && id != "" {
+		// Reactivating a disabled account takes a licensed seat again.
+		// Provisioning new accounts stays ungated (they are checked at their
+		// first sign-in) so a directory push never fails on seats.
+		if err := s.scimReactivationSeatCheck(r.Context(), id, body); err != nil {
+			scimFailure(w, http.StatusForbidden, "", err.Error())
+			return
+		}
+	}
 	resource, err := s.Store.SaveSCIMResource(r.Context(), kind, id, body)
 	if err != nil {
 		scimStoreFailure(w, err)
@@ -517,9 +533,34 @@ func (s *Server) scimResources(w http.ResponseWriter, r *http.Request, kind, id 
 		status = 201
 		action = "scim.create"
 	}
+	if kind == "Groups" {
+		// Directory group membership changed: group-granted admin follows.
+		s.reevaluateGroupAdmins(r.Context())
+	}
 	s.scimAudit(r, action, kind, fmt.Sprint(resource["id"]))
 	w.Header().Set("Location", resource["meta"].(map[string]any)["location"].(string))
 	scimJSON(w, status, scimProject(resource, r.URL.Query()))
+}
+
+// scimReactivationSeatCheck refuses to turn a disabled account active when no
+// licensed seat is free. Admins and bootstrap admins are exempt, as at sign-in.
+func (s *Server) scimReactivationSeatCheck(ctx context.Context, id string, body map[string]any) error {
+	active := true
+	for key, value := range body {
+		if strings.EqualFold(key, "active") {
+			if b, ok := value.(bool); ok {
+				active = b
+			}
+		}
+	}
+	if !active {
+		return nil
+	}
+	user, err := s.Store.UserByID(ctx, id)
+	if err != nil || user.IsActive || user.IsAdmin() || s.isBootstrapAdmin(user.Email) {
+		return nil
+	}
+	return s.checkSeatAvailableFor(ctx, user.ID)
 }
 
 // Attribute projection retains always-returned identifiers. Paths are case-insensitive.
@@ -687,7 +728,9 @@ func (s *Server) mountSCIMAdminRoutes(r chi.Router) {
 		s.audit(r, "scim.token.revoke", "scim_token", id, nil, nil)
 		scimAdminJSON(w, 204, nil)
 	})
-	r.Post("/admin/scim/tokens/{id}/rotate", func(w http.ResponseWriter, r *http.Request) {
+	// Rotating mints a new secret, so it is gated like creating one; revoking
+	// (DELETE) is never gated.
+	r.Post("/admin/scim/tokens/{id}/rotate", s.gateFeature("scim", s.gateCreate("SCIM token", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		token, secret, err := s.Store.RotateSCIMToken(r.Context(), id)
 		if err != nil {
@@ -696,7 +739,7 @@ func (s *Server) mountSCIMAdminRoutes(r chi.Router) {
 		}
 		s.audit(r, "scim.token.rotate", "scim_token", id, nil, map[string]string{"replacement_id": token.ID})
 		scimAdminJSON(w, 201, map[string]any{"token": token, "secret": secret})
-	})
+	})))
 }
 func scimAdminJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

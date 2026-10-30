@@ -315,6 +315,9 @@ type Message struct {
 	Index int
 	Role  string
 	Text  string
+	// Tool marks tool output (role "tool"/"function"): what a tool fed
+	// the model, not what the person wrote.
+	Tool bool
 	// contentPath is how to write a redacted string back: "string" when
 	// content was a plain string, "parts" when it was a content array.
 	contentPath string
@@ -417,6 +420,11 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		for j := range vs {
 			vs[j].MessageIndex = msgs[i].Index
 			vs[j].Record = msgs[i].Index >= newFrom
+			if msgs[i].Tool {
+				// Found in what a tool fed the model, not in what the
+				// person wrote: say so on the record.
+				vs[j].Direction = store.SecgwDirectionToolOutput
+			}
 			c := eff.Checks[vs[j].Kind]
 			switch c.Mode {
 			case store.SecgwModeBlock:
@@ -450,7 +458,15 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 	if req.Extra != nil {
 		extras = append([]*Extra{req.Extra}, extras...)
 	}
-	inj, safe, stats := e.runModelChecks(ctx, eff, msgs, parsed, extras)
+	modelMsgs := msgs
+	if ToolOutputJudged(ctx) {
+		// The caller (Chat) judged each tool result when the tool made
+		// it, against this same policy, and withheld what was flagged.
+		// Judging it again here would read the page as the person's own
+		// message and stop the whole reply.
+		modelMsgs = userWordsOnly(msgs, true)
+	}
+	inj, safe, stats := e.runModelChecks(ctx, eff, modelMsgs, parsed, extras)
 	dec.Model = stats
 	if inj.ran {
 		c, _ := eff.Has(store.SecgwCheckPromptInjection, direction)
@@ -608,7 +624,7 @@ func (e *Engine) classifyInjection(ctx context.Context, c ResolvedCheck, msgs []
 		if s.Score < opts.Threshold {
 			continue
 		}
-		vs = append(vs, Violation{Kind: c.Kind, RuleID: s.Label, Severity: string(detect.SeverityHigh), Direction: store.SecgwDirectionIngress,
+		vs = append(vs, Violation{Kind: c.Kind, RuleID: s.Label, Severity: string(detect.SeverityHigh), Direction: ingressDirection(msgs[mi]),
 			MessageIndex: msgs[mi].Index, Text: msgs[mi].Text, Length: len(msgs[mi].Text), PolicyID: c.PolicyID, BindingID: c.BindingID,
 			Record:          msgs[mi].Index >= newTurnStart(msgs),
 			ClassifierScore: s.Score, ClassifierModel: c.ClassifierModelID})

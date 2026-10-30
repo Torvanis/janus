@@ -207,49 +207,10 @@ var ErrManagedModelFallbackExhausted = errors.New("managed model target and fall
 func (s *Store) ResolveModelForRequest(ctx context.Context, name string) (ResolvedModel, error) {
 	managed, err := s.ManagedModelByName(ctx, name)
 	switch {
+	case err == nil && managed.Status == ManagedModelEnabled && managed.Kind == ManagedKindRouter:
+		return s.resolveRouterForRequest(ctx, managed)
 	case err == nil && managed.Status == ManagedModelEnabled:
-		resolved := ResolvedModel{Managed: managed}
-		if managed.FallbackModelID != "" && !managed.FallbackBroken {
-			if fb, err := s.ModelByID(ctx, managed.FallbackModelID); err == nil && fb.Status == ModelEnabled {
-				resolved.Fallback = fb
-			}
-		}
-		target, err := s.ModelByID(ctx, managed.TargetModelID)
-		if err == nil && target.Status != ModelEnabled && !managed.Broken {
-			// A pool whose primary is out but whose other members serve:
-			// hand the proxy any servable member; the balancer picks the
-			// real one per request.
-			for _, pm := range managed.Pool.Members {
-				if pm.Servable() {
-					if alt, altErr := s.ModelByID(ctx, pm.ModelID); altErr == nil {
-						target = alt
-						break
-					}
-				}
-			}
-		}
-		if managed.Broken || err != nil {
-			// The target is gone or disabled: a configuration-level
-			// unavailability, deterministic for every caller. Serve the
-			// fallback if one is configured for this failure mode; otherwise
-			// the alias is broken — and if a fallback WAS configured but is
-			// itself unusable, say so distinctly.
-			if err == nil {
-				resolved.PrimaryModel = target
-			}
-			if resolved.Fallback != nil && managed.HasFallbackTrigger(FallbackTriggerTargetUnavailable) {
-				resolved.Model = resolved.Fallback
-				resolved.FellBack = true
-				resolved.FallbackReason = FallbackTriggerTargetUnavailable
-				return resolved, nil
-			}
-			if managed.FallbackModelID != "" && managed.HasFallbackTrigger(FallbackTriggerTargetUnavailable) {
-				return resolved, ErrManagedModelFallbackExhausted
-			}
-			return resolved, ErrManagedModelBroken
-		}
-		resolved.Model = target
-		return resolved, nil
+		return s.resolveManagedForRequest(ctx, managed)
 	case err == nil:
 		// The alias exists but is disabled: fall through so a real model of
 		// the same name can still answer, and otherwise report not-found.
@@ -264,6 +225,92 @@ func (s *Store) ResolveModelForRequest(ctx context.Context, name string) (Resolv
 		return ResolvedModel{}, err
 	}
 	return ResolvedModel{Model: candidates[0], Alternatives: candidates[1:]}, nil
+}
+
+// resolveRouterForRequest resolves a router to the model its default serves
+// right now. The default is resolved exactly as a request naming it would
+// be (an alias's fallback and a pool's other members included) instead of
+// from the snapshot the router row took when it was saved; the proxy's
+// routing step then picks the route that really serves.
+func (s *Store) resolveRouterForRequest(ctx context.Context, router *ManagedModel) (ResolvedModel, error) {
+	resolved := ResolvedModel{Managed: router}
+	if router.Broken {
+		return resolved, ErrManagedModelBroken
+	}
+	defaultID := router.TargetModelID
+	if _, cfg, err := s.RouterConfigFor(ctx, router.ID); err == nil && cfg.Default.ModelID != "" {
+		defaultID = cfg.Default.ModelID
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return ResolvedModel{}, err
+	}
+	alias, err := s.routerDefaultAlias(ctx, defaultID)
+	if err != nil && !errors.Is(err, errRouterDefaultIsRouter) {
+		return ResolvedModel{}, err
+	}
+	if err != nil || (alias != nil && alias.Status != ManagedModelEnabled) {
+		return resolved, ErrManagedModelBroken
+	}
+	if alias != nil {
+		inner, err := s.resolveManagedForRequest(ctx, alias)
+		if err != nil || inner.Model == nil {
+			return resolved, ErrManagedModelBroken
+		}
+		resolved.Model = inner.Model
+		return resolved, nil
+	}
+	target, err := s.ModelByID(ctx, defaultID)
+	if err != nil || target.Status != ModelEnabled {
+		return resolved, ErrManagedModelBroken
+	}
+	resolved.Model = target
+	return resolved, nil
+}
+
+// resolveManagedForRequest resolves an enabled alias or pool to the model
+// that serves it (its target, a servable pool member, or its fallback).
+func (s *Store) resolveManagedForRequest(ctx context.Context, managed *ManagedModel) (ResolvedModel, error) {
+	resolved := ResolvedModel{Managed: managed}
+	if managed.FallbackModelID != "" && !managed.FallbackBroken {
+		if fb, err := s.ModelByID(ctx, managed.FallbackModelID); err == nil && fb.Status == ModelEnabled {
+			resolved.Fallback = fb
+		}
+	}
+	target, err := s.ModelByID(ctx, managed.TargetModelID)
+	if err == nil && target.Status != ModelEnabled && !managed.Broken {
+		// A pool whose primary is out but whose other members serve:
+		// hand the proxy any servable member; the balancer picks the
+		// real one per request.
+		for _, pm := range managed.Pool.Members {
+			if pm.Servable() {
+				if alt, altErr := s.ModelByID(ctx, pm.ModelID); altErr == nil {
+					target = alt
+					break
+				}
+			}
+		}
+	}
+	if managed.Broken || err != nil {
+		// The target is gone or disabled: a configuration-level
+		// unavailability, deterministic for every caller. Serve the
+		// fallback if one is configured for this failure mode; otherwise
+		// the alias is broken — and if a fallback WAS configured but is
+		// itself unusable, say so distinctly.
+		if err == nil {
+			resolved.PrimaryModel = target
+		}
+		if resolved.Fallback != nil && managed.HasFallbackTrigger(FallbackTriggerTargetUnavailable) {
+			resolved.Model = resolved.Fallback
+			resolved.FellBack = true
+			resolved.FallbackReason = FallbackTriggerTargetUnavailable
+			return resolved, nil
+		}
+		if managed.FallbackModelID != "" && managed.HasFallbackTrigger(FallbackTriggerTargetUnavailable) {
+			return resolved, ErrManagedModelFallbackExhausted
+		}
+		return resolved, ErrManagedModelBroken
+	}
+	resolved.Model = target
+	return resolved, nil
 }
 
 // ModelByUpstreamAndName loads one model by its owning upstream and native
@@ -419,10 +466,10 @@ func (s *Store) SetModelDisplayName(ctx context.Context, id, displayName string)
 
 // UpsertDiscoveredModel records a model reported by an upstream. Existing rows
 // keep their curation status; brand new models land as pending_approval. A
-// stale row that is listed again goes back to pending_approval for an admin
-// to look at, except a decision model, which resumes the state it had before
-// it was marked stale: decision models back guards, routers and served
-// decisions, and a listing gap must not quietly switch them off.
+// stale row that is listed again resumes the state it had before it was
+// marked stale (pending_approval when that is unknown): models back aliases,
+// pools, routers, grants and guards, and a listing gap must not quietly
+// switch them off.
 func (s *Store) UpsertDiscoveredModel(ctx context.Context, upstreamID, name string, modalities []string) (created bool, err error) {
 	var id, status, role, before string
 	err = s.queryRow(ctx, `SELECT id, status, classifier_role, status_before_stale FROM model WHERE upstream_id = ? AND name = ?`, upstreamID, name).Scan(&id, &status, &role, &before)
@@ -438,12 +485,12 @@ func (s *Store) UpsertDiscoveredModel(ctx context.Context, upstreamID, name stri
 	default:
 		next := status
 		if status == ModelStale {
+			// Every model resumes the state it had before it went stale:
+			// a listing gap must not throw away an admin's approval.
 			next = ModelPending
-			if role == ClassifierRoleDecision {
-				switch before {
-				case ModelEnabled, ModelDisabled, ModelPending:
-					next = before
-				}
+			switch before {
+			case ModelEnabled, ModelDisabled, ModelPending:
+				next = before
 			}
 		}
 		return false, s.exec(ctx, `UPDATE model SET discovered_at = ?, modalities = ?, status = ?, status_before_stale = '' WHERE id = ?`,
@@ -461,25 +508,63 @@ func (s *Store) MarkStaleModels(ctx context.Context, upstreamID string, seen []s
 // keepRoles classifier roles untouched: discovery could not list that kind
 // of model this run, so their absence says nothing.
 func (s *Store) MarkStaleModelsKeeping(ctx context.Context, upstreamID string, seen, keepRoles []string) (int, error) {
-	query := `UPDATE model SET status_before_stale = status, status = ? WHERE upstream_id = ? AND status <> ?`
-	args := []any{ModelStale, upstreamID, ModelStale}
+	n, _, err := s.MarkStaleModelsReport(ctx, upstreamID, seen, keepRoles)
+	return n, err
+}
+
+// MarkStaleModelsReport is MarkStaleModelsKeeping that also returns the
+// names of the enabled models it marked stale, so discovery can tell an
+// administrator that models in use stopped being listed.
+func (s *Store) MarkStaleModelsReport(ctx context.Context, upstreamID string, seen, keepRoles []string) (int, []string, error) {
+	where := ` WHERE upstream_id = ? AND status <> ?`
+	whereArgs := []any{upstreamID, ModelStale}
 	if len(seen) > 0 {
-		query += ` AND name NOT IN (` + placeholders(len(seen)) + `)`
-		args = append(args, toArgs(seen)...)
+		where += ` AND name NOT IN (` + placeholders(len(seen)) + `)`
+		whereArgs = append(whereArgs, toArgs(seen)...)
 	}
 	if len(keepRoles) > 0 {
-		query += ` AND classifier_role NOT IN (` + placeholders(len(keepRoles)) + `)`
-		args = append(args, toArgs(keepRoles)...)
+		where += ` AND classifier_role NOT IN (` + placeholders(len(keepRoles)) + `)`
+		whereArgs = append(whereArgs, toArgs(keepRoles)...)
 	}
-	res, err := s.db.ExecContext(ctx, s.rebind(query), args...)
+	var enabled []string
+	var n int64
+	// writeTx, not modelTx: discovery runs this every cycle and an unchanged
+	// catalog must not flush the revision-tagged proxy caches.
+	err := s.writeTx(ctx, func(tx *Store) error {
+		rows, err := tx.query(ctx, `SELECT name FROM model`+where+` AND status = ? ORDER BY name`, append(append([]any{}, whereArgs...), ModelEnabled)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			enabled = append(enabled, name)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		_ = rows.Close()
+		runner := sqlRunner(tx.db)
+		if tx.tx != nil {
+			runner = tx.tx
+		}
+		res, err := runner.ExecContext(ctx, tx.rebind(`UPDATE model SET status_before_stale = status, status = ?`+where), append([]any{ModelStale}, whereArgs...)...)
+		if err != nil {
+			return err
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("mark stale models: %w", err)
+		return 0, nil, fmt.Errorf("mark stale models: %w", err)
 	}
-	n, _ := res.RowsAffected()
 	if n > 0 && s.modelRevision != nil {
 		s.modelRevision.Add(1)
 	}
-	return int(n), nil
+	return int(n), enabled, nil
 }
 
 // SetModelStatus curates a model.

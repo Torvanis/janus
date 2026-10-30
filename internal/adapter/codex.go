@@ -236,6 +236,15 @@ func chatToResponses(body []byte, model string) ([]byte, string, error) {
 	if len(in.Tools) > 0 {
 		tools := make([]any, 0, len(in.Tools))
 		for i, raw := range in.Tools {
+			if h, ok := hostedTool(raw); ok {
+				// Provider-run tools (web/X search, code) pass through.
+				tools = append(tools, h)
+				if h["type"] == "code_interpreter" {
+					// Ask for the program's output so it can be shown.
+					out["include"] = []string{"code_interpreter_call.outputs"}
+				}
+				continue
+			}
 			t, err := responsesTool(raw)
 			if err != nil {
 				return nil, "", fmt.Errorf("tools[%d]: %w", i, err)
@@ -471,6 +480,15 @@ type codexEvent struct {
 	} `json:"response"`
 	Message string `json:"message"`
 	Code    string `json:"code"`
+	// Annotation is a citation on the reply text
+	// (response.output_text.annotation.added).
+	Annotation *struct {
+		Type       string `json:"type"`
+		URL        string `json:"url"`
+		Title      string `json:"title"`
+		StartIndex int    `json:"start_index"`
+		EndIndex   int    `json:"end_index"`
+	} `json:"annotation"`
 }
 
 type codexOutputItem struct {
@@ -479,11 +497,21 @@ type codexOutputItem struct {
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+	// Action is a hosted search call's query and sources.
+	Action *searchAction `json:"action"`
+	// Code and Outputs: a code_interpreter_call's program and its logs.
+	Code    string `json:"code"`
+	Outputs []struct {
+		Type string `json:"type"`
+		Logs string `json:"logs"`
+	} `json:"outputs"`
 }
 
 type codexUsage struct {
-	InputTokens        int64 `json:"input_tokens"`
-	OutputTokens       int64 `json:"output_tokens"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	// X.ai reports the exact bill, hosted tool calls included, in ticks.
+	CostInUSDTicks     *int64 `json:"cost_in_usd_ticks"`
 	InputTokensDetails struct {
 		CachedTokens int64 `json:"cached_tokens"`
 	} `json:"input_tokens_details"`
@@ -495,7 +523,14 @@ type codexUsage struct {
 func (u *codexUsage) usage() Usage {
 	// Responses reports cached input as a subset of input_tokens, the
 	// OpenAI convention (CachedDisjoint=false).
-	return Usage{TokensIn: u.InputTokens, TokensOut: u.OutputTokens, TokensCached: u.InputTokensDetails.CachedTokens, Reported: true}
+	out := Usage{TokensIn: u.InputTokens, TokensOut: u.OutputTokens, TokensCached: u.InputTokensDetails.CachedTokens, Reported: true}
+	if u.CostInUSDTicks != nil && *u.CostInUSDTicks > 0 {
+		// The exact cost, including xAI's per-search fees the token rate
+		// card cannot express.
+		out.CostNano = (*u.CostInUSDTicks + xaiTicksPerNanoUSD/2) / xaiTicksPerNanoUSD
+		out.CostReported = true
+	}
+	return out
 }
 
 func (u *codexUsage) openAI() map[string]any {
@@ -546,7 +581,15 @@ func (t *codexTranslator) event(ev codexEvent) []map[string]any {
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		t.reasoning.WriteString(ev.Delta)
 		return []map[string]any{{"reasoning_content": ev.Delta}}
+	case "response.output_text.annotation.added":
+		if a := ev.Annotation; a != nil && a.Type == "url_citation" && a.URL != "" {
+			return []map[string]any{{"annotations": []any{map[string]any{"type": "url_citation",
+				"url_citation": map[string]any{"url": a.URL, "title": a.Title, "start_index": a.StartIndex, "end_index": a.EndIndex}}}}}
+		}
 	case "response.output_item.added":
+		if kind := hostedCallKind(ev.Item.Type); kind != "" {
+			return []map[string]any{activityDelta(kind, "searching", nil)}
+		}
 		if ev.Item.Type == "function_call" {
 			idx := len(t.toolIndex)
 			t.toolIndex[ev.OutputIndex] = idx
@@ -564,6 +607,13 @@ func (t *codexTranslator) event(ev codexEvent) []map[string]any {
 		fn["arguments"] = fn["arguments"].(string) + ev.Delta
 		return []map[string]any{{"tool_calls": []any{map[string]any{"index": idx, "function": map[string]any{"arguments": ev.Delta}}}}}
 	case "response.output_item.done":
+		if kind := hostedCallKind(ev.Item.Type); kind != "" {
+			d := activityDelta(kind, "done", ev.Item.Action)
+			if kind == "code_execution" {
+				codeActivity(d, ev.Item.Code, ev.Item.Outputs)
+			}
+			return []map[string]any{d}
+		}
 		// A function call whose arguments arrived only in the done item
 		// (no deltas) still has to reach the caller.
 		if ev.Item.Type == "function_call" {
@@ -622,9 +672,16 @@ func (t *codexTranslator) chunk(delta map[string]any, finish any, usage map[stri
 }
 
 // NewStreamTransformer implements Adapter.
-func (c *Codex) NewStreamTransformer(req *Request, _ http.Header) StreamTransformer {
+func (c *Codex) NewStreamTransformer(req *Request, respHeader http.Header) StreamTransformer {
 	if !isChatCompletions(req) {
 		return PassthroughStream{}
+	}
+	// The ChatGPT backend has been seen labelling its event stream
+	// "text/plain; charset=utf-8". What Janus relays is a chat.completions
+	// SSE stream, so say so: clients (Janus Chat among them) decide how to
+	// read the body from Content-Type. A JSON error body keeps its type.
+	if respHeader != nil && !strings.Contains(strings.ToLower(respHeader.Get("Content-Type")), "json") {
+		respHeader.Set("Content-Type", "text/event-stream")
 	}
 	return &codexStream{t: newCodexTranslator(reqModel(req))}
 }
@@ -679,10 +736,19 @@ func (c *Codex) TransformResponse(req *Request, body []byte) ([]byte, error) {
 		return body, nil
 	}
 	t := newCodexTranslator(reqModel(req))
+	var acts, anns []any
 	forEachSSEData(body, func(payload []byte) {
 		var ev codexEvent
 		if json.Unmarshal(payload, &ev) == nil {
-			t.event(ev)
+			// Hosted tool activity and citations ride on the deltas.
+			for _, d := range t.event(ev) {
+				if a, ok := d["janus_activity"]; ok {
+					acts = append(acts, a)
+				}
+				if v, ok := d["annotations"].([]any); ok {
+					anns = append(anns, v...)
+				}
+			}
 		}
 	})
 	if t.err != nil {
@@ -694,6 +760,12 @@ func (c *Codex) TransformResponse(req *Request, body []byte) ([]byte, error) {
 	msg := map[string]any{"role": "assistant", "content": t.text.String()}
 	if t.reasoning.Len() > 0 {
 		msg["reasoning_content"] = t.reasoning.String()
+	}
+	if len(acts) > 0 {
+		msg["janus_activities"] = acts
+	}
+	if len(anns) > 0 {
+		msg["annotations"] = anns
 	}
 	if len(t.tools) > 0 {
 		calls := make([]any, len(t.tools))

@@ -19,6 +19,7 @@ import { TroubleshootingCard } from './TroubleshootingCard';
 import { LicenseCard } from './LicenseCard';
 import { RetainedPanel } from '../../components/RouteTopNav';
 import { PersonalSubscriptionsCard } from './PersonalSubscriptionsCard';
+import { FileStorageCard } from './FileStorageCard';
 
 /**
  * Label/description/consequence copy for each feature flag on the
@@ -280,6 +281,7 @@ export function SystemPage({
               <div id="discovery">
                 <DiscoveryIntervalCard interval={data.discovery.interval} />
               </div>
+              <FileStorageCard />
               <PersonalSubscriptionsCard />
             </RetainedPanel>
 

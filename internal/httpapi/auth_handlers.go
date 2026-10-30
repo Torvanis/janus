@@ -123,9 +123,19 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 
 	// Seat limit (RULING): a NEW user cannot complete first sign-in when the
 	// licensed seat count is already used; existing users are never affected.
+	// "New" includes an account pre-provisioned by an admin, SCIM or the
+	// directory that has never signed in: such rows hold no seat until their
+	// first sign-in, so that is where the seat is checked.
 	// Admins always get in so the person who can fix the license can sign in.
-	if before == nil && !bootstrap && !groupAdmin {
-		if err := s.checkSeatAvailable(ctx); err != nil {
+	firstSignIn := before == nil || (before.LastLoginAt.IsZero() && !before.IsAdmin())
+	if firstSignIn && !bootstrap && !groupAdmin {
+		seatErr := error(nil)
+		if before == nil {
+			seatErr = s.checkSeatAvailable(ctx)
+		} else {
+			seatErr = s.checkSeatAvailableFor(ctx, before.ID)
+		}
+		if err := seatErr; err != nil {
 			s.Logger.WarnContext(ctx, "seat limit reached; first sign-in refused", "email", identity.Email)
 			s.renderLoginError(w, r, err.Error())
 			return
@@ -144,11 +154,13 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 	}
 	// IdP groups are replaced wholesale on every sign-in; in-app groups are left
 	// untouched so admin-curated membership survives.
+	covered := s.childCoveredNow(ctx)
 	if err := s.Store.ReplaceIDPGroupsForUser(ctx, user.ID, identity.Groups); err != nil {
 		s.Logger.ErrorContext(ctx, "synchronise identity-provider groups", "error", err.Error())
 		s.renderLoginError(w, r, "Your directory groups could not be synchronised. Try signing in again; if this continues, contact a Janus administrator.")
 		return
 	}
+	s.childCoverageLost(ctx, covered, "their sign-in groups from the identity provider changed")
 	switch {
 	case created:
 		// First login: one entry records the account and the capability it

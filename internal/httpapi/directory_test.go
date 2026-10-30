@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -139,6 +140,15 @@ func TestDirectorySignInThroughLoginForm(t *testing.T) {
 	if !strings.HasPrefix(ada.AuthID, "ldap:cn=ada,") || !ada.AdminViaGroup {
 		t.Fatalf("ada: %+v", ada)
 	}
+	// Past the grace period the configured directory keeps signing people
+	// in (expiry never disrupts work).
+	exp := time.Now().Add(-60 * 24 * time.Hour)
+	installLicense(t, h, license.Claims{LicenseID: "JNS-LDAP-EXP", Org: "T", IssuedTo: "t@t", Edition: license.EditionBusiness,
+		Features: license.BusinessFeatures, Seats: 100, Exp: &exp, GraceDays: 30, Term: license.TermSubscription})
+	if rec := login("ada@example.com", "pw-ada"); rec.Code != 200 {
+		t.Fatalf("directory sign-in after grace: %d %s", rec.Code, rec.Body)
+	}
+	bizLicense(t, h)
 	// bob is not in janus-admins.
 	if rec = login("bob@example.com", "pw-bob"); rec.Code != 200 {
 		t.Fatalf("bob: %d %s", rec.Code, rec.Body)

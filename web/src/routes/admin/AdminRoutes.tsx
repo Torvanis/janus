@@ -1,5 +1,5 @@
+import { ChatAdminPage } from './ChatAdmin';
 import type { ReactNode } from 'react';
-import { Route, Routes } from 'react-router-dom';
 import { AdminOverview } from './Overview';
 import { UpstreamsPage } from './Upstreams';
 import { AdminModelsPage } from './Models';
@@ -14,6 +14,8 @@ import { LegacyWorkspaceRedirect } from '../../app/LegacyWorkspaceRedirect';
 import { AdminQuotasPage } from './Quotas';
 import { RulesPage } from './Rules';
 import { SecurityPage } from './Security';
+import { ChildSafetyPage } from './ChildSafety';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { RoutingPage } from './Routing';
 import { AlertsPage } from './Alerts';
 import { AuditPage } from './Audit';
@@ -30,6 +32,8 @@ export default function AdminRoutes(): ReactNode {
       <Route path="models" element={<AdminModelsPage />} />
       <Route path="managed-models" element={<ManagedModelsPage />} />
       <Route path="grants" element={<GrantsPage />} />
+      <Route path="chat" element={<ChatAdminPage />} />
+      <Route path="chat/:tab" element={<ChatAdminPage />} />
       <Route path="service-tokens" element={<ServiceTokensPage />} />
       <Route path="service-tokens/:id" element={<ServiceTokensPage />} />
       <Route path="subscriptions" element={<LegacyWorkspaceRedirect />} />
@@ -45,6 +49,9 @@ export default function AdminRoutes(): ReactNode {
       <Route path="routing" element={<RoutingPage />} />
       <Route path="routing/:tab" element={<RoutingPage />} />
       <Route path="routing/:tab/:id" element={<RoutingPage />} />
+      <Route path="child-safety" element={<ChildSafetyPage />} />
+      {/* Family safety moved out of Security into Child Safety. */}
+      <Route path="security/family" element={<Navigate to="/admin/child-safety" replace />} />
       <Route path="security" element={<SecurityPage />} />
       <Route path="security/:tab" element={<SecurityPage />} />
       <Route path="alerts" element={<AlertsPage />} />

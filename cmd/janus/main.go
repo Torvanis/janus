@@ -18,6 +18,7 @@ import (
 
 	"github.com/torvanis/janus/internal/alerting"
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/blobstore"
 	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/crypto"
 	"github.com/torvanis/janus/internal/discovery"
@@ -291,10 +292,23 @@ func run() error {
 		// Troubleshooting mode: captures only while an admin has enabled a
 		// session; the recorder itself is inert otherwise.
 		Troubleshoot: troubleshoot.New(db, cipher, cfg.TroubleshootDir, logger),
+		// File storage: database by default, or S3-compatible from
+		// JANUS_STORAGE_MODE / the admin setting. Objects are encrypted
+		// with the gateway key before they reach either backend.
+		Blobs: blobstore.NewManager(db, cipher, httpapi.StorageEnvConfig(cfg), cfg.StorageMaxObjectBytes),
+	}
+	// The license gauge and expiry alerts follow every refresh, including an
+	// admin installing or removing a key.
+	licenseMgr.OnRefresh(server.OnLicenseState)
+	server.OnLicenseState(licenseMgr.State())
+	if cfg.StorageMode != "" {
+		logger.Info("file storage set by the deployment", "mode", cfg.StorageMode, "endpoint", cfg.S3Endpoint, "bucket", cfg.S3Bucket)
 	}
 	if cfg.TroubleshootDir != "" {
 		logger.Info("troubleshooting disk backend available", "dir", cfg.TroubleshootDir)
 	}
+	// A SearXNG installed with the deployment turns Chat web search on.
+	server.ApplyDeploymentChatSearch(ctx)
 	perf := httpapi.DecidePerformanceMode(cfg.PerformanceMode, licenseMgr.State())
 	server.StartPerformanceMode(perf)
 	switch {
@@ -306,6 +320,7 @@ func run() error {
 	}
 
 	purger := jobs.NewPurger(db, quotaEngine, metrics, logger, cfg.UsageRetentionDays, cfg.AuditRetentionDays, cfg.PurgeJobTimeUTC)
+	purger.ContentPurge = server.PurgeHeldContent
 
 	var wg sync.WaitGroup
 	discoverySvc.Start(ctx, &wg)

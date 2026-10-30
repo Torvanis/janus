@@ -239,6 +239,9 @@ func (e *Engine) categoriesFromDecision(c ResolvedCheck, direction string, msgs 
 	if direction == store.SecgwDirectionIngress && c.Mode == store.SecgwModeBlock {
 		action = store.SecgwActionBlocked
 	}
+	if direction == store.SecgwDirectionIngress {
+		direction = ingressDirection(m)
+	}
 	return checkOutcome{ran: true, vs: []Violation{{Kind: c.Kind, RuleID: strings.Join(slugs, ","), Severity: string(detect.SeverityHigh),
 		Direction: direction, Action: action, MessageIndex: m.Index, Text: m.Text, Length: len(m.Text), Record: true,
 		PolicyID: c.PolicyID, BindingID: c.BindingID, ClassifierScore: counted[0].Probability, ClassifierModel: c.ClassifierModelID}}}

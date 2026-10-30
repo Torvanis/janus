@@ -114,7 +114,7 @@ func (a *Ollama) Prepare(up Upstream, req *Request) (*Prepared, error) {
 		header.Set("Authorization", "Bearer "+up.APIKey)
 	}
 	body := req.Body
-	if req.Streaming && isJSON(header) {
+	if req.Streaming && isJSON(header) && streamUsagePath(req.Path) {
 		body = ensureStreamUsage(body)
 	}
 	return &Prepared{URL: joinURL(up.BaseURL, req.Path), Header: header, Body: body}, nil

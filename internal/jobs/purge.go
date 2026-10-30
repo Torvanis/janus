@@ -24,6 +24,10 @@ type Purger struct {
 	mu          sync.RWMutex
 	lastRun     time.Time
 	lastDeleted int64
+	// ContentPurge removes held content of deleted accounts and
+	// conversations deleted long enough ago (files need the server's
+	// storage, so the server supplies it). Nil skips the step.
+	ContentPurge func(ctx context.Context, now time.Time) int64
 }
 
 // NewPurger builds the retention job.
@@ -77,17 +81,41 @@ func (p *Purger) RunOnce(ctx context.Context) {
 		p.metrics.PurgeDeletedRows.WithLabelValues("quota_alert_state").Add(float64(n))
 		deleted += n
 	}
+	if n, err := p.store.PurgeAlertClaims(ctx, now.Add(-time.Hour)); err != nil {
+		p.logger.ErrorContext(ctx, "purge alert claims", "error", err.Error())
+	} else if n > 0 {
+		p.metrics.PurgeDeletedRows.WithLabelValues("alert_dedup").Add(float64(n))
+		deleted += n
+	}
 	if n, err := p.store.PurgeExpiredOIDCStates(ctx, now); err != nil {
 		p.logger.ErrorContext(ctx, "purge expired oidc states", "error", err.Error())
 	} else if n > 0 {
 		p.metrics.PurgeDeletedRows.WithLabelValues("oidc_state").Add(float64(n))
 		deleted += n
 	}
-	// Prompt classification results follow their own admin-set retention.
+	// Notifications are kept for 90 days.
+	if n, err := p.store.PurgeNotifications(ctx, now.Add(-store.NotificationRetention)); err != nil {
+		p.logger.ErrorContext(ctx, "purge notifications", "error", err.Error())
+	} else if n > 0 {
+		p.metrics.PurgeDeletedRows.WithLabelValues("notification").Add(float64(n))
+		deleted += n
+	}
+	// A violation never outlives the request log it belongs to (its own,
+	// shorter per-kind bounds run in the Security Gateway retention job).
+	if p.usageDays > 0 {
+		if n, err := p.store.PruneSecgwViolationsBefore(ctx, now.AddDate(0, 0, -p.usageDays)); err != nil {
+			p.logger.ErrorContext(ctx, "purge violations past usage retention", "error", err.Error())
+		} else if n > 0 {
+			p.metrics.PurgeDeletedRows.WithLabelValues("secgw_violation").Add(float64(n))
+			deleted += n
+		}
+	}
+	// Prompt classification results follow their own admin-set retention,
+	// capped at the usage-log retention.
 	if settings, err := p.store.ClassificationSettings(ctx); err != nil {
 		p.logger.ErrorContext(ctx, "read classification retention", "error", err.Error())
-	} else if settings.RetentionDays > 0 {
-		if n, err := p.store.PruneClassificationResults(ctx, now.AddDate(0, 0, -settings.RetentionDays)); err != nil {
+	} else if days := EffectiveClassificationRetention(settings.RetentionDays, p.usageDays); days > 0 {
+		if n, err := p.store.PruneClassificationResults(ctx, now.AddDate(0, 0, -days)); err != nil {
 			p.logger.ErrorContext(ctx, "purge classification results", "error", err.Error())
 		} else if n > 0 {
 			p.metrics.PurgeDeletedRows.WithLabelValues("classification_result").Add(float64(n))
@@ -99,6 +127,14 @@ func (p *Purger) RunOnce(ctx context.Context) {
 	// (0 keeps them), and a decision never names its caller for longer
 	// than the usage log does.
 	deleted += p.pruneRouting(ctx, now)
+	// Deleted people's held content (after 30 days) and conversations
+	// deleted 30+ days ago.
+	if p.ContentPurge != nil {
+		if n := p.ContentPurge(ctx, now); n > 0 {
+			p.metrics.PurgeDeletedRows.WithLabelValues("user_content").Add(float64(n))
+			deleted += n
+		}
+	}
 	if err := p.quota.Reconcile(ctx); err != nil {
 		p.logger.ErrorContext(ctx, "reconcile quota ledgers after purge", "error", err.Error())
 	}
@@ -107,6 +143,16 @@ func (p *Purger) RunOnce(ctx context.Context) {
 	p.lastRun, p.lastDeleted = now, deleted
 	p.mu.Unlock()
 	p.logger.InfoContext(ctx, "retention purge complete", "rows_deleted", deleted)
+}
+
+// EffectiveClassificationRetention is the number of days Usage insights
+// results are kept: the admin setting (0 = no own limit), never longer than
+// the usage-log retention. 0 means no bound at all.
+func EffectiveClassificationRetention(ownDays, usageDays int) int {
+	if usageDays > 0 && (ownDays <= 0 || usageDays < ownDays) {
+		return usageDays
+	}
+	return ownDays
 }
 
 // pruneRouting enforces auto-routing retention and returns the rows removed.

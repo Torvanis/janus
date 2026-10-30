@@ -46,7 +46,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				},
 				{
 					"language": "python", "label": "Python (OpenAI SDK)",
-					"code": "from openai import OpenAI\n\n" +
+					"code": "import os\n\nfrom openai import OpenAI\n\n" +
 						"client = OpenAI(\n" +
 						"    base_url=\"" + base + "\",\n" +
 						"    api_key=os.environ[\"JANUS_API_KEY\"],\n" +
@@ -71,7 +71,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				},
 				{
 					"language": "python", "label": "LangChain",
-					"code": "from langchain_openai import ChatOpenAI\n\n" +
+					"code": "import os\n\nfrom langchain_openai import ChatOpenAI\n\n" +
 						"llm = ChatOpenAI(\n" +
 						"    base_url=\"" + base + "\",\n" +
 						"    api_key=os.environ[\"JANUS_API_KEY\"],\n" +
@@ -122,7 +122,8 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 			"id": "tokens", "title": "API tokens", "docs_url": "/docs/guides/tokens",
 			"body": "Tokens identify you to the gateway. Create one per tool so you can revoke a single " +
 				"integration without disrupting the rest. Janus stores only a hash of each token: the value is " +
-				"shown once at creation and can never be retrieved again. Revocation takes effect immediately.",
+				"shown once at creation and can never be retrieved again. Revocation takes effect at once on " +
+				"every gateway replica.",
 			"snippets": []map[string]string{
 				{"language": "bash", "label": "Use a token from the environment",
 					"code": "export JANUS_API_KEY=\"janus_…\"   # the value you copied at creation\n" +
@@ -161,7 +162,9 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 		return map[string]any{
 			"id": "quotas", "title": "Quotas", "docs_url": "/docs/guides/quotas",
 			"body": "Quotas cap input tokens, output tokens, spend, or request count over a window. Multiple " +
-				"quotas combine, and the most restrictive one wins. You are warned at 80% and 95%. On breach the " +
+				"quotas combine, and the most restrictive one wins. You are warned at 80% and 95% unless a rule " +
+				"sets its own thresholds. A team's quota counts only requests made while working under that " +
+				"team. On breach the " +
 				"next request is refused with HTTP 429 and a reset time. By default an in-flight request is " +
 				"allowed to finish; administrators can switch a quota to cut streams immediately instead. " +
 				"Prompt-cache writes (the 5-minute and 1-hour cache-write token counts some providers report) " +
@@ -181,14 +184,14 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 			"body": "Every gateway error carries a stable `code`. Look it up below, or open the error catalog for " +
 				"the full list with causes and fixes.",
 			"errors": []map[string]string{
-				{"code": "policy.token_invalid", "status": "401", "fix": "The token is missing, revoked, or mistyped. Create a new one on the Tokens page."},
+				{"code": "policy.token_invalid", "status": "401", "fix": "The token is missing, revoked, or mistyped. Create a new one on the API Tokens page."},
 				{"code": "policy.user_disabled", "status": "403", "fix": "Your account is disabled. Contact an administrator."},
 				{"code": "policy.model_not_granted", "status": "403", "fix": "You have not been granted this model. Call /v1/models to see what you can use."},
 				{"code": "policy.endpoint_blocked", "status": "403", "fix": "A gateway policy rule matched this request. The reason field explains which signal fired."},
 				{"code": "policy.quota_exceeded", "status": "429", "fix": "You reached a limit. Wait until reset_at, or ask for a higher quota."},
 				{"code": "upstream.unavailable", "status": "503", "fix": "The provider could not be reached. Retry shortly."},
 				{"code": "upstream.rate_limit", "status": "429", "fix": "The provider throttled the gateway. Back off and retry."},
-				{"code": "upstream.stream_interrupted", "status": "200 + in-band error", "fix": "The provider ended the stream early; the answer is incomplete. Retry."},
+				{"code": "upstream.stream_interrupted", "status": "502 (in-band, after 200)", "fix": "The provider ended the stream early; the answer is incomplete. Retry."},
 				{"code": "policy.service_token_expired", "status": "401", "fix": "This service token passed its expiry date. Ask an administrator for a replacement."},
 				{"code": "policy.security_blocked", "status": "403", "fix": "A guardrail check refused the request. Remove the flagged material, or give the request_id to an administrator."},
 				{"code": "policy.subscription_reauth_required", "status": "403", "fix": "Your personal provider subscription needs to be reconnected on the Subscriptions page."},
@@ -196,7 +199,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				{"code": "policy.rate_limit", "status": "429", "fix": "Too many requests per minute. Wait retry_after seconds."},
 				{"code": "policy.managed_model_unavailable", "status": "503", "fix": "This managed model points at a missing or disabled model. Use another model and tell an administrator."},
 				{"code": "policy.managed_model_fallback_exhausted", "status": "503", "fix": "The managed model and its fallback are both unavailable. Retry later or report the request_id."},
-				{"code": "policy.response_too_large", "status": "500", "fix": "The answer exceeded the gateway response size cap. Ask for a shorter answer."},
+				{"code": "policy.response_too_large", "status": "500 (in-band, after 200)", "fix": "A streamed answer exceeded the gateway response size cap and was cut; the stream ends with this error. Ask for a shorter answer."},
 				{"code": "invalid_request_error", "status": "400", "fix": "The request body is malformed or missing a field such as model. The message says what to fix."},
 				{"code": "not_found_error", "status": "404", "fix": "The path or item does not exist. Model calls need a base URL ending in /v1."},
 				{"code": "server_error", "status": "500", "fix": "Unexpected gateway fault. Retry once, then quote the request_id."},
@@ -209,7 +212,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 			"terms": []map[string]string{
 				{"term": "Upstream", "definition": "A configured provider endpoint that Janus forwards requests to."},
 				{"term": "Adapter", "definition": "The plug-in that translates between the OpenAI wire format and one provider's protocol."},
-				{"term": "Grant", "definition": "Permission for a user, a group, or everyone to call a specific model."},
+				{"term": "Grant", "definition": "Permission for a user, group, all users, a team, all teams, or a service token to call a model or managed model."},
 				{"term": "Rate card", "definition": "The per-million-token prices used to attribute spend: input, output, cached input, and 5-minute/1-hour cache-write rates. Versioned, so historical usage keeps its original rate. An explicitly saved $0 card means free, not unpriced."},
 				{"term": "Context window", "definition": "The maximum number of tokens a model accepts as input, shown in the catalog (context_window). Seeded from the bundled reference data for well-known models and correctable by administrators; 0 renders as a dash meaning unknown."},
 				{"term": "Modality", "definition": "What kind of work a request performs: chat, embedding, image, audio, and so on."},

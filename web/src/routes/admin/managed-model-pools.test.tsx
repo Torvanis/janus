@@ -163,6 +163,29 @@ describe('Managed model pools', () => {
     });
   });
 
+  it('never offers a guard classifier as a target or pool member', async () => {
+    const withGuard = [
+      ...models,
+      { id: 'm-guard', name: 'llama-guard', status: 'enabled', upstream_name: 'vllm-a', classifier_role: 'generative_guard' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(
+        {
+          'GET /api/v1/admin/managed-models': { managed_models: [baseRow], total_count: 1 },
+          'GET /api/v1/admin/models': { models: withGuard },
+        },
+        [],
+      ),
+    );
+    renderPage(['load_balancing', 'model_fallbacks']);
+    const row = (await screen.findByText('qwen')).closest('tr')!;
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+    const editor = await screen.findByTestId('pool-editor');
+    await waitFor(() => expect(within(editor).getAllByRole('option').length).toBeGreaterThan(1));
+    expect(screen.queryByRole('option', { name: /llama-guard/ })).toBeNull();
+  });
+
   it('shows the upsell and refuses to save a new pool without the license', async () => {
     const calls: Call[] = [];
     vi.stubGlobal(

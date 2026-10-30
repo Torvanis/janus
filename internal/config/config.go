@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -97,6 +98,13 @@ type Config struct {
 	// surface is hidden in the UI. Token, request, and latency accounting is
 	// unaffected. Default false: behavior is identical to a billed deployment.
 	LocalOnly bool
+	// ChatPreview turns on the Janus Chat preview (JANUS_CHAT_PREVIEW). Off by
+	// default while the feature is built out.
+	ChatPreview bool
+	// ChatAutoTitle (JANUS_CHAT_AUTO_TITLE, default true) names a chat with a
+	// short model-written title after its first reply; the call is metered
+	// like the chat and shows in the request log as janus-chat-title.
+	ChatAutoTitle bool
 
 	// PerformanceMode (JANUS_PERFORMANCE_MODE, Business edition) batches
 	// usage writes and commits them without waiting for the WAL flush. It
@@ -159,6 +167,34 @@ type Config struct {
 	// and a permanently-on session costs a buffered copy of every matching
 	// response plus the storage the retention policy allows.
 	TroubleshootDir string
+
+	// File storage (chat attachments, troubleshooting capture bodies).
+	// StorageMode is JANUS_STORAGE_MODE ("database" or "s3"); empty leaves
+	// the choice to the admin UI (Settings → General → File storage), and
+	// a non-empty value makes every storage field read-only there.
+	StorageMode string
+	S3Endpoint  string
+	// ChatSearchSearXNGURL (JANUS_CHAT_SEARCH_SEARXNG_URL) is a SearXNG
+	// instance run next to this deployment. Janus turns Chat web search on with it at
+	// startup, once; an administrator's later changes stick.
+	ChatSearchSearXNGURL string
+	S3Bucket             string
+	S3Region             string
+	S3PathStyle          bool
+	S3Prefix             string
+	S3AccessKeyID        string
+	S3SecretAccessKey    string `json:"-"`
+	// S3CAFile is a PEM file of extra CAs for the S3 endpoint
+	// (JANUS_S3_CA_FILE); S3CABundle holds its contents once loaded.
+	S3CAFile   string
+	S3CABundle string `json:"-"`
+	// StorageMaxObjectBytes caps one stored file
+	// (JANUS_STORAGE_MAX_OBJECT_BYTES, default 25 MiB).
+	StorageMaxObjectBytes int64
+	// ChatMaxUploadBytes caps one Janus Chat attachment
+	// (JANUS_CHAT_MAX_UPLOAD_BYTES, default 20 MiB). The effective limit is
+	// the smaller of this and StorageMaxObjectBytes.
+	ChatMaxUploadBytes int64
 
 	// Notifications
 	SMTPHost string
@@ -295,6 +331,8 @@ func Load() (*Config, error) {
 		OIDCGroupsClaim:      envOr("JANUS_OIDC_GROUPS_CLAIM", "groups"),
 		DevAuthEnabled:       envBool("JANUS_DEV_AUTH", false),
 		LocalOnly:            envBool("JANUS_LOCAL_ONLY", false),
+		ChatPreview:          envBool("JANUS_CHAT_PREVIEW", false),
+		ChatAutoTitle:        envBool("JANUS_CHAT_AUTO_TITLE", true),
 		PerformanceMode:      envBool("JANUS_PERFORMANCE_MODE", false),
 		SMTPHost:             os.Getenv("JANUS_SMTP_HOST"),
 		SMTPUser:             os.Getenv("JANUS_SMTP_USER"),
@@ -303,6 +341,15 @@ func Load() (*Config, error) {
 		CABundlePath:         os.Getenv("JANUS_CA_BUNDLE"),
 		PurgeJobTimeUTC:      envOr("JANUS_PURGE_JOB_TIME_UTC", "02:00"),
 		TroubleshootDir:      strings.TrimSpace(os.Getenv("JANUS_TROUBLESHOOT_DIR")),
+		StorageMode:          strings.ToLower(strings.TrimSpace(os.Getenv("JANUS_STORAGE_MODE"))),
+		S3Endpoint:           strings.TrimSpace(os.Getenv("JANUS_S3_ENDPOINT")),
+		S3Bucket:             strings.TrimSpace(os.Getenv("JANUS_S3_BUCKET")),
+		S3Region:             envOr("JANUS_S3_REGION", "us-east-1"),
+		S3PathStyle:          envBool("JANUS_S3_PATH_STYLE", false),
+		S3Prefix:             strings.TrimSpace(os.Getenv("JANUS_S3_PREFIX")),
+		S3AccessKeyID:        strings.TrimSpace(os.Getenv("JANUS_S3_ACCESS_KEY_ID")),
+		S3SecretAccessKey:    os.Getenv("JANUS_S3_SECRET_ACCESS_KEY"),
+		S3CAFile:             strings.TrimSpace(os.Getenv("JANUS_S3_CA_FILE")),
 		OIDCScopes:           splitList(envOr("JANUS_OIDC_SCOPES", "openid,profile,email,groups")),
 		BootstrapAdminEmails: lowerAll(splitList(os.Getenv("JANUS_BOOTSTRAP_ADMIN_EMAILS"))),
 		AdminGroups:          normalizeSet(splitList(os.Getenv("JANUS_ADMIN_GROUPS"))),
@@ -327,6 +374,12 @@ func Load() (*Config, error) {
 	c.LicenseSyncToken = strings.TrimSpace(c.LicenseSyncToken)
 	if len(c.LicenseSyncToken) > 4096 || strings.ContainsAny(c.LicenseSyncToken, "\r\n	 ") {
 		return nil, fmt.Errorf("JANUS_LICENSE_SYNC_TOKEN has invalid format")
+	}
+	if err := c.loadChatSearch(); err != nil {
+		return nil, err
+	}
+	if err := c.loadStorage(); err != nil {
+		return nil, err
 	}
 	if c.SMTPPort, err = envInt("JANUS_SMTP_PORT", 587); err != nil {
 		return nil, err
@@ -438,6 +491,10 @@ func devAuthGuard(c *Config) error {
 		return nil
 	}
 	const remedy = "configure OIDC (JANUS_OIDC_PROVIDER_URL, JANUS_OIDC_CLIENT_ID, JANUS_OIDC_CLIENT_SECRET) instead, or set JANUS_DEV_AUTH_ALLOW_UNSAFE=true only for an intentional, isolated demo"
+	// The raw JANUS_ENV on purpose: unset defaults to "production" in
+	// c.Environment, but the documented quick start (make run, docker run
+	// on 127.0.0.1) leaves it unset. A reachable deployment is stopped by
+	// the loopback check below whatever JANUS_ENV says.
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("JANUS_ENV")), "production") {
 		return fmt.Errorf("JANUS_DEV_AUTH=true signs in any email address with no identity provider, and JANUS_ENV=production: refusing to start; %s", remedy)
 	}
@@ -629,3 +686,71 @@ func parseCIDRs(v string) ([]*net.IPNet, error) {
 // OIDCEnabled reports whether an identity provider is configured. Without
 // one, sign-in is by local account (see internal/httpapi/local_auth.go).
 func (c *Config) OIDCEnabled() bool { return c.OIDCProviderURL != "" }
+
+// loadChatSearch validates JANUS_CHAT_SEARCH_SEARXNG_URL.
+func (c *Config) loadChatSearch() error {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv("JANUS_CHAT_SEARCH_SEARXNG_URL")), "/")
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return fmt.Errorf("JANUS_CHAT_SEARCH_SEARXNG_URL must look like http://searxng:8080")
+	}
+	c.ChatSearchSearXNGURL = raw
+	return nil
+}
+
+// loadStorage validates the file storage variables. Mode "s3" needs an
+// endpoint, bucket and both credential halves, so a half-configured
+// deployment fails at startup rather than on the first upload.
+func (c *Config) loadStorage() error {
+	raw := strings.TrimSpace(os.Getenv("JANUS_STORAGE_MAX_OBJECT_BYTES"))
+	c.StorageMaxObjectBytes = 25 << 20
+	c.ChatMaxUploadBytes = 20 << 20
+	if v := strings.TrimSpace(os.Getenv("JANUS_CHAT_MAX_UPLOAD_BYTES")); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("JANUS_CHAT_MAX_UPLOAD_BYTES must be a positive integer")
+		}
+		c.ChatMaxUploadBytes = n
+	}
+	if raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			return fmt.Errorf("JANUS_STORAGE_MAX_OBJECT_BYTES must be a positive integer")
+		}
+		c.StorageMaxObjectBytes = v
+	}
+	switch c.StorageMode {
+	case "", "database":
+		return nil
+	case "s3":
+	default:
+		return fmt.Errorf("JANUS_STORAGE_MODE must be \"database\" or \"s3\"")
+	}
+	var missing []string
+	for name, v := range map[string]string{
+		"JANUS_S3_ENDPOINT": c.S3Endpoint, "JANUS_S3_BUCKET": c.S3Bucket,
+		"JANUS_S3_ACCESS_KEY_ID": c.S3AccessKeyID, "JANUS_S3_SECRET_ACCESS_KEY": c.S3SecretAccessKey,
+	} {
+		if v == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("JANUS_STORAGE_MODE=s3 requires %s", strings.Join(missing, ", "))
+	}
+	if c.S3CAFile != "" {
+		pemBytes, err := os.ReadFile(c.S3CAFile)
+		if err != nil {
+			return fmt.Errorf("JANUS_S3_CA_FILE points to %q which cannot be read: %v", c.S3CAFile, err)
+		}
+		if !x509.NewCertPool().AppendCertsFromPEM(pemBytes) {
+			return fmt.Errorf("JANUS_S3_CA_FILE file %q contains no valid PEM certificates", c.S3CAFile)
+		}
+		c.S3CABundle = string(pemBytes)
+	}
+	return nil
+}

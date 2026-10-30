@@ -100,11 +100,15 @@ func (s *Store) assertValidFallback(ctx context.Context, targetModelID, fallback
 	} else if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if _, err := s.ModelByID(ctx, fallbackModelID); err != nil {
+	fb, err := s.ModelByID(ctx, fallbackModelID)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return &ValidationError{Field: "fallback_model_id", Message: "that fallback model does not exist"}
 		}
 		return err
+	}
+	if guardClassifier(fb) {
+		return &ValidationError{Field: "fallback_model_id", Message: guardServeMessage(fb)}
 	}
 	return nil
 }
@@ -242,13 +246,31 @@ func (s *Store) assertValidTarget(ctx context.Context, targetModelID string) err
 	if strings.TrimSpace(targetModelID) == "" {
 		return &ValidationError{Field: "target_model_id", Message: "choose the model this alias should point at"}
 	}
-	if _, err := s.ModelByID(ctx, targetModelID); err != nil {
+	target, err := s.ModelByID(ctx, targetModelID)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return &ValidationError{Field: "target_model_id", Message: "that model does not exist"}
 		}
 		return err
 	}
+	if guardClassifier(target) {
+		return &ValidationError{Field: "target_model_id", Message: guardServeMessage(target)}
+	}
 	return nil
+}
+
+// guardClassifier reports a model that carries a Security Gateway
+// classifier role other than decision. Such a model only ever judges
+// traffic: it is never granted, so it must never become callable through
+// an alias, a fallback or a pool either. Decision models are the exception:
+// an alias of one serves the decision endpoints (the chat proxy refuses it).
+func guardClassifier(m *Model) bool {
+	return m != nil && m.ClassifierRole != "" && m.ClassifierRole != ClassifierRoleDecision
+}
+
+// guardServeMessage explains why a classifier cannot serve through an alias.
+func guardServeMessage(m *Model) string {
+	return fmt.Sprintf("%s is a Security Gateway classifier (%s); classifiers only check traffic and can never answer requests, so an alias, fallback or pool cannot use it", m.PublicName(), m.ClassifierRole)
 }
 
 // CreateManagedModel defines a new alias pointing at a real catalog model.
@@ -401,6 +423,9 @@ func (s *Store) decorateManagedModel(ctx context.Context, m *ManagedModel) (*Man
 	if m.Kind == "" {
 		m.Kind = ManagedKindAlias
 	}
+	if m.Kind == ManagedKindRouter {
+		return s.decorateRouterModel(ctx, m)
+	}
 	target, err := s.ModelByID(ctx, m.TargetModelID)
 	if errors.Is(err, ErrNotFound) {
 		m.Broken = true
@@ -437,6 +462,82 @@ func (s *Store) decorateManagedModel(ctx context.Context, m *ManagedModel) (*Man
 	if err := s.decorateManagedModelFallback(ctx, m); err != nil {
 		return nil, err
 	}
+	return m, nil
+}
+
+// routerDefaultAlias loads the alias or pool a router's default points at,
+// or nil when the default is a catalog model. A default that is itself a
+// router (refused on save) is reported as an error rather than followed, so
+// two routers can never decorate each other in a loop.
+func (s *Store) routerDefaultAlias(ctx context.Context, id string) (*ManagedModel, error) {
+	raw, err := scanManagedModel(s.queryRow(ctx, `SELECT `+managedModelColumns+` FROM managed_model WHERE id = ?`, id).Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load router default: %w", err)
+	}
+	if raw.Kind == ManagedKindRouter {
+		return nil, errRouterDefaultIsRouter
+	}
+	return s.decorateManagedModel(ctx, raw)
+}
+
+var errRouterDefaultIsRouter = errors.New("the default points at another router")
+
+// decorateRouterModel judges a router by what its default serves TODAY. The
+// router row keeps a snapshot of its default's target (target_model_id and
+// one pool member) for older readers, but an alias or pool default can be
+// repointed, lose its target to its fallback, or keep serving from other
+// pool members after the snapshot was taken: the router serves whenever
+// calling that alias would serve.
+func (s *Store) decorateRouterModel(ctx context.Context, m *ManagedModel) (*ManagedModel, error) {
+	defaultID := m.TargetModelID
+	if _, cfg, err := s.RouterConfigFor(ctx, m.ID); err == nil && cfg.Default.ModelID != "" {
+		defaultID = cfg.Default.ModelID
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	alias, err := s.routerDefaultAlias(ctx, defaultID)
+	switch {
+	case errors.Is(err, errRouterDefaultIsRouter):
+		m.Broken, m.BrokenReason = true, "its default model points at another router"
+	case err != nil:
+		return nil, err
+	case alias != nil:
+		m.TargetName, m.TargetDisplayName, m.TargetPublicName = alias.TargetName, alias.TargetDisplayName, alias.TargetPublicName
+		m.TargetStatus, m.TargetUpstreamID, m.TargetUpstreamName = alias.TargetStatus, alias.TargetUpstreamID, alias.TargetUpstreamName
+		m.Modalities, m.ContextWindow = alias.Modalities, alias.ContextWindow
+		switch {
+		case alias.Status != ManagedModelEnabled:
+			m.Broken, m.BrokenReason = true, fmt.Sprintf("its default model %q is disabled", alias.Name)
+		case !alias.Servable:
+			reason := alias.BrokenReason
+			if alias.FallbackBroken && alias.FallbackBrokenReason != "" {
+				reason += "; " + alias.FallbackBrokenReason
+			}
+			if reason == "" {
+				reason = "it cannot serve"
+			}
+			m.Broken, m.BrokenReason = true, fmt.Sprintf("its default model %q cannot serve: %s", alias.Name, reason)
+		}
+	default:
+		target, err := s.ModelByID(ctx, defaultID)
+		if errors.Is(err, ErrNotFound) {
+			m.Broken, m.BrokenReason = true, "its default model no longer exists in the catalog"
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		m.TargetName, m.TargetDisplayName, m.TargetPublicName = target.Name, target.DisplayName, target.PublicName()
+		m.TargetStatus, m.TargetUpstreamID, m.TargetUpstreamName = target.Status, target.UpstreamID, target.UpstreamName
+		m.Modalities, m.ContextWindow = target.Modalities, target.ContextWindow
+		if target.Status != ModelEnabled {
+			m.Broken, m.BrokenReason = true, fmt.Sprintf("its default model %q is %s, so requests to this router will fail", target.PublicName(), target.Status)
+		}
+	}
+	m.Servable = m.Status == ManagedModelEnabled && !m.Broken
 	return m, nil
 }
 

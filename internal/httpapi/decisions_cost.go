@@ -108,11 +108,12 @@ func (s *Server) meterDecisionCall(model *store.Model, upstream *store.Upstream)
 	return func(ctx context.Context, elapsed time.Duration, inputChars int, res classify.Result, callErr error) {
 		event := &store.UsageEvent{
 			ModelID: model.ID, ModelName: model.PublicName(), UpstreamID: upstream.ID,
-			EndpointPath: "/internal/secgw/classify", HTTPMethod: http.MethodPost, Modality: "classification",
+			HTTPMethod: http.MethodPost, Modality: "classification",
 			RequestBytes: int64(inputChars), LatencyMs: int(elapsed.Milliseconds()), UpstreamMs: int(elapsed.Milliseconds()),
-			ClientApp: "janus-security-gateway", RequestID: RequestIDFrom(ctx), HTTPStatus: http.StatusOK,
+			RequestID: RequestIDFrom(ctx), HTTPStatus: http.StatusOK,
 			AccountingMode: usage.AccountingNone,
 		}
+		event.ClientApp, event.EndpointPath = classifierCallOwner(ctx)
 		if callErr != nil {
 			event.HTTPStatus = http.StatusBadGateway
 			event.ErrorCode = CodeUpstreamDown
@@ -144,4 +145,16 @@ func (s *Server) decisionModelForWire(ctx context.Context, upstream *store.Upstr
 		}
 	}
 	return nil, nil
+}
+
+// classifierCallOwner names who a classifier call Janus made for itself is
+// billed to, from the feature label on its context: Auto-routing's own
+// decision calls are Auto-routing cost; every other call (a guard, or a
+// guard call that a routing question rode along on) is Security Gateway
+// cost.
+func classifierCallOwner(ctx context.Context) (clientApp, endpointPath string) {
+	if classify.FeatureFrom(ctx) == routingFeature {
+		return store.InternalRoutingClientApp, "/internal/routing/classify"
+	}
+	return store.InternalClientApp, "/internal/secgw/classify"
 }

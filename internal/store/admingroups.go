@@ -87,10 +87,10 @@ func (s *Store) AddAdminGroup(ctx context.Context, name, actorUserID string) (*A
 
 // RemoveAdminGroup stops promoting members of a group.
 //
-// It deliberately does NOT demote anyone: a user who was promoted through this
-// group keeps whatever role they hold until it is changed explicitly, and a
-// user who also holds a bootstrap or per-user grant is unaffected entirely.
-// Removing the broadest layer must never silently revoke the narrower ones.
+// It never changes anyone's Role: a user who also holds a bootstrap or
+// per-user grant is unaffected entirely. The transient admin_via_group signal
+// is re-evaluated by the caller (RevokeStaleAdminViaGroup), so members who
+// were administrators only through this group lose it at once.
 func (s *Store) RemoveAdminGroup(ctx context.Context, name string) error {
 	normalized := strings.ToLower(strings.TrimSpace(name))
 	if err := s.exec(ctx, `DELETE FROM admin_group WHERE name = ?`, normalized); err != nil {
@@ -111,4 +111,38 @@ func (s *Store) AdminGroupNames(ctx context.Context) (map[string]struct{}, error
 		out[g.Name] = struct{}{}
 	}
 	return out, nil
+}
+
+// RevokeStaleAdminViaGroup clears admin_via_group for every user none of whose groups is still an administrator group (adminGroups:
+// lowercased names from every source). It only ever removes the signal;
+// promotion still happens at sign-in. Every group the user belongs to counts
+// (directory, SCIM or in-app), which errs on the side of keeping access.
+// Returns the users whose admin_via_group was cleared.
+func (s *Store) RevokeStaleAdminViaGroup(ctx context.Context, adminGroups map[string]struct{}) ([]string, error) {
+	revoked := []string{}
+	candidates, err := s.teamStringIDs(ctx, `SELECT id FROM app_user WHERE admin_via_group = ? ORDER BY id`, true)
+	if err != nil {
+		return revoked, err
+	}
+	for _, id := range candidates {
+		names, err := s.GroupNamesForUser(ctx, id)
+		if err != nil {
+			return revoked, err
+		}
+		keep := false
+		for _, n := range names {
+			if _, ok := adminGroups[strings.ToLower(strings.TrimSpace(n))]; ok {
+				keep = true
+				break
+			}
+		}
+		if keep {
+			continue
+		}
+		if err := s.exec(ctx, `UPDATE app_user SET admin_via_group = ? WHERE id = ?`, false, id); err != nil {
+			return revoked, err
+		}
+		revoked = append(revoked, id)
+	}
+	return revoked, nil
 }

@@ -423,17 +423,19 @@ func (s *Server) mountAdminLocalAuthRoutes(ar chi.Router) {
 	ar.Delete("/admin/users/{id}/totp", s.handleAdminResetTOTP)
 
 	// Admin-configured OIDC providers. Listing is always allowed (the card
-	// shows the upsell); everything that changes state needs multi_oidc.
+	// shows the upsell); creating, testing and editing need multi_oidc.
+	// Deleting is never gated, so a provider can be removed after a downgrade.
 	ar.Get("/admin/identity-providers", s.handleAdminListIdentityProviders)
 	ar.Post("/admin/identity-providers", s.gateFeature("multi_oidc", s.handleAdminCreateIdentityProvider))
 	ar.Post("/admin/identity-providers/test", s.gateFeature("multi_oidc", s.handleAdminTestIdentityProvider))
 	ar.Put("/admin/identity-providers/{id}", s.gateFeature("multi_oidc", s.handleAdminUpdateIdentityProvider))
-	ar.Delete("/admin/identity-providers/{id}", s.gateFeature("multi_oidc", s.handleAdminDeleteIdentityProvider))
+	ar.Delete("/admin/identity-providers/{id}", s.handleAdminDeleteIdentityProvider)
 
-	// LDAP directory (Business: ldap). GET always answers so the card can upsell.
+	// LDAP directory (Business: ldap). GET always answers so the card can upsell;
+	// DELETE is never gated, so the directory can be removed after a downgrade.
 	ar.Get("/admin/directory", s.handleAdminGetDirectory)
 	ar.Put("/admin/directory", s.gateFeature("ldap", s.handleAdminPutDirectory))
-	ar.Delete("/admin/directory", s.gateFeature("ldap", s.handleAdminDeleteDirectory))
+	ar.Delete("/admin/directory", s.handleAdminDeleteDirectory)
 	ar.Post("/admin/directory/test", s.gateFeature("ldap", s.handleAdminTestDirectory))
 }
 

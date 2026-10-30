@@ -251,6 +251,13 @@ func (s *Store) ListAllSubscriptions(ctx context.Context) ([]*SubscriptionConnec
 	return s.listSubscriptions(ctx, `WHERE 1=1`)
 }
 
+// ListCheckableSubscriptions returns the connections the background check
+// may renew: only those of active accounts. A disabled or deleted person's
+// vendor tokens are never refreshed.
+func (s *Store) ListCheckableSubscriptions(ctx context.Context) ([]*SubscriptionConnection, error) {
+	return s.listSubscriptions(ctx, `WHERE u.is_active = 1`)
+}
+
 // SubscriptionByID loads one connection.
 func (s *Store) SubscriptionByID(ctx context.Context, id string) (*SubscriptionConnection, error) {
 	c, err := scanSubscription(s.queryRow(ctx, `SELECT `+subscriptionColumns+subscriptionFrom+`WHERE c.id = ?`, id).Scan)
@@ -365,6 +372,22 @@ func (s *Store) ExpireSubscriptionAccess(ctx context.Context, id string) error {
 func (s *Store) MarkSubscriptionReauth(ctx context.Context, id, reason string) error {
 	return s.exec(ctx, `UPDATE subscription_connection SET status = ?, last_error = ?, updated_at = ? WHERE id = ?`,
 		SubscriptionReauthRequired, reason, FormatTime(nowUTC()), id)
+}
+
+// MarkSubscriptionReauthOnce is MarkSubscriptionReauth that reports whether
+// this call moved the connection out of another state. The transition is
+// one conditional UPDATE, so of several replicas noticing the same expired
+// sign-in exactly one sees true (and tells the owner).
+func (s *Store) MarkSubscriptionReauthOnce(ctx context.Context, id, reason string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE subscription_connection SET status = ?, last_error = ?, updated_at = ? WHERE id = ? AND status <> ?`),
+		SubscriptionReauthRequired, reason, FormatTime(nowUTC()), id, SubscriptionReauthRequired)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return true, nil
+	}
+	return false, s.MarkSubscriptionReauth(ctx, id, reason)
 }
 
 // SetSubscriptionModels replaces the cached model list and the selection

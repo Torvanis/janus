@@ -56,7 +56,7 @@ export function TeamAdminSettings({
         }}
         onConfirm={() => remove.mutate()}
         title={`Delete ${team.name}?`}
-        consequence={`The team and its ${team.member_count} memberships will be removed. This cannot be undone.`}
+        consequence={`The team and its ${team.member_count} memberships will be removed. API keys, Chat conversations and “Working under” selections that use this team switch to personal context, and their owners are notified. This cannot be undone.`}
         confirmLabel="Delete team"
         busy={remove.isPending}
       />

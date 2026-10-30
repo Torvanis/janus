@@ -32,6 +32,11 @@ type fakeXAI struct {
 	revoked       []string
 	inferenceAuth []string
 	inferenceBody []string
+	// streamType overrides the streaming Content-Type (default
+	// text/event-stream); the ChatGPT backend has sent text/plain.
+	streamType string
+	// emptyStream streams a reply with no text at all.
+	emptyStream bool
 }
 
 func newFakeXAI(t *testing.T) *fakeXAI {
@@ -111,6 +116,22 @@ func (f *fakeXAI) serve(w http.ResponseWriter, r *http.Request) {
 		f.inferenceBody = append(f.inferenceBody, string(body))
 		if bearer != f.liveAccess {
 			writeJSON(401, map[string]any{"error": "invalid_token"})
+			return
+		}
+		if strings.Contains(string(body), `"stream":true`) {
+			// Streaming (Janus Chat always streams): one content frame,
+			// then usage, then [DONE], as xAI sends it.
+			ct := "text/event-stream"
+			if f.streamType != "" {
+				ct = f.streamType
+			}
+			w.Header().Set("Content-Type", ct)
+			w.WriteHeader(200)
+			if !f.emptyStream {
+				_, _ = io.WriteString(w, `data: {"id":"x-1","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`+"\n\n")
+			}
+			_, _ = io.WriteString(w, `data: {"id":"x-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":5,"cost_in_usd_ticks":123456789}}`+"\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 			return
 		}
 		// xAI reports a list-price cost; for a personal plan it must not

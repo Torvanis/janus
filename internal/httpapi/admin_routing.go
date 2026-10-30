@@ -621,7 +621,11 @@ func (s *Server) routingTestCategories(ctx context.Context) ([]routing.Category,
 
 func (s *Server) handleTestRouting(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Text              string `json:"text"`
+		Text string `json:"text"`
+		// History is optional earlier conversation ("User: ..." /
+		// "Assistant: ..." lines), so a follow-up can be tried the way a
+		// live request is classified.
+		History           string `json:"history"`
 		ClassifierModelID string `json:"classifier_model_id"`
 		RouterID          string `json:"router_id"`
 		// Config tests an unsaved router from the builder.
@@ -688,7 +692,7 @@ func (s *Server) handleTestRouting(w http.ResponseWriter, r *http.Request) {
 	cctx, cancel := context.WithTimeout(classify.WithFeature(ctx, routingFeature, "test"), 30*time.Second)
 	defer cancel()
 	started := time.Now()
-	res, err := cl.Decide(cctx, classify.TrimText(text, settings.MaxChars), questions)
+	res, err := cl.Decide(cctx, classify.WithContext(classify.ParseHistory(body.History), text, settings.MaxChars), questions)
 	out.LatencyMs = time.Since(started).Milliseconds()
 	if err != nil {
 		out.Status, out.Error = "error", err.Error()

@@ -845,6 +845,23 @@ var migrations = []migration{
 	servedManagedModelMigration,
 	decisionStaleStatusMigration,
 	secgwCategoryMigration,
+	chatMigration,
+	chatSearchMigration,
+	blobStorageMigration,
+	chatAttachmentMigration,
+	secgwFamilyMigration,
+	chatSettingsMigration,
+	chatPromptMigration,
+	chatShareMigration,
+	chatAdminMigration,
+	chatToolsMigration,
+	chatRound10Migration,
+	usageRequestIndexMigration,
+	chatModelDefaultsMigration,
+	childSafetyMigration,
+	classificationContextMigration,
+	usageChatMessageMigration,
+	userDeleteHoldMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serialises
@@ -859,6 +876,34 @@ const migrationAdvisoryLockKey int64 = 0x6a616e75735f6d69 // "janus_mi"
 // one at a time and the losers find them already recorded in the ledger.
 // SQLite deployments are single-process by definition (embedded file
 // database), so the file lock suffices there.
+// renamedMigrations maps a name a release once applied under to the name
+// the same migration has now. 1.2.0 shipped the money widening as 0011;
+// it became 0013 and 0011 went to admin_via_group. Without the rename a
+// 1.2.0 database would re-run 0013 (duplicate columns) and never run the
+// new 0011.
+var renamedMigrations = map[string]string{
+	"0011_bigint_money_cache_write_rates": "0013_bigint_money_cache_write_rates",
+}
+
+// renameMigrations rewrites old names in the ledger (and in applied).
+func (s *Store) renameMigrations(ctx context.Context, applied map[string]bool) error {
+	for old, now := range renamedMigrations {
+		if !applied[old] {
+			continue
+		}
+		if !applied[now] {
+			if _, err := s.db.ExecContext(ctx, s.rebind(`UPDATE schema_migration SET name = ? WHERE name = ?`), now, old); err != nil {
+				return fmt.Errorf("rename migration %s: %w", old, err)
+			}
+			applied[now] = true
+		} else if _, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM schema_migration WHERE name = ?`), old); err != nil {
+			return fmt.Errorf("drop renamed migration %s: %w", old, err)
+		}
+		delete(applied, old)
+	}
+	return nil
+}
+
 func (s *Store) Migrate(ctx context.Context) error {
 	if s.dialect == DialectPostgres {
 		// The lock is session-scoped, so it must be taken on one pinned
@@ -896,6 +941,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate migration ledger: %w", err)
+	}
+	if err := s.renameMigrations(ctx, applied); err != nil {
+		return err
 	}
 
 	for _, m := range migrations {

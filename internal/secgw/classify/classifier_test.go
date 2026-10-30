@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dec "github.com/torvanis/janus/internal/classify"
 )
 
 func TestChunkOverlapCoversBoundaries(t *testing.T) {
@@ -139,7 +141,7 @@ func TestTextClassificationParsesBatchedAndSingleAndMapsLabels(t *testing.T) {
 
 	var metered int
 	c, err := New(ProtocolTextClassification, Upstream{ModelName: "pg", BaseURL: srv.URL + "/", APIKey: "k", Client: srv.Client(),
-		Meter: func(_ context.Context, _ time.Duration, chars int, err error) { metered += chars }})
+		Meter: func(_ context.Context, _ time.Duration, chars int, _ dec.Usage, err error) { metered += chars }})
 	if err != nil {
 		t.Fatal(err)
 	}

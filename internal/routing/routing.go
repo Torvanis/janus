@@ -173,6 +173,47 @@ func Questions(cfg store.RouterConfig, cats []Category, codeStyle bool) []classi
 	return qs
 }
 
+// ThinkingScales reports whether a route's thinking (routeID, or the
+// default) follows the request's difficulty: a sticky conversation keeps its
+// route but still has each turn's difficulty judged for it.
+func ThinkingScales(cfg store.RouterConfig, routeID string) bool {
+	if routeID == DefaultRouteID {
+		return cfg.Default.Thinking == store.ThinkingScale
+	}
+	for _, r := range cfg.Routes {
+		if r.ID == routeID {
+			return r.Thinking == store.ThinkingScale
+		}
+	}
+	return false
+}
+
+// DifficultyQuestions are the questions a sticky turn asks: difficulty
+// only (the route is kept), with the coding scale for a coding
+// conversation when the router uses it.
+func DifficultyQuestions(category string, codeStyle bool) []classify.Question {
+	qs := []classify.Question{DifficultyQuestion()}
+	if codeStyle && category == "coding" {
+		qs = append(qs, CodeDifficultyQuestion())
+	}
+	return qs
+}
+
+// InterpretDifficulty reads a sticky turn's difficulty, the conversation's
+// remembered category deciding which scale counts (0 = not answered).
+func InterpretDifficulty(res classify.Result, category string) float64 {
+	d := 0.0
+	if a, ok := res.Answers[QuestionDifficulty]; ok {
+		d = expectedLevel(a)
+	}
+	if a, ok := res.Answers[QuestionCodeDifficulty]; ok && category == "coding" {
+		if c := expectedLevel(a); c > 0 {
+			d = c
+		}
+	}
+	return d
+}
+
 // Answer is what the classifier said, reduced to what routing uses.
 type Answer struct {
 	// Category is the chosen category slug ("none" or "" when not asked).
@@ -249,6 +290,10 @@ type Context struct {
 	// OverQuota reports whether the caller is over a quota on a route's
 	// model (consulted only for routes with SkipWhenOverQuota).
 	OverQuota func(modelID string) bool
+	// Blocked reports whether the caller may not use a route's model at
+	// all (Child Safety blocks it for their age range). A blocked route is
+	// never chosen, whatever its settings.
+	Blocked func(modelID string) bool
 }
 
 // Step is one line of the decision trace the admin's Try box shows.
@@ -381,6 +426,9 @@ func servesRequest(c Candidate, rc Context) (bool, string) {
 	if c.ContextWindow > 0 && rc.EstimatedTokens > c.ContextWindow*9/10 {
 		return false, "request (~" + strconv.FormatInt(rc.EstimatedTokens, 10) + " tokens) is too large for its " + strconv.FormatInt(c.ContextWindow, 10) + "-token context window"
 	}
+	if rc.Blocked != nil && rc.Blocked(r.ModelID) {
+		return false, "caller may not use this route's model"
+	}
 	if r.RestrictToGranted && rc.Granted != nil && !rc.Granted(r.ModelID) {
 		return false, "caller is not granted this route's model"
 	}
@@ -388,6 +436,29 @@ func servesRequest(c Candidate, rc Context) (bool, string) {
 		return false, "caller is over a quota on this route's model"
 	}
 	return true, ""
+}
+
+// AvoidBlockedDefault replaces a decision that serves the default with the
+// first route that may serve this request when the caller may not use the
+// default (rc.Blocked). It returns d unchanged when the default is allowed
+// or no route is: then the request is refused for the default's model.
+func AvoidBlockedDefault(cfg store.RouterConfig, cands []Candidate, d Decision, difficulty float64, rc Context) Decision {
+	if !d.IsDefault() || rc.Blocked == nil || !rc.Blocked(cfg.Default.ModelID) {
+		return d
+	}
+	trace := append(d.Trace[:len(d.Trace):len(d.Trace)], Step{RouteID: DefaultRouteID, Index: -1, Outcome: "skipped", Detail: "caller may not use the default's model"})
+	for i, c := range cands {
+		if !c.Servable {
+			continue
+		}
+		if ok, _ := servesRequest(c, rc); !ok {
+			continue
+		}
+		trace = append(trace, Step{RouteID: c.Route.ID, Index: i, Outcome: "matched", Detail: "first route the caller may use"})
+		return Decision{RouteID: c.Route.ID, Index: i, ModelID: c.Route.ModelID, Thinking: Thinking(c.Route.Thinking, difficulty),
+			Reason: d.Reason, Trace: trace}
+	}
+	return d
 }
 
 // ByRouteID returns the decision for a remembered route (stickiness). A

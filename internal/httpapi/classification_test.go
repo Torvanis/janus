@@ -152,8 +152,12 @@ func TestAsyncClassificationAddsNoLatencyAndStoresLabelsOnly(t *testing.T) {
 		t.Fatalf("one 400 ms call must be timed and metered: %+v", r)
 	}
 	seen := f.seen()
-	if len(seen) != 1 || seen[0] != "why does the borrow checker reject this" {
-		t.Fatalf("default scope is the last user turn without the system prompt, saw %q", seen)
+	// The default is the latest message with the earlier conversation as
+	// context (a follow-up is labelled by what the conversation is about),
+	// still without the system prompt.
+	want := "Earlier in this conversation (context only):\nUser: earlier turn\nAssistant: ok\n\nThe latest message, which is the request to judge:\nUser: why does the borrow checker reject this"
+	if len(seen) != 1 || seen[0] != want {
+		t.Fatalf("default scope is the latest message with its conversation, without the system prompt, saw %q", seen)
 	}
 	for _, s := range seen {
 		if strings.Contains(s, "SYSTEM-SECRET") {

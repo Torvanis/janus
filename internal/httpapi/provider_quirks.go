@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/torvanis/janus/internal/adapter"
+	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/subscription"
 )
 
@@ -221,7 +223,7 @@ func (s *Server) learnCatalogRefusal(modelID, adapterType string, body, raw []by
 // response, the adapter that must translate it and the request it
 // answers, or ok=false when the retry could not be sent (the original
 // refusal is then relayed).
-func (s *Server) resendFitted(ctx context.Context, r *http.Request, base adapter.Adapter, up adapter.Upstream, req *adapter.Request, retry quirkRetry) (*http.Response, adapter.Adapter, *adapter.Request, bool) {
+func (s *Server) resendFitted(ctx context.Context, r *http.Request, base adapter.Adapter, up adapter.Upstream, req *adapter.Request, retry quirkRetry, event *store.UsageEvent) (*http.Response, adapter.Adapter, *adapter.Request, bool) {
 	a := base
 	if retry.viaResponses {
 		a = adapter.ResponsesFallback()
@@ -241,11 +243,47 @@ func (s *Server) resendFitted(ctx context.Context, r *http.Request, base adapter
 	}
 	out.Header = prepared.Header
 	out.ContentLength = int64(len(prepared.Body))
-	resp, err := s.upstreamHTTPClient(ctx).Do(out)
+	// The same client, timeouts and redirect policy as the first send: a
+	// fitted resend of a streamed reply is bounded by silence, not length.
+	resp, err := s.sendUpstream(ctx, out, prepared, event, next.Body)
 	if err != nil {
 		return nil, nil, nil, false
 	}
 	return resp, a, &next, true
+}
+
+// sendUpstream sends one proxied request (the first attempt or a fitted
+// resend) with the client its kind of request needs: the long-wait client
+// for media and for non-streamed provider-run tools, the adapter's redirect
+// policy, and the streaming idle timer instead of the total timeout.
+func (s *Server) sendUpstream(ctx context.Context, out *http.Request, prepared *adapter.Prepared, event *store.UsageEvent, body []byte) (*http.Response, error) {
+	clientModality := event.Modality
+	if !event.Streaming && usesHostedTools(body) {
+		// Provider-run tools (web/X search, code interpreter) work
+		// before the first byte of a non-streamed reply: 30 s of
+		// searching is normal, so wait like a media request does.
+		clientModality = adapter.ModalityImage
+	}
+	client := s.upstreamHTTPClientFor(ctx, clientModality)
+	if prepared != nil && prepared.OnRedirect != nil {
+		// Same pooled transport; only the redirect policy differs.
+		fix := prepared.OnRedirect
+		c := *client
+		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			// Only follow the provider's own host with the credential.
+			if req.URL.Host != via[0].URL.Host {
+				req.Header.Del("Authorization")
+				return nil
+			}
+			fix(req.Header)
+			return nil
+		}
+		client = &c
+	}
+	return doUpstream(client, out, event.Streaming, s.effectiveUpstreamTimeouts(ctx).Total)
 }
 
 // readRefusal reads a 400 body (bounded) and puts it back for relaying.

@@ -251,7 +251,7 @@ func (s *Server) buildBenchRig(ctx context.Context, cfg benchmarkConfig) (*bench
 			sb.Style, plan.Style = cfg.Style, cfg.Style
 		}
 		rig.plan = plan
-		rig.ride = plan.Key != "" && plan.Style == classify.StyleCombined && plan.TextScope == classify.ScopeLastUser && !plan.IncludeSystem
+		rig.ride = plan.Key != "" && plan.Style == classify.StyleCombined && (plan.TextScope == classify.ScopeLastUser || plan.TextScope == classify.ScopeContext) && !plan.IncludeSystem
 		how := "one flat question (category and subcategory together)"
 		if !plan.Flat() {
 			how = "category, then subcategory"

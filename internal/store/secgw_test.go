@@ -254,6 +254,46 @@ func TestSecgwViolationsHashOnlyUnlessCaptured(t *testing.T) {
 	}
 }
 
+// Why a row has no text: content_safety text CAN be captured (when its
+// policy keeps text), so it is "capture off", not "never stored"; Child
+// Safety never keeps what a child wrote.
+func TestSecgwViolationCaptureDisabledByKind(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	on, off := true, false
+	keeps := &SecgwPolicy{Name: "keeps", Enabled: true, Capture: SecgwCaptureConfig{PromptInjectionBodies: &on},
+		Checks: []SecgwCheck{{Kind: SecgwCheckSecrets, Enabled: true, Mode: SecgwModeObserve}}}
+	drops := &SecgwPolicy{Name: "drops", Enabled: true, Capture: SecgwCaptureConfig{PromptInjectionBodies: &off},
+		Checks: []SecgwCheck{{Kind: SecgwCheckSecrets, Enabled: true, Mode: SecgwModeObserve}}}
+	for _, p := range []*SecgwPolicy{keeps, drops} {
+		if err := s.CreateSecgwPolicy(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := func(req, kind, policy string) *SecgwViolation {
+		return &SecgwViolation{RequestID: req, Kind: kind, RuleID: "r", Severity: "high", Direction: SecgwDirectionIngress,
+			Action: SecgwActionObserved, MatchHash: "h", PolicyID: policy}
+	}
+	if err := s.InsertSecgwViolations(ctx, []*SecgwViolation{
+		row("cs-keeps", string(SecgwCheckContentSafety), keeps.ID),
+		row("cs-drops", string(SecgwCheckContentSafety), drops.ID),
+		row("secret-keeps", string(SecgwCheckSecrets), keeps.ID),
+		row("child", string(SecgwCheckContentSafety), SecgwFamilyPolicyID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListSecgwViolations(ctx, SecgwViolationFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"cs-keeps": false, "cs-drops": true, "secret-keeps": true, "child": true}
+	for _, v := range got {
+		if v.CaptureDisabled != want[v.RequestID] {
+			t.Errorf("%s: capture_disabled = %v, want %v", v.RequestID, v.CaptureDisabled, want[v.RequestID])
+		}
+	}
+}
+
 func TestSetModelClassifierRoleExcludesFromServableAndRefusesGranted(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

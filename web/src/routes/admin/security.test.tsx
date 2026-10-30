@@ -21,7 +21,7 @@ import type {
   SecurityCategoriesDoc,
   SecurityCategory,
 } from '../../lib/types';
-import { categoryCalls, parentalControlsTemplate } from '../../lib/securityTemplates';
+import { categoryCalls } from '../../lib/securityTemplates';
 import { ToastProvider } from '../../components/ui';
 import { SecurityPage } from './Security';
 
@@ -715,20 +715,16 @@ describe('security — bindings (upstream provider rung)', () => {
 });
 
 describe('security — categories', () => {
-  it('is a findable tab that lists the three groups by name, with the first sentence and who uses each', async () => {
+  it('is a findable tab that lists safety and custom groups by name, with the first sentence and who uses each', async () => {
     renderPage('/admin/security/categories');
     expect(screen.getByRole('tab', { name: 'Categories' }).getAttribute('aria-selected')).toBe('true');
-    const table = (await screen.findByText('Homework done for them')).closest('table')!;
-    for (const group of ['Safety', 'Family', 'Your categories']) {
+    const table = (await screen.findByText('Crypto scams')).closest('table')!;
+    for (const group of ['Safety', 'Your categories']) {
       expect(within(table).getByText(group)).toBeTruthy();
     }
-    const row = within(table).getByText('Homework done for them').closest('tr')!;
-    expect(within(row).getByText('Homework done for them requests.')).toBeTruthy();
-    expect(within(row).getByText('60%')).toBeTruthy();
-    expect(within(row).getByText('Kids')).toBeTruthy();
-    // Built-ins reset, custom ones delete.
-    expect(within(row).getByRole('button', { name: 'Reset Homework done for them' })).toBeTruthy();
-    expect(within(row).queryByRole('button', { name: 'Delete Homework done for them' })).toBeNull();
+    // The Family categories belong to Child Safety now, not this tab.
+    expect(within(table).queryByText('Family')).toBeNull();
+    expect(within(table).queryByText('Homework done for them')).toBeNull();
     const custom = within(table).getByText('Crypto scams').closest('tr')!;
     expect(within(custom).getByText('Follows Usage insights: Finance')).toBeTruthy();
     expect(within(custom).getByRole('button', { name: 'Delete Crypto scams' })).toBeTruthy();
@@ -855,7 +851,9 @@ describe('security — content safety method', () => {
     expect(within(drawer).getByRole('button', { name: 'Violent crimes' }).getAttribute('aria-pressed')).toBe('true');
     expect(within(drawer).getByRole('button', { name: 'Elections' }).getAttribute('aria-pressed')).toBe('false');
     expect(within(drawer).getByText('One classifier call per request.')).toBeTruthy();
-    await user.click(within(drawer).getByRole('button', { name: 'Feeling low or unsafe' }));
+    // Family categories are Child Safety's now: not offered to a policy.
+    expect(within(drawer).queryByRole('button', { name: 'Feeling low or unsafe' })).toBeNull();
+    await user.click(within(drawer).getByRole('button', { name: 'Crypto scams' }));
     await user.selectOptions(within(drawer).getByLabelText('Ask', { selector: 'select' }), 'separately');
     expect(within(drawer).getByText('6 classifier calls per request, sent in parallel.')).toBeTruthy();
     await user.click(within(drawer).getByRole('button', { name: 'Create policy' }));
@@ -874,7 +872,7 @@ describe('security — content safety method', () => {
           'child_sexual_exploitation',
           'indiscriminate_weapons',
           'self_harm',
-          'feeling_low',
+          'crypto_scams',
         ],
       },
     });
@@ -951,44 +949,15 @@ describe('security — content safety method', () => {
     expect(cs.options).toMatchObject({ method: 'categories' });
   });
 
-  it('opens the Parental controls template in the editor with Family and critical categories', async () => {
-    routeGets({ '/api/v1/admin/secgw/classifiers': { classifiers: [jev], protocols: [] } });
-    mocked.post.mockResolvedValue({ policy });
-    renderPage('/admin/security/policies');
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Parental controls template' }));
-    const drawer = await screen.findByRole('dialog');
-    expect((within(drawer).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Parental controls');
-    await user.click(within(drawer).getByRole('button', { name: 'Create policy' }));
-    await waitFor(() => expect(mocked.post).toHaveBeenCalledTimes(1));
-    const [path, body] = mocked.post.mock.calls[0] as [string, Record<string, unknown>];
-    expect(path).toBe('/api/v1/admin/secgw/policies');
-    const checks = body.checks as Array<Record<string, unknown>>;
-    const cs = checks.find((c) => c.kind === 'content_safety')!;
-    // No license in this fixture's session: the editor offers enforcement
-    // (the API is the authority), so the template blocks.
-    expect(cs).toMatchObject({ enabled: true, mode: 'block', direction: 'both', classifier_model_id: 'm-jev' });
-    expect((cs.options as { safety: string[] }).safety).toEqual([
-      'homework_shortcut',
-      'feeling_low',
-      'violent_crimes',
-      'sex_crimes',
-      'child_sexual_exploitation',
-      'indiscriminate_weapons',
-      'self_harm',
-    ]);
-    expect(checks.find((c) => c.kind === 'secrets')).toMatchObject({ enabled: true });
-    expect(checks.find((c) => c.kind === 'pii')).toMatchObject({
-      enabled: true,
-      options: { classes: ['email', 'phone', 'pan'] },
-    });
-  });
-
-  it('builds the template to block when enforcement is licensed', () => {
-    const tpl = parentalControlsTemplate({ name: 'P', description: '', categories: categoriesDoc.categories, enforce: true });
-    expect(tpl.checks.map((c) => `${c.kind}:${c.mode}`)).toEqual(['content_safety:block', 'secrets:block', 'pii:redact']);
+  it('counts classifier calls per categories check', () => {
     expect(categoryCalls(26, 'together')).toBe(2);
     expect(categoryCalls(3, 'separately')).toBe(3);
+  });
+
+  it('offers no Parental controls template: children are under Child Safety', async () => {
+    renderPage('/admin/security/policies');
+    expect(await screen.findByRole('button', { name: /New policy/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Parental controls template' })).toBeNull();
   });
 });
 

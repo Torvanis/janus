@@ -241,3 +241,40 @@ func TestClassificationErrorIsStoredAsValidUTF8(t *testing.T) {
 		t.Fatalf("stored error len=%d valid=%v", len(r.Error), utf8.ValidString(r.Error))
 	}
 }
+
+// Usage insights moves to the latest message with its conversation as
+// context: a saved last_user (the old default, which the settings form
+// saved with every field) becomes context; a deliberate choice of every
+// user message or the whole conversation is left alone.
+func TestClassificationContextMigration(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if got := DefaultClassificationSettings().TextScope; got != ClassificationScopeContext {
+		t.Fatalf("default scope %q", got)
+	}
+	for _, tc := range []struct{ saved, want string }{
+		{ClassificationScopeLastUser, ClassificationScopeContext},
+		{ClassificationScopeAllUser, ClassificationScopeAllUser},
+		{ClassificationScopeAll, ClassificationScopeAll},
+	} {
+		c := DefaultClassificationSettings()
+		c.TextScope = tc.saved
+		if err := s.SetClassificationSettings(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range classificationContextMigration.stmt {
+			if _, err := s.DB().ExecContext(ctx, stmt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.ClassificationSettings(ctx)
+		if err != nil || got.TextScope != tc.want {
+			t.Fatalf("saved %s: got %q err %v", tc.saved, got.TextScope, err)
+		}
+	}
+	// The new scope round-trips through validation.
+	c := DefaultClassificationSettings()
+	if err := s.SetClassificationSettings(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+}

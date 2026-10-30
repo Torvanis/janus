@@ -19,6 +19,7 @@ import (
 
 	"github.com/torvanis/janus/internal/alerting"
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/blobstore"
 	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/crypto"
 	"github.com/torvanis/janus/internal/discovery"
@@ -60,15 +61,29 @@ type Server struct {
 
 	troubleshootOnce sync.Once
 
+	// Blobs is the admin-configured file storage (database or
+	// S3-compatible) shared by chat attachments and troubleshooting
+	// captures. Optional: built lazily from Store, Cipher and Config
+	// (storage.go) when nil.
+	Blobs                 *blobstore.Manager
+	blobsOnce             sync.Once
+	troubleshootBlobsOnce sync.Once
+
+	// Janus Chat run registry (chat.go), built on first use.
+	chatOnce sync.Once
+	// chatAdminCache holds the Chat admin settings briefly (chat_admin.go).
+	chatAdminMu    sync.Mutex
+	chatAdminCache *chatSettingsCache
+	chat           *chatRuntime
+
 	// Security Gateway classifier resolver, built lazily on first use so
 	// test wiring needs nothing extra; holds one circuit breaker per
 	// classifier model.
 	secgwOnce     sync.Once
 	secgwResolver *classifierResolver
-
-	tokenCache  sync.Map    // digest -> cachedToken
-	touched     sync.Map    // credential id -> time.Time of the last last_used_at write
-	configCache configCache // hot-path configuration reads (see cache.go)
+	tokenCache    sync.Map    // digest -> cachedToken
+	touched       sync.Map    // credential id -> time.Time of the last last_used_at write
+	configCache   configCache // hot-path configuration reads (see cache.go)
 	// perfCache holds the read-time model performance rollups (60s TTL): a
 	// 14-day scan per catalog view is wasteful, and the figures are daily.
 	perfCache configCache
@@ -97,6 +112,9 @@ type Server struct {
 	// the pointer itself is lock-free on the hot path.
 	upstreamClientMu sync.Mutex
 	upstreamClient   atomic.Pointer[upstreamClientState]
+	// upstreamMediaClient is the same for image/video generation, whose
+	// time-to-first-byte is the whole generation (see upstreamHTTPClientFor).
+	upstreamMediaClient atomic.Pointer[upstreamClientState]
 
 	// pools is this replica's load-balancer state (probes, in-flight
 	// counts, breakers); built on first use.
@@ -219,6 +237,7 @@ func (s *Server) buildRouter() http.Handler {
 			pr.Get("/help/{topic}", s.handleHelpTopic)
 
 			s.mountSubscriptionRoutes(pr)
+			s.mountChatRoutes(pr)
 
 			// delegated team-quota management for team leads. The
 			// handlers authorize per team (lead + lead_can_edit_quotas), so no
@@ -229,7 +248,7 @@ func (s *Server) buildRouter() http.Handler {
 			// separate concern from controlling its budget.
 			pr.Get("/lead/teams/{id}/members", s.handleLeadTeamMembers)
 			pr.Put("/lead/teams/{id}/members", s.handleLeadSetTeamMembers)
-			pr.Post("/lead/teams/{id}/quotas", s.handleLeadCreateQuota)
+			pr.Post("/lead/teams/{id}/quotas", s.gateCreate("quota", s.handleLeadCreateQuota))
 			pr.Put("/lead/teams/{id}/quotas/{quotaID}", s.handleLeadUpdateQuota)
 			pr.Delete("/lead/teams/{id}/quotas/{quotaID}", s.handleLeadDeleteQuota)
 		})
@@ -239,6 +258,7 @@ func (s *Server) buildRouter() http.Handler {
 			s.mountAdminRoutes(ar)
 			s.mountSCIMAdminRoutes(ar)
 			s.mountSubscriptionAdminRoutes(ar)
+			s.mountChatAdminRoutes(ar)
 		})
 	})
 
@@ -322,8 +342,9 @@ func serviceTokenCacheKey(digest string) string { return "svc|" + digest }
 // short-lived cache the user-token path uses so the proxy hot path stays off
 // the database.
 //
-// Expiry is re-checked on every call, including on cache hits: a cached entry
-// must not keep an expired credential alive for the remainder of the TTL.
+// Revocation and expiry are re-checked on every call, including on cache
+// hits: a cached entry must not keep a revoked (on another replica) or
+// expired credential alive for the remainder of the TTL.
 func (s *Server) resolveServiceToken(ctx context.Context, presented string) (*store.ServiceToken, error) {
 	if presented == "" {
 		return nil, ErrTokenInvalid("")
@@ -334,13 +355,18 @@ func (s *Server) resolveServiceToken(ctx context.Context, presented string) (*st
 		entry := cached.(cachedServiceToken)
 		if time.Since(entry.cachedAt) < tokenCacheTTL {
 			s.Metrics.TokenCacheHits.Inc()
-			// Revocation is handled by cache invalidation; expiry is a clock
-			// event with no write to hang an invalidation off, so it must be
-			// evaluated against the current time on every use.
-			if entry.token.Expired(time.Now().UTC()) {
-				return nil, ErrServiceTokenExpired(entry.token.ExpiresAt)
+			// Revocation and an expiry change must be immediate on every
+			// replica, as for user tokens: the cache only saves the digest
+			// lookup, the row itself is re-read on each use.
+			current, err := s.Store.ServiceTokenByID(ctx, entry.token.ID)
+			if err != nil || current.Revoked() {
+				s.tokenCache.Delete(key)
+				return nil, ErrTokenInvalid("This service token is no longer active.")
 			}
-			return entry.token, nil
+			if current.Expired(time.Now().UTC()) {
+				return nil, ErrServiceTokenExpired(current.ExpiresAt)
+			}
+			return current, nil
 		}
 		s.tokenCache.Delete(key)
 	}

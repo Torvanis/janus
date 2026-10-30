@@ -909,7 +909,8 @@ function apiErrorOf(err: unknown): { field?: string; message: string } {
 /* --- Classifier ----------------------------------------------------------- */
 
 const SCOPES = [
-  { value: 'last_user', label: 'Latest user message' },
+  { value: 'context', label: 'Latest message, with recent conversation (recommended)' },
+  { value: 'last_user', label: 'Latest user message only' },
   { value: 'all_user', label: 'Every user message' },
   { value: 'conversation', label: 'Whole conversation' },
 ];

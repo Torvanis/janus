@@ -84,6 +84,7 @@ func (s *Server) handleTeamGroups(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	actor := UserFrom(ctx).ID
 	var ids []string
+	covered := s.childCoveredNow(ctx)
 	err := s.Store.WithTeamAction(ctx, id, actor, func(tx *store.Store) error {
 		role, err := tx.TeamActorRole(ctx, id, actor)
 		if err != nil {
@@ -106,6 +107,7 @@ func (s *Server) handleTeamGroups(w http.ResponseWriter, r *http.Request) {
 		teamHTTPError(w, r, err)
 		return
 	}
+	s.childCoverageLost(ctx, covered, "their team's directory groups changed")
 	WriteJSON(w, 200, map[string]any{"group_ids": ids})
 }
 func (s *Server) handleTeamCandidates(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +230,7 @@ func (s *Server) handleTeamRemoveMember(w http.ResponseWriter, r *http.Request) 
 	target := chi.URLParam(r, "userID")
 	retained := false
 	sources := []store.TeamMembershipSource{}
+	covered := s.childCoveredNow(ctx)
 	err := s.Store.WithTeamAction(ctx, id, actor, func(tx *store.Store) error {
 		role, err := tx.TeamActorRole(ctx, id, actor)
 		if err != nil {
@@ -240,8 +243,22 @@ func (s *Server) handleTeamRemoveMember(w http.ResponseWriter, r *http.Request) 
 		if actor != target && (!teamManager(role) || (role == "moderator" && targetRole != "member")) {
 			return store.ErrTeamForbidden
 		}
+		coveredBefore, err := tx.ChildCovered(ctx)
+		if err != nil {
+			return err
+		}
 		if err := tx.RemoveTeamMemberSource(ctx, id, target, "manual", ""); err != nil {
 			return err
+		}
+		if actor == target && coveredBefore[target] {
+			// Leaving must never switch off a person's own Child Safety.
+			coveredAfter, err := tx.ChildCovered(ctx)
+			if err != nil {
+				return err
+			}
+			if !coveredAfter[target] {
+				return store.ErrChildSafetyCoverage
+			}
 		}
 		members, err := tx.TeamMembers(ctx, id)
 		if err != nil {
@@ -263,6 +280,7 @@ func (s *Server) handleTeamRemoveMember(w http.ResponseWriter, r *http.Request) 
 		teamHTTPError(w, r, err)
 		return
 	}
+	s.childCoverageLost(ctx, covered, "they were removed from a team")
 	message := "Manual membership removed."
 	if retained {
 		message = "Directory membership remains. Ask an administrator to update the source group or team mapping."
@@ -339,7 +357,7 @@ func teamHTTPError(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusNotFound
 	case errors.Is(err, store.ErrTeamForbidden):
 		status = http.StatusForbidden
-	case errors.Is(err, store.ErrTeamUnlisted), errors.Is(err, store.ErrTeamArchived), errors.Is(err, store.ErrTeamRequestState), errors.Is(err, store.ErrLastTeamLeader):
+	case errors.Is(err, store.ErrTeamUnlisted), errors.Is(err, store.ErrTeamArchived), errors.Is(err, store.ErrTeamRequestState), errors.Is(err, store.ErrLastTeamLeader), errors.Is(err, store.ErrChildSafetyCoverage):
 		status = http.StatusConflict
 	case errors.Is(err, store.ErrInvalidTeamRole):
 		status = http.StatusBadRequest

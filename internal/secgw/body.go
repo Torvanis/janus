@@ -45,7 +45,7 @@ func parseMessages(body []byte) ([]Message, bool) {
 			out = append(out, Message{Index: i, Role: msg.Role + ".tool_calls", Text: strings.Join(extra, "\n"), contentPath: "tool_calls"})
 			continue
 		}
-		out = append(out, Message{Index: i, Role: msg.Role, Text: text, contentPath: path})
+		out = append(out, Message{Index: i, Role: msg.Role, Text: text, Tool: msg.Role == "tool" || msg.Role == "function", contentPath: path})
 	}
 	return out, true
 }

@@ -497,6 +497,9 @@ const (
 	ClassificationScopeLastUser = "last_user"
 	ClassificationScopeAllUser  = "all_user"
 	ClassificationScopeAll      = "conversation"
+	// ClassificationScopeContext: the new turn with the earlier
+	// conversation as marked context (the default).
+	ClassificationScopeContext = "context"
 )
 
 // ClassificationSettings is the admin configuration.
@@ -538,7 +541,7 @@ type ClassificationSettings struct {
 func DefaultClassificationSettings() ClassificationSettings {
 	return ClassificationSettings{
 		Enabled: false, Mode: ClassificationModeAsync, Protocol: ClassificationProtocolSystemOne,
-		SampleRate: 100, TimeoutMs: 5000, TextScope: ClassificationScopeLastUser, MaxChars: 6000,
+		SampleRate: 100, TimeoutMs: 5000, TextScope: ClassificationScopeContext, MaxChars: 6000,
 		IncludeServiceTokens: true, Concurrency: 4, QueueSize: 1000, Subcategories: true, RetentionDays: 180,
 	}
 }
@@ -556,9 +559,9 @@ func (c *ClassificationSettings) Validate() error {
 		return &ValidationError{Field: "protocol", Message: "protocol must be systemone or chat"}
 	}
 	switch c.TextScope {
-	case ClassificationScopeLastUser, ClassificationScopeAllUser, ClassificationScopeAll:
+	case ClassificationScopeContext, ClassificationScopeLastUser, ClassificationScopeAllUser, ClassificationScopeAll:
 	default:
-		return &ValidationError{Field: "text_scope", Message: "text_scope must be last_user, all_user or conversation"}
+		return &ValidationError{Field: "text_scope", Message: "text_scope must be context, last_user, all_user or conversation"}
 	}
 	c.Model = strings.TrimSpace(c.Model)
 	if c.Enabled && (c.UpstreamID == "" || c.Model == "") {
@@ -584,6 +587,15 @@ func (c *ClassificationSettings) Validate() error {
 	}
 	return nil
 }
+
+// classificationContextMigration moves Usage insights from the latest
+// message alone to the latest message with the conversation as context
+// (user ruling 2026-10-27). last_user was the only default and the settings
+// form saves every field, so a stored last_user is almost always the old
+// default rather than a choice; the other two options are left alone.
+var classificationContextMigration = migration{name: "0068_classification_context", stmt: []string{
+	`UPDATE system_setting SET value = replace(value, '"text_scope":"last_user"', '"text_scope":"context"') WHERE key = 'prompt_classification'`,
+}}
 
 // ClassificationSettings returns the stored settings, or the defaults.
 func (s *Store) ClassificationSettings(ctx context.Context) (ClassificationSettings, error) {

@@ -3,7 +3,7 @@ import { Collection } from '../../components/Collection';
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { AdminUserRow, ManagedModel, Model, QuotaStatus, RateLimitRule, Team } from '../../lib/types';
+import type { AdminUserRow, ManagedModel, Model, QuotaStatus, RateLimitRule, ServiceTokenRow, Team } from '../../lib/types';
 import { formatDateTime, formatNumber, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Field, Modal, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
@@ -90,6 +90,7 @@ export function AdminQuotasPage(): ReactNode {
             { value: '', label: t('adminQuotas.allSubjects') },
             { value: 'user', label: t('adminQuotas.people') },
             { value: 'team', label: t('adminQuotas.teams') },
+            { value: 'service_token', label: t('adminQuotas.serviceTokens') },
           ]}
         />
       </div>
@@ -143,7 +144,11 @@ export function AdminQuotasPage(): ReactNode {
                           <td>
                             <div>{quota.subject_name || '—'}</div>
                             <div className="small muted">
-                              {quota.subject_type === 'team' ? t('adminQuotas.team') : t('adminQuotas.person')}
+                              {quota.subject_type === 'team'
+                                ? t('adminQuotas.team')
+                                : quota.subject_type === 'service_token'
+                                  ? t('adminQuotas.serviceToken')
+                                  : t('adminQuotas.person')}
                             </div>
                           </td>
                           <td className="small muted">{quota.model_name}</td>
@@ -322,7 +327,12 @@ function RateLimitsSection(): ReactNode {
                   id: 'subject',
                   label: t('adminQuotas.appliesTo'),
                   value: (rule) => rule.subject_name || rule.subject_id,
-                  render: (rule) => <>{rule.subject_id ? rule.subject_name || rule.subject_id : t('adminQuotas.everyPerson')}</>,
+                  render: (rule) => (
+                    <>
+                      {rule.subject_id ? rule.subject_name || rule.subject_id : t('adminQuotas.everyPerson')}
+                      {rule.subject_type === 'service_token' && <span className="muted"> · {t('adminQuotas.serviceToken')}</span>}
+                    </>
+                  ),
                 },
                 {
                   id: 'endpoint',
@@ -429,6 +439,7 @@ function CreateRateLimitModal({
   onCreated: () => void;
 }): ReactNode {
   const toast = useToast();
+  const [subjectType, setSubjectType] = useState<'user' | 'service_token'>('user');
   const [subjectId, setSubjectId] = useState('');
   const [endpoint, setEndpoint] = useState('*');
   const [rpm, setRpm] = useState('60');
@@ -438,10 +449,16 @@ function CreateRateLimitModal({
     queryFn: () => api.get<{ users: AdminUserRow[] }>('/api/v1/admin/users?limit=200'),
     enabled: open,
   });
+  const serviceTokens = useQuery({
+    queryKey: ['admin', 'service-tokens', 'for-rate-limits'],
+    queryFn: () => api.get<{ service_tokens: ServiceTokenRow[] }>('/api/v1/admin/service-tokens?status=active'),
+    enabled: open && subjectType === 'service_token',
+  });
 
   const create = useMutation({
     mutationFn: () =>
       api.post('/api/v1/admin/rate-limits', {
+        subject_type: subjectType,
         subject_id: subjectId,
         endpoint,
         requests_per_minute: Number.parseInt(rpm, 10),
@@ -456,7 +473,7 @@ function CreateRateLimitModal({
   const numericRpm = Number.parseInt(rpm, 10);
   const rpmError = rpm !== '' && (Number.isNaN(numericRpm) || numericRpm < 1) ? t('adminQuotas.rlRpmError') : undefined;
   const endpointError = endpoint !== '*' && !endpoint.startsWith('/v1/') ? t('adminQuotas.rlEndpointError') : undefined;
-  const valid = rpm !== '' && !rpmError && !endpointError;
+  const valid = rpm !== '' && !rpmError && !endpointError && (subjectType === 'user' || Boolean(subjectId));
 
   return (
     <Modal
@@ -475,16 +492,43 @@ function CreateRateLimitModal({
         </>
       }
     >
-      <Field label={t('adminQuotas.appliesTo')} hint={t('adminQuotas.rlAppliesToHint')}>
-        <select className="select" value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
-          <option value="">{t('adminQuotas.everyPerson')}</option>
-          {(users.data?.users ?? []).map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.name || user.email}
-            </option>
-          ))}
+      <Field label={t('adminQuotas.appliesTo')} required>
+        <select
+          className="select"
+          value={subjectType}
+          onChange={(event) => {
+            setSubjectType(event.target.value as typeof subjectType);
+            setSubjectId('');
+          }}
+        >
+          <option value="user">{t('adminQuotas.people')}</option>
+          <option value="service_token">{t('adminQuotas.aServiceToken')}</option>
         </select>
       </Field>
+
+      {subjectType === 'user' ? (
+        <Field label={t('adminQuotas.person')} hint={t('adminQuotas.rlAppliesToHint')}>
+          <select className="select" value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+            <option value="">{t('adminQuotas.everyPerson')}</option>
+            {(users.data?.users ?? []).map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name || user.email}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : (
+        <Field label={t('adminQuotas.serviceToken')} required hint={t('adminQuotas.rlServiceTokenHint')}>
+          <select className="select" value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+            <option value="">{t('adminQuotas.choose')}</option>
+            {(serviceTokens.data?.service_tokens ?? []).map((token) => (
+              <option key={token.id} value={token.id}>
+                {token.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
 
       <Field label={t('adminQuotas.colEndpoint')} required error={endpointError} hint={t('adminQuotas.rlEndpointHint')}>
         <input
@@ -524,7 +568,7 @@ function CreateQuotaModal({
   onCreated: () => void;
 }): ReactNode {
   const toast = useToast();
-  const [subjectType, setSubjectType] = useState<'user' | 'team'>('user');
+  const [subjectType, setSubjectType] = useState<'user' | 'team' | 'service_token'>('user');
   const [subjectId, setSubjectId] = useState('');
   const [modelId, setModelId] = useState('');
   const [metric, setMetric] = useState('tokens_in');
@@ -542,6 +586,11 @@ function CreateQuotaModal({
     queryKey: ['admin', 'teams'],
     queryFn: () => api.get<{ teams: Team[] }>('/api/v1/admin/teams'),
     enabled: open,
+  });
+  const serviceTokens = useQuery({
+    queryKey: ['admin', 'service-tokens', 'for-quotas'],
+    queryFn: () => api.get<{ service_tokens: ServiceTokenRow[] }>('/api/v1/admin/service-tokens?status=active'),
+    enabled: open && subjectType === 'service_token',
   });
   const models = useQuery({
     queryKey: ['admin', 'models', 'for-quotas'],
@@ -625,10 +674,20 @@ function CreateQuotaModal({
         >
           <option value="user">{t('adminQuotas.aPerson')}</option>
           <option value="team">{t('adminQuotas.aTeam')}</option>
+          <option value="service_token">{t('adminQuotas.aServiceToken')}</option>
         </select>
       </Field>
 
-      <Field label={subjectType === 'user' ? t('adminQuotas.person') : t('adminQuotas.team')} required>
+      <Field
+        label={
+          subjectType === 'user'
+            ? t('adminQuotas.person')
+            : subjectType === 'team'
+              ? t('adminQuotas.team')
+              : t('adminQuotas.serviceToken')
+        }
+        required
+      >
         <select className="select" value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
           <option value="">{t('adminQuotas.choose')}</option>
           {subjectType === 'user'
@@ -637,11 +696,17 @@ function CreateQuotaModal({
                   {user.name || user.email}
                 </option>
               ))
-            : (teams.data?.teams ?? []).map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
+            : subjectType === 'team'
+              ? (teams.data?.teams ?? []).map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))
+              : (serviceTokens.data?.service_tokens ?? []).map((token) => (
+                  <option key={token.id} value={token.id}>
+                    {token.name}
+                  </option>
+                ))}
         </select>
       </Field>
 

@@ -1062,7 +1062,7 @@ function RouterBuilder({
               </Field>
               <Field
                 label="Remember conversations (minutes)"
-                hint="Later turns of a conversation keep its route: no model flip mid-task, prompt caches stay warm."
+                hint="Later turns of a conversation keep its model: no switch mid-task, and the model's cached context stays warm. A route whose thinking scales with difficulty still sets each turn's thinking from that turn (with the conversation as context)."
               >
                 <div className="row" style={{ gap: 'var(--janus-space-3)' }}>
                   <label className="switch">
@@ -1592,11 +1592,50 @@ function RouteEditor({
 
 /* --- Try routing --------------------------------------------------------------- */
 
+/** Optional earlier conversation for a Try box, so a follow-up such as "What
+ * about Ohio?" is tried the way a live request is classified: with the
+ * conversation as context. */
+function EarlierConversation({ value, onChange }: { value: string; onChange: (v: string) => void }): ReactNode {
+  const [open, setOpen] = useState(value !== '');
+  if (!open) {
+    return (
+      <div>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpen(true)}>
+          + Earlier conversation
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="stack" style={{ gap: 4 }}>
+      <label className="field-label" htmlFor="try-history">
+        Earlier conversation (optional)
+      </label>
+      <textarea
+        id="try-history"
+        className="textarea"
+        rows={4}
+        value={value}
+        placeholder={
+          'User: My landlord in California kept my deposit. What are my rights?\nAssistant: In California a landlord must return it within 21 days…'
+        }
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p className="small muted" style={{ margin: 0 }}>
+        One message per line, starting with User: or Assistant:. Live requests are classified with their last few messages as
+        context, and the prompt below as the message to judge.
+      </p>
+    </div>
+  );
+}
+
 function RouterTryBox({ routerId, name, config }: { routerId?: string; name: string; config: RouterConfig }): ReactNode {
   const [text, setText] = useState('');
+  const [history, setHistory] = useState('');
   const catName = useCategoryName();
   const test = useMutation({
-    mutationFn: () => api.post<RoutingTestResult>(`${BASE}/test`, { text, router_id: routerId ?? '', router_name: name, config }),
+    mutationFn: () =>
+      api.post<RoutingTestResult>(`${BASE}/test`, { text, history, router_id: routerId ?? '', router_name: name, config }),
   });
   const res = test.data;
   const r = res?.routers[0];
@@ -1621,6 +1660,7 @@ function RouterTryBox({ routerId, name, config }: { routerId?: string; name: str
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <EarlierConversation value={history} onChange={setHistory} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button
           type="button"
@@ -2147,9 +2187,10 @@ function ClassifierForm({ doc }: { doc: RoutingDocument }): ReactNode {
 
 function TryRouting({ classifierId }: { classifierId: string }): ReactNode {
   const [text, setText] = useState('');
+  const [history, setHistory] = useState('');
   const catName = useCategoryName();
   const test = useMutation({
-    mutationFn: () => api.post<RoutingTestResult>(`${BASE}/test`, { text, classifier_model_id: classifierId }),
+    mutationFn: () => api.post<RoutingTestResult>(`${BASE}/test`, { text, history, classifier_model_id: classifierId }),
   });
   const res = test.data;
   const probs = Object.entries(res?.probabilities ?? {})
@@ -2175,6 +2216,7 @@ function TryRouting({ classifierId }: { classifierId: string }): ReactNode {
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <EarlierConversation value={history} onChange={setHistory} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button
           type="button"

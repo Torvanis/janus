@@ -70,6 +70,12 @@
 
 .docs-article {
   max-width: 76ch;
+  /* Long URLs and metric names break instead of widening the page on a
+     phone; code blocks keep their own horizontal scroll. */
+  overflow-wrap: anywhere;
+}
+.docs-article pre {
+  overflow-wrap: normal;
 }
 .docs-article h1 {
   font-size: var(--janus-text-3xl);

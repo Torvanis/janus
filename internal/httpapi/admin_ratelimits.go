@@ -10,8 +10,8 @@ import (
 	"github.com/torvanis/janus/internal/store"
 )
 
-// Rate-limit rule administration. Rules cap requests per minute per person and
-// endpoint; configuration is always available, enforcement is gated by the
+// Rate-limit rule administration. Rules cap requests per minute per person (or
+// service token) and endpoint; configuration is always available, enforcement is gated by the
 // per_user_rate_limits_enabled feature flag. Feature flags themselves
 // are defined in store.DefaultFeatureFlags and managed by the handlers in
 // admin_handlers.go.
@@ -34,6 +34,7 @@ func (s *Server) handleListRateLimits(w http.ResponseWriter, r *http.Request) {
 }
 
 type rateLimitPayload struct {
+	SubjectType       string `json:"subject_type"`
 	SubjectID         string `json:"subject_id"`
 	Endpoint          string `json:"endpoint"`
 	RequestsPerMinute int    `json:"requests_per_minute"`
@@ -57,7 +58,28 @@ func (s *Server) handleCreateRateLimit(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("endpoint must be * or a proxied path starting with /v1/, for example /v1/chat/completions or /v1/audio/*.").WithParam("endpoint"))
 		return
 	}
-	if body.SubjectID != "" {
+	subjectType := strings.TrimSpace(body.SubjectType)
+	switch subjectType {
+	case "", "user":
+		subjectType = "user"
+	case "service_token":
+	default:
+		WriteError(w, r, ErrInvalidRequest("subject_type must be user or service_token.").WithParam("subject_type"))
+		return
+	}
+	if subjectType == "service_token" {
+		// A service token rule names one integration; "everyone" is the
+		// person rule with no subject, which already covers service tokens.
+		tok, err := s.Store.ServiceTokenByID(r.Context(), body.SubjectID)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !tok.RevokedAt.IsZero()) {
+			WriteError(w, r, ErrInvalidRequest("Choose an existing, active service token.").WithParam("subject_id"))
+			return
+		}
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	} else if body.SubjectID != "" {
 		if _, err := s.Store.UserByID(r.Context(), body.SubjectID); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				WriteError(w, r, ErrInvalidRequest("Choose an existing person, or leave the person empty to apply the limit to everyone.").WithParam("subject_id"))
@@ -68,7 +90,7 @@ func (s *Server) handleCreateRateLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rule := &store.RateLimitRule{
-		SubjectType: "user", SubjectID: body.SubjectID,
+		SubjectType: subjectType, SubjectID: body.SubjectID,
 		Endpoint: endpoint, RequestsPerMinute: body.RequestsPerMinute,
 	}
 	if err := s.Store.CreateRateLimitRule(r.Context(), rule); err != nil {
@@ -77,7 +99,7 @@ func (s *Server) handleCreateRateLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.InvalidateConfigCache()
 	s.audit(r, "rate_limit_created", "rate_limit_rule", rule.ID, nil, map[string]any{
-		"subject_id": rule.SubjectID, "endpoint": rule.Endpoint, "requests_per_minute": rule.RequestsPerMinute,
+		"subject_type": rule.SubjectType, "subject_id": rule.SubjectID, "endpoint": rule.Endpoint, "requests_per_minute": rule.RequestsPerMinute,
 	})
 	WriteJSON(w, http.StatusCreated, map[string]any{"rule": rule})
 }

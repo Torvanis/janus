@@ -23,16 +23,16 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.10.4
+## Release 2026.10.5
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.4`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.5`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.10.4` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.4): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.10.5` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.5): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus-helm-chart/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.2.1](https://github.com/Torvanis/janus/releases/download/v2026.10.4/janus-helm-chart-0.2.1.tgz)
-- Offline container images for air-gapped installs: `janus-container-image-2026.10.4-linux-amd64.tar` and `janus-container-image-2026.10.4-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.10.4) (`docker load -i` or `podman load -i`).
+- [Download Helm chart 0.2.2](https://github.com/Torvanis/janus/releases/download/v2026.10.5/janus-helm-chart-0.2.2.tgz)
+- Offline container images for air-gapped installs: `janus-container-image-2026.10.5-linux-amd64.tar` and `janus-container-image-2026.10.5-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.10.5) (`docker load -i` or `podman load -i`).
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -43,7 +43,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.4/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.5/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -61,11 +61,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.4` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.5` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.10.4 .
+docker build -t janus:2026.10.5 .
 ```
 
 This starts a **local evaluation** instance;
@@ -84,7 +84,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.10.4
+  janus:2026.10.5
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -118,6 +118,13 @@ Janus reads configuration from environment variables. Common settings:
 | `JANUS_UPDATE_CHECK` | Opt-in version checking; disabled by default. |
 | `JANUS_PERFORMANCE_MODE` | Business: batch usage writes for the busiest gateways (see below). Defaults to `false`. |
 | `JANUS_DB_MAX_CONNS` | PostgreSQL connections per replica; defaults to 25. Keep replicas × this well under the server's `max_connections`. |
+| `JANUS_CHAT_PREVIEW` | Turns on Janus Chat (preview). Defaults to `false`. |
+| `JANUS_CHAT_AUTO_TITLE` | Lets the chat's model name each conversation (a metered `janus-chat-title` request). Defaults to `true`. |
+| `JANUS_CHAT_MAX_UPLOAD_BYTES` | Largest chat attachment; defaults to 20 MiB and never exceeds the storage limit. |
+| `JANUS_CHAT_SEARCH_SEARXNG_URL` | Address of a SearXNG instance; Chat web search is turned on with it once at startup. |
+| `JANUS_STORAGE_MODE` | `database` or `s3` fixes where chat files and troubleshooting captures are kept; unset lets Administration → Settings → General → File storage decide. |
+| `JANUS_S3_ENDPOINT`, `JANUS_S3_BUCKET`, `JANUS_S3_ACCESS_KEY_ID`, `JANUS_S3_SECRET_ACCESS_KEY` | Required with `JANUS_STORAGE_MODE=s3`. Optional: `JANUS_S3_REGION` (default `us-east-1`), `JANUS_S3_PATH_STYLE`, `JANUS_S3_PREFIX`, `JANUS_S3_CA_FILE`. Files are encrypted by Janus before upload. |
+| `JANUS_STORAGE_MAX_OBJECT_BYTES` | Largest stored file; defaults to 25 MiB. |
 
 See the built-in documentation for additional identity, policy, retention,
 notification, and operational settings. Never place credentials in source
@@ -130,7 +137,7 @@ database's disk flush. The trade is a bounded loss window: a database crash
 can lose about the last 0.5 s of usage records, and a replica killed without a
 graceful shutdown up to 100 ms of them. Graceful shutdowns and rollouts lose
 nothing. It needs a valid Business or Enterprise license (otherwise the
-gateway logs why and runs normally) and is shown on Admin → System.
+gateway logs why and runs normally) and is shown on Administration → Settings → System status.
 
 ## Production deployment
 
@@ -156,7 +163,7 @@ through a configured upstream.
 
 ## Build from source
 
-Requires Git, Make, Bash, Python **3**, Go **1.26.7**, and Node.js **22**
+Requires Git, Make, Bash, Python **3**, Go **1.26.10**, and Node.js **22**
 with npm. The verification suite also requires a C compiler for Go race tests.
 These commands target a Unix-like build environment. Dependency versions are
 recorded in the Go module files and `web/package-lock.json`.
@@ -164,7 +171,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.10.4
+git checkout v2026.10.5
 make web-deps
 make verify
 make build

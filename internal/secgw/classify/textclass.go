@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	dec "github.com/torvanis/janus/internal/classify"
 )
 
 // ProtocolTextClassification is the HF Text Embeddings Inference
@@ -78,7 +80,7 @@ func (t *textClassification) Classify(ctx context.Context, in []Segment) ([]Scor
 	started := time.Now()
 	resp, err := t.up.Client.Do(req)
 	if t.up.Meter != nil {
-		defer func() { t.up.Meter(ctx, time.Since(started), chars, err) }()
+		defer func() { t.up.Meter(ctx, time.Since(started), chars, dec.Usage{}, err) }()
 	}
 	var body []byte
 	defer func() { traceCall(ctx, t.up, ProtocolTextClassification, url, started, payload, body, err) }()

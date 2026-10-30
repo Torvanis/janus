@@ -16,7 +16,7 @@ const (
 // Grants on real models and grants on managed models (aliases) both appear;
 // ModelKind tells them apart and the name resolution follows the kind.
 func (s *Store) ListGrants(ctx context.Context, modelID string) ([]*Grant, error) {
-	query := `SELECT g.id, g.model_id, g.model_kind, g.grantee_type, g.grantee_id, g.created_at
+	query := `SELECT g.id, g.model_id, g.model_kind, g.grantee_type, g.grantee_id, g.created_at, g.chat_name, g.chat_description
 		FROM model_grant g`
 	args := []any{}
 	if modelID != "" {
@@ -33,7 +33,7 @@ func (s *Store) ListGrants(ctx context.Context, modelID string) ([]*Grant, error
 	for rows.Next() {
 		var g Grant
 		var created string
-		if err := rows.Scan(&g.ID, &g.ModelID, &g.ModelKind, &g.GranteeType, &g.GranteeID, &created); err != nil {
+		if err := rows.Scan(&g.ID, &g.ModelID, &g.ModelKind, &g.GranteeType, &g.GranteeID, &created, &g.ChatName, &g.ChatDescription); err != nil {
 			return nil, fmt.Errorf("scan grant: %w", err)
 		}
 		g.CreatedAt = ParseTime(created)

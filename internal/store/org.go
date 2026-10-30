@@ -518,17 +518,90 @@ func (s *Store) UpdateTeam(ctx context.Context, id, name, leadUserID string, del
 	})
 }
 
-// DeleteTeam archives identity and roster for historical labels. No usage moves.
+// TeamArchiveResult lists what DeleteTeam moved back to personal context.
+type TeamArchiveResult struct {
+	Tokens        int      `json:"tokens"`
+	Sessions      int      `json:"sessions"`
+	Conversations int      `json:"conversations"`
+	UserIDs       []string `json:"-"`
+}
+
+// DeleteTeam archives identity and roster for historical labels. No usage
+// moves. Everything still bound to the team switches to personal context so
+// it keeps working: API keys, browser "Working under" selections and Chat
+// conversations (hidden Chat keys for the team are revoked; a personal one is
+// made on next send). Recorded usage keeps its team label.
 func (s *Store) DeleteTeam(ctx context.Context, id string) error {
-	return s.modelTx(ctx, func(s *Store) error {
+	_, err := s.ArchiveTeam(ctx, id)
+	return err
+}
+
+// ArchiveTeam is DeleteTeam returning what was switched to personal.
+func (s *Store) ArchiveTeam(ctx context.Context, id string) (*TeamArchiveResult, error) {
+	res := &TeamArchiveResult{}
+	err := s.modelTx(ctx, func(s *Store) error {
+		*res = TeamArchiveResult{}
 		if err := s.lockTeamMembership(ctx); err != nil {
 			return err
 		}
-		if _, err := s.TeamByID(ctx, id); err != nil {
+		team, err := s.TeamByID(ctx, id)
+		if err != nil {
 			return err
 		}
-		return s.exec(ctx, `UPDATE team SET archived_at=?,listed=0 WHERE id=? AND archived_at=''`, FormatTime(nowUTC()), id)
+		if !team.ArchivedAt.IsZero() {
+			return nil
+		}
+		users, err := s.teamStringIDs(ctx, `SELECT user_id FROM api_token WHERE team_id=? AND revoked_at='' AND kind<>?
+			UNION SELECT user_id FROM session_team_context WHERE team_id=?
+			UNION SELECT user_id FROM chat_conversation WHERE team_id=? AND deleted_at=''
+			ORDER BY 1`, id, TokenKindChat, id, id)
+		if err != nil {
+			return err
+		}
+		res.UserIDs = users
+		for _, c := range []struct {
+			n    *int
+			q    string
+			args []any
+		}{
+			{&res.Tokens, `SELECT COUNT(*) FROM api_token WHERE team_id=? AND revoked_at='' AND kind<>?`, []any{id, TokenKindChat}},
+			{&res.Sessions, `SELECT COUNT(*) FROM session_team_context WHERE team_id=?`, []any{id}},
+			{&res.Conversations, `SELECT COUNT(*) FROM chat_conversation WHERE team_id=? AND deleted_at=''`, []any{id}},
+		} {
+			if err := s.queryRow(ctx, c.q, c.args...).Scan(c.n); err != nil {
+				return err
+			}
+		}
+		now := FormatTime(nowUTC())
+		for _, stmt := range []struct {
+			q    string
+			args []any
+		}{
+			{`UPDATE team SET archived_at=?,listed=0 WHERE id=? AND archived_at=''`, []any{now, id}},
+			{`UPDATE api_token SET revoked_at=? WHERE team_id=? AND kind=? AND revoked_at=''`, []any{now, id, TokenKindChat}},
+			{`UPDATE api_token SET team_id='' WHERE team_id=? AND revoked_at=''`, []any{id}},
+			{`UPDATE session_team_context SET team_id='' WHERE team_id=?`, []any{id}},
+			{`UPDATE chat_conversation SET team_id='' WHERE team_id=?`, []any{id}},
+			// An archived team covers no one: its Child Safety assignment goes
+			// with it, so the Child Safety page never shows a stale team.
+			{`DELETE FROM secgw_family_assignment WHERE scope_type = ? AND scope_id = ?`, []any{SecgwFamilyScopeTeam, id}},
+		} {
+			if err := s.exec(ctx, stmt.q, stmt.args...); err != nil {
+				return err
+			}
+		}
+		for _, uid := range users {
+			if err := s.CreateNotification(ctx, &Notification{UserID: uid, Severity: "info", Title: "Team deleted",
+				Body: "The team “" + team.Name + "” was deleted. Your API keys, Chat conversations and “Working under” selection for it now use your personal context."}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // SetTeamMembers replaces manual sources only; group membership and roles survive.

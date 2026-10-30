@@ -39,7 +39,6 @@ import type {
   SecgwSeverity,
   SecgwTermList,
   SecgwViolation,
-  SecurityCategoriesDoc,
   SecurityCategory,
   ServiceTokenRow,
   Upstream,
@@ -48,16 +47,10 @@ import { formatDateTime, formatNumber, formatRelative } from '../../lib/format';
 import { AsyncSection, Badge, Chevron, ConfirmDialog, Drawer, Field, Modal, useToast, type Tone } from '../../components/ui';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useLicensed, useSession } from '../../app/session';
-import { CATEGORIES_KEY, CategoriesTab, useSecurityCategories } from './SecurityCategories';
-import {
-  categoryCalls,
-  CRITICAL_SAFETY_SLUGS,
-  parentalControlsTemplate,
-  type PolicyDraftTemplate,
-} from '../../lib/securityTemplates';
+import { CategoriesTab, useSecurityCategories } from './SecurityCategories';
+import { categoryCalls, CRITICAL_SAFETY_SLUGS, type PolicyDraftTemplate } from '../../lib/securityTemplates';
 
 const BASE = '/api/v1/admin/secgw';
-const CATEGORIES_BASE = `${BASE}/categories`;
 const KEY = ['admin', 'secgw'] as const;
 
 const TABS = ['overview', 'policies', 'bindings', 'term-lists', 'categories', 'violations', 'classifiers'] as const;
@@ -94,11 +87,14 @@ const ACTION_LABELS: Record<string, MessageKey> = {
   redacted: 'adminSecurity.violations.actionRedacted',
   blocked: 'adminSecurity.violations.actionBlocked',
   stream_cut: 'adminSecurity.violations.actionStreamCut',
+  supported: 'adminSecurity.violations.actionSupported',
+  withheld: 'adminSecurity.violations.actionWithheld',
 };
 
 function actionTone(action: string): Tone {
   if (action === 'blocked' || action === 'stream_cut') return 'danger';
   if (action === 'redacted') return 'warning';
+  if (action === 'supported') return 'info';
   return 'neutral';
 }
 
@@ -550,7 +546,6 @@ function ChecksLine({ policy }: { policy: SecgwPolicy }): ReactNode {
 function PoliciesTab(): ReactNode {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const enforceLicensed = useLicensed('guardrails_enforce');
   const [creating, setCreating] = useState(false);
   const [template, setTemplate] = useState<PolicyDraftTemplate | null>(null);
   const [editing, setEditing] = useState<SecgwPolicy | null>(null);
@@ -569,41 +564,9 @@ function PoliciesTab(): ReactNode {
     onError: (error: Error) => toast(error.message, 'danger'),
   });
 
-  // The Parental controls template is a policy body the normal create API
-  // takes; it opens in the editor unsaved, so the admin reviews it first.
-  const startTemplate = async () => {
-    try {
-      const [cats, cls] = await Promise.all([
-        queryClient.fetchQuery({ queryKey: CATEGORIES_KEY, queryFn: () => api.get<SecurityCategoriesDoc>(CATEGORIES_BASE) }),
-        queryClient.fetchQuery({ queryKey: [...KEY, 'classifiers'], queryFn: fetchClassifiers }),
-      ]);
-      const decision = (cls.classifiers ?? []).find((m) => m.classifier_role === 'decision');
-      setTemplate(
-        parentalControlsTemplate({
-          name: t('adminSecurity.policies.templateParentalName'),
-          description: t('adminSecurity.policies.templateParentalDescription'),
-          categories: cats.categories ?? [],
-          classifierId: decision?.id,
-          enforce: enforceLicensed,
-        }),
-      );
-      setCreating(true);
-    } catch (error) {
-      toast((error as Error).message, 'danger');
-    }
-  };
-
   return (
     <div className="stack">
       <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--janus-space-2)' }}>
-        <button
-          type="button"
-          className="btn"
-          title={t('adminSecurity.policies.fromTemplateHint')}
-          onClick={() => void startTemplate()}
-        >
-          {t('adminSecurity.policies.fromTemplate')}
-        </button>
         <button
           type="button"
           className="btn btn-primary"
@@ -1581,6 +1544,8 @@ function CallCount({ check }: { check: SecgwCheck }): ReactNode {
   );
 }
 
+// Family categories belong to Child Safety now: a policy that already
+// selects one still shows it (so it can be removed), nothing offers it.
 const CATEGORY_GROUPS: Array<[SecurityCategory['group'], MessageKey]> = [
   ['safety', 'adminSecurity.categories.groupSafety'],
   ['family', 'adminSecurity.categories.groupFamily'],
@@ -1605,7 +1570,9 @@ function SecurityCategoryPicker({ value, onChange }: { value: string[]; onChange
           : t('adminSecurity.policies.securityCategoriesCount', { count: value.length })}
       </p>
       {CATEGORY_GROUPS.map(([group, key]) => {
-        const items = all.filter((c) => c.group === group && (c.enabled || set.has(c.slug)));
+        const items = all.filter(
+          (c) => c.group === group && (group === 'family' ? set.has(c.slug) : c.enabled || set.has(c.slug)),
+        );
         if (items.length === 0) return null;
         return (
           <div key={group}>
@@ -2822,7 +2789,8 @@ function violationHeadline(v: SecgwViolation): string {
  */
 function noTextReason(v: SecgwViolation): string {
   if (v.capture_disabled) {
-    return v.kind === 'prompt_injection'
+    if (v.policy_id === 'family_safety') return t('adminSecurity.violations.captureOffChildSafety');
+    return v.kind === 'prompt_injection' || v.kind === 'content_safety'
       ? t('adminSecurity.violations.captureOffInjection')
       : t('adminSecurity.violations.captureOffKind');
   }
@@ -3006,7 +2974,11 @@ function ViolationsTab(): ReactNode {
                               <span>{violationHeadline(v)}</span>
                               <span className="secgw-cell-sub">
                                 {kindLabel(v.kind)} · {v.severity}
-                                {v.direction === 'egress' ? ` · ${t('adminSecurity.violations.whereEgress')}` : ''}
+                                {v.direction === 'egress'
+                                  ? ` · ${t('adminSecurity.violations.whereEgress')}`
+                                  : v.direction === 'tool_output'
+                                    ? ` · ${t('adminSecurity.violations.whereToolOutput')}`
+                                    : ''}
                               </span>
                             </div>
                           </div>
@@ -3071,7 +3043,11 @@ function ViolationDrawer({ violation, onClose }: { violation: SecgwViolation; on
           <div className="secgw-cell-stack">
             <div className="secgw-vhead-title">{violationHeadline(v)}</div>
             <div className="secgw-vhead-sub">
-              {v.direction === 'egress' ? t('adminSecurity.violations.whereEgress') : t('adminSecurity.violations.whereIngress')}
+              {v.direction === 'egress'
+                ? t('adminSecurity.violations.whereEgress')
+                : v.direction === 'tool_output'
+                  ? t('adminSecurity.violations.whereToolOutput')
+                  : t('adminSecurity.violations.whereIngress')}
               {' · '}
               {t('adminSecurity.violations.byWho', { who: who.label })}
               {' · '}

@@ -351,6 +351,11 @@ func (s *Server) evalPolicyStops(ctx context.Context, j *evalJob, target store.R
 	if eff.Empty() {
 		return ""
 	}
+	// Model-backed checks meter their calls against the request the
+	// evaluation samples, not an anonymous background job.
+	if RequestIDFrom(ctx) == "" && j.requestID != "" {
+		ctx = context.WithValue(ctx, ctxRequestID, j.requestID)
+	}
 	dec, err := eng.Ingress(ctx, eff, secgw.Request{Body: body, IsServiceToken: j.serviceTokenID != ""})
 	if err != nil {
 		return "not evaluated: the Security Gateway could not check the copy for " + who

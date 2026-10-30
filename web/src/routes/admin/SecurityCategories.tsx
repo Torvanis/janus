@@ -39,9 +39,10 @@ function firstSentence(text: string): string {
   return m?.[1] ?? trimmed;
 }
 
+// The Family categories are Child Safety's (Safety & Security → Child
+// Safety), with their own fixed definitions: not listed or edited here.
 const GROUPS: Array<[SecgwCategoryGroup, MessageKey, MessageKey]> = [
   ['safety', 'adminSecurity.categories.groupSafety', 'adminSecurity.categories.groupSafetyHint'],
-  ['family', 'adminSecurity.categories.groupFamily', 'adminSecurity.categories.groupFamilyHint'],
   ['custom', 'adminSecurity.categories.groupCustom', 'adminSecurity.categories.groupCustomHint'],
 ];
 

@@ -196,6 +196,12 @@ func TestSCIMValidationAndRollback(t *testing.T) {
 	if err = s.DeleteSCIMResource(ctx, "Users", id); err != nil {
 		t.Fatal(err)
 	}
+	// Within the 30-day hold the same externalId is the same person coming
+	// back (TestSCIMDeleteThenReprovisionRestores); once the hold has run
+	// out and the content is purged, the tombstone guards the identity.
+	if err = s.PurgeUserContent(ctx, id); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = s.SaveSCIMResource(ctx, "Users", "", map[string]any{"userName": "new@example.com", "externalId": "directory-key"}); err == nil {
 		t.Fatal("tombstone external ID reused")
 	}

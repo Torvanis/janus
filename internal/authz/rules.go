@@ -30,11 +30,14 @@ type RequestSignals struct {
 }
 
 // SignalsFromRequest extracts rule inputs from an inbound request.
-func SignalsFromRequest(r *http.Request, clientIP, tokenPrefix, model string) RequestSignals {
+// forwardedFor is the X-Forwarded-For chain only when the immediate peer is a
+// trusted proxy (JANUS_TRUSTED_PROXIES), "" otherwise: a client talking to
+// Janus directly could write any address into the header.
+func SignalsFromRequest(r *http.Request, clientIP, forwardedFor, tokenPrefix, model string) RequestSignals {
 	return RequestSignals{
 		UserAgent:    r.Header.Get("User-Agent"),
 		SourceIP:     clientIP,
-		ForwardedFor: r.Header.Get("X-Forwarded-For"),
+		ForwardedFor: forwardedFor,
 		Path:         r.URL.Path,
 		Method:       r.Method,
 		Header:       r.Header,

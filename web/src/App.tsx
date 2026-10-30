@@ -25,6 +25,8 @@ import { ForbiddenPage, NotFoundPage } from './routes/Errors';
 // open them, and the first paint of the dashboard should not pay for them.
 const DocsRoutes = lazy(() => import('./routes/docs/DocsRoutes'));
 const AdminRoutes = lazy(() => import('./routes/admin/AdminRoutes'));
+const ChatPage = lazy(() => import('./routes/chat/ChatPage'));
+const SharedChatPage = lazy(() => import('./routes/chat/SharedChatPage'));
 
 export function App(): ReactNode {
   return (
@@ -79,6 +81,25 @@ function AppRoutes(): ReactNode {
                 <Route path="/subscriptions" element={<SubscriptionsPage />} />
                 <Route path="/subscriptions/:provider" element={<SubscriptionsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route
+                  path="/chat/shared/:share"
+                  element={
+                    <Suspense fallback={<FullPageSpinner />}>
+                      <SharedChatPage />
+                    </Suspense>
+                  }
+                />
+                {['/chat', '/chat/:id'].map((path) => (
+                  <Route
+                    key={path}
+                    path={path}
+                    element={
+                      <Suspense fallback={<FullPageSpinner />}>
+                        <ChatPage />
+                      </Suspense>
+                    }
+                  />
+                ))}
                 <Route
                   path="/admin/*"
                   element={

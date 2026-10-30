@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,10 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/system/upstream-timeouts", s.handleGetUpstreamTimeouts)
 	r.Patch("/admin/system/upstream-timeouts", s.handlePatchUpstreamTimeouts)
 	r.Delete("/admin/system/upstream-timeouts", s.handleDeleteUpstreamTimeouts)
+	// File storage (database or S3-compatible), see storage.go.
+	r.Get("/admin/storage", s.handleGetStorage)
+	r.Put("/admin/storage", s.handlePutStorage)
+	r.Post("/admin/storage/test", s.handleTestStorage)
 	r.Get("/admin/system/discovery-interval", s.handleGetDiscoveryInterval)
 	r.Patch("/admin/system/discovery-interval", s.handlePatchDiscoveryInterval)
 	r.Delete("/admin/system/discovery-interval", s.handleDeleteDiscoveryInterval)
@@ -62,6 +67,10 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/grants", s.handleListGrants)
 	r.Post("/admin/grants", s.gateCreate("grant", s.handleCreateGrant))
 	r.Delete("/admin/grants/{id}", s.handleDeleteGrant)
+	r.Patch("/admin/grants/{id}/chat", s.handleAdminGrantChatLabel)
+	r.Get("/admin/chat", s.handleAdminChatGet)
+	r.Put("/admin/chat", s.handleAdminChatPut)
+	r.Post("/admin/chat/search-test", s.handleAdminChatSearchTest)
 
 	// Service tokens and managed models (see admin_service_tokens.go).
 	s.mountServiceTokenRoutes(r)
@@ -71,6 +80,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/users/{id}", s.handleAdminUserDetail)
 	r.Patch("/admin/users/{id}", s.handlePatchUser)
 	r.Delete("/admin/users/{id}", s.handleDeleteUser)
+	r.Post("/admin/users/{id}/purge", s.handlePurgeUserContent)
 
 	r.Get("/admin/groups", s.handleListGroups)
 	r.Post("/admin/groups", s.gateCreate("group", s.handleCreateGroup))
@@ -187,6 +197,12 @@ func addTotals(a, b store.Totals) store.Totals {
 	return a
 }
 
+// overviewParts are the independently loadable pieces of the admin
+// overview. The console asks for each one separately (?part=) so fast
+// numbers paint while the heavy breakdowns are still running; without
+// ?part the whole document comes back, its pieces computed concurrently.
+var overviewParts = []string{"totals", "series", "leaders", "performance", "quotas"}
+
 func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	start, end, label := rangeBounds(r)
 	// The overview is the ORG-WIDE view: the scope carries no principal
@@ -194,38 +210,215 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	// alongside user traffic. That is the org-pulse rule — cluster-level
 	// numbers count everything the gateway processed.
 	scope := store.UsageScope{Start: start, End: end}
+	want := map[string]bool{}
+	if p := strings.TrimSpace(r.URL.Query().Get("part")); p != "" {
+		for _, one := range strings.Split(p, ",") {
+			one = strings.TrimSpace(one)
+			if !slices.Contains(overviewParts, one) {
+				WriteError(w, r, ErrInvalidRequest("Unknown overview part. Use one of: "+strings.Join(overviewParts, ", ")).WithParam("part"))
+				return
+			}
+			want[one] = true
+		}
+	} else {
+		for _, one := range overviewParts {
+			want[one] = true
+		}
+	}
+	ctx := r.Context()
+	out := map[string]any{"range": label}
+	var mu sync.Mutex
+	set := func(k string, v any) {
+		mu.Lock()
+		out[k] = v
+		mu.Unlock()
+	}
+	var jobs []func() error
+	run := func(fn func() error) { jobs = append(jobs, fn) }
 
-	totals, err := s.Store.AggregateUsage(r.Context(), scope)
-	if err != nil {
+	if want["totals"] {
+		run(func() error {
+			totals, err := s.Store.AggregateUsage(ctx, scope)
+			if err != nil {
+				return err
+			}
+			set("totals", totals)
+			return nil
+		})
+		run(func() error {
+			// Split totals so an admin can see at a glance how much of the
+			// org's consumption is automated versus human.
+			serviceTotals, err := s.Store.AggregateUsage(ctx, store.UsageScope{Start: start, End: end, Principal: store.PrincipalServiceTokens})
+			if err != nil {
+				return err
+			}
+			set("service_token_totals", serviceTotals)
+			return nil
+		})
+		run(func() error {
+			serviceTokenCounts, err := s.Store.CountServiceTokensByStatus(ctx)
+			if err != nil {
+				return err
+			}
+			modelCounts, err := s.Store.CountModelsByStatus(ctx)
+			if err != nil {
+				return err
+			}
+			userCount, err := s.Store.CountUsers(ctx)
+			if err != nil {
+				return err
+			}
+			activeUsers, err := s.Store.ActiveUserCount(ctx, time.Now().UTC().Add(-15*time.Minute))
+			if err != nil {
+				return err
+			}
+			set("service_token_counts", serviceTokenCounts)
+			set("model_counts", modelCounts)
+			set("user_count", userCount)
+			set("active_users_15m", activeUsers)
+			return nil
+		})
+	}
+	bucket, buckets := seriesShape(label)
+	if want["series"] {
+		run(func() error {
+			series, err := s.Store.UsageSeries(ctx, scope, bucket, buckets)
+			if err != nil {
+				return err
+			}
+			set("series", series)
+			return nil
+		})
+	}
+	if want["performance"] {
+		run(func() error {
+			// Performance of the most-used models, on the same buckets as
+			// the org trend so the charts line up.
+			modelPerformance, err := s.Store.ModelPerformanceSeriesFor(ctx, scope, bucket, buckets, overviewPerfModels)
+			if err != nil {
+				return err
+			}
+			if len(modelPerformance.Models) > 0 {
+				upstreams, err := s.Store.ListUpstreams(ctx)
+				if err != nil {
+					return err
+				}
+				names := make(map[string]string, len(upstreams))
+				for _, up := range upstreams {
+					names[up.ID] = up.Name
+				}
+				for i := range modelPerformance.Models {
+					modelPerformance.Models[i].UpstreamName = names[modelPerformance.Models[i].UpstreamID]
+				}
+			}
+			set("model_performance", modelPerformance)
+			return nil
+		})
+	}
+	if want["leaders"] {
+		run(func() error {
+			// Top users rank by output-token volume (the default breakdown
+			// metric), not by spend — usage is the primary leaderboard
+			// signal. This is a PEOPLE-oriented report, so service-token
+			// traffic is excluded; BreakdownUsage enforces that for the
+			// "user" dimension itself.
+			topSpenders, err := s.Store.BreakdownUsage(ctx, scope, "user", store.BreakdownMetricTokensOut)
+			if err != nil {
+				return err
+			}
+			if len(topSpenders) > 10 {
+				topSpenders = topSpenders[:10]
+			}
+			set("top_spenders", topSpenders)
+			return nil
+		})
+		run(func() error {
+			topTeams, err := s.overviewTopTeams(ctx, scope)
+			if err != nil {
+				return err
+			}
+			set("top_teams", topTeams)
+			return nil
+		})
+		run(func() error {
+			// Service tokens get their own leaderboard rather than being
+			// folded into top users: their traffic is counted in the org
+			// totals, so without this panel a busy integration would move
+			// the headline numbers with no visible explanation.
+			topServiceTokens, err := s.Store.BreakdownUsage(ctx, scope, "service_token", store.BreakdownMetricTokensOut)
+			if err != nil {
+				return err
+			}
+			if len(topServiceTokens) > 10 {
+				topServiceTokens = topServiceTokens[:10]
+			}
+			set("top_service_tokens", topServiceTokens)
+			return nil
+		})
+		run(func() error {
+			// The store filters the model breakdown against the model
+			// catalog, so the top-models graph never shows invalid model
+			// names sent by callers.
+			topModels, err := s.Store.BreakdownUsage(ctx, scope, "model", store.BreakdownMetricCost)
+			if err != nil {
+				return err
+			}
+			set("top_models", topModels)
+			return nil
+		})
+		run(func() error {
+			byStatus, err := s.Store.BreakdownUsage(ctx, scope, "status", store.BreakdownMetricCost)
+			if err != nil {
+				return err
+			}
+			set("by_status", byStatus)
+			return nil
+		})
+	}
+	if want["quotas"] {
+		run(func() error {
+			quotas, err := s.Store.ListQuotas(ctx)
+			if err != nil {
+				return err
+			}
+			nearBreach := []map[string]any{}
+			for _, q := range quotas {
+				// Local-only mode: USD quotas are inert (never enforced), so
+				// listing one as "near breach" would be both a cost surface
+				// and a lie.
+				if s.Config.LocalOnly && q.Metric == store.MetricCostUSD {
+					continue
+				}
+				status, err := s.Quota.StatusFor(ctx, q)
+				if err != nil {
+					continue
+				}
+				if status.AtRisk {
+					nearBreach = append(nearBreach, quotaStatusPayload(status))
+				}
+			}
+			set("near_breach", nearBreach)
+			return nil
+		})
+	}
+	if err := parallel(jobs...); err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	// Top users rank by output-token volume (the default breakdown metric),
-	// not by spend — usage is the primary leaderboard signal.
-	//
-	// This is a PEOPLE-oriented report, so service-token traffic is excluded.
-	// BreakdownUsage enforces that for the "user" dimension itself, so the
-	// exclusion cannot be lost by editing this call site.
-	topSpenders, err := s.Store.BreakdownUsage(r.Context(), scope, "user", store.BreakdownMetricTokensOut)
+	WriteJSON(w, http.StatusOK, out)
+}
+
+// overviewTopTeams ranks teams by recorded attribution (never the current
+// roster): one grouped query by recorded team list, an event counting for
+// every team in its list.
+func (s *Server) overviewTopTeams(ctx context.Context, scope store.UsageScope) ([]store.Breakdown, error) {
+	teams, err := s.Store.ListTeams(ctx)
 	if err != nil {
-		WriteError(w, r, err)
-		return
+		return nil, err
 	}
-	if len(topSpenders) > 10 {
-		topSpenders = topSpenders[:10]
-	}
-	// Team scopes use recorded attribution, never the current member roster.
-	teams, err := s.Store.ListTeams(r.Context())
+	bySnapshot, err := s.Store.AggregateUsageBy(ctx, scope, "team_snapshot")
 	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	// One grouped query by recorded team list; an event counts for every
-	// team in its list, exactly as the per-team LIKE filter did.
-	bySnapshot, err := s.Store.AggregateUsageBy(r.Context(), scope, "team_snapshot")
-	if err != nil {
-		WriteError(w, r, err)
-		return
+		return nil, err
 	}
 	perTeam := map[string]store.Totals{}
 	for snapshot, t := range bySnapshot {
@@ -259,121 +452,7 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 	if len(topTeams) > 10 {
 		topTeams = topTeams[:10]
 	}
-	// Service tokens get their own leaderboard rather than being folded into
-	// top users. Their traffic is counted in the org totals above, so without
-	// this panel a busy integration would move the headline numbers with no
-	// visible explanation anywhere in the console.
-	topServiceTokens, err := s.Store.BreakdownUsage(r.Context(), scope, "service_token", store.BreakdownMetricTokensOut)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	if len(topServiceTokens) > 10 {
-		topServiceTokens = topServiceTokens[:10]
-	}
-	// Split totals so an admin can see at a glance how much of the org's
-	// consumption is automated versus human.
-	serviceTotals, err := s.Store.AggregateUsage(r.Context(), store.UsageScope{
-		Start: start, End: end, Principal: store.PrincipalServiceTokens,
-	})
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	serviceTokenCounts, err := s.Store.CountServiceTokensByStatus(r.Context())
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	// The store filters the model breakdown against the model catalog, so the
-	// admin top-models graph never shows invalid model names sent by callers
-	// (those are logged by the store for auditing instead).
-	topModels, err := s.Store.BreakdownUsage(r.Context(), scope, "model", store.BreakdownMetricCost)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	byStatus, err := s.Store.BreakdownUsage(r.Context(), scope, "status", store.BreakdownMetricCost)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	bucket, buckets := seriesShape(label)
-	series, err := s.Store.UsageSeries(r.Context(), scope, bucket, buckets)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	// Performance of the most-used models, on the same buckets as the org
-	// trend so the charts line up.
-	modelPerformance, err := s.Store.ModelPerformanceSeriesFor(r.Context(), scope, bucket, buckets, overviewPerfModels)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	if len(modelPerformance.Models) > 0 {
-		upstreams, err := s.Store.ListUpstreams(r.Context())
-		if err != nil {
-			WriteError(w, r, err)
-			return
-		}
-		names := make(map[string]string, len(upstreams))
-		for _, up := range upstreams {
-			names[up.ID] = up.Name
-		}
-		for i := range modelPerformance.Models {
-			modelPerformance.Models[i].UpstreamName = names[modelPerformance.Models[i].UpstreamID]
-		}
-	}
-	modelCounts, err := s.Store.CountModelsByStatus(r.Context())
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	quotas, err := s.Store.ListQuotas(r.Context())
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	nearBreach := []map[string]any{}
-	for _, q := range quotas {
-		// Local-only mode: USD quotas are inert (never enforced), so listing
-		// one as "near breach" would be both a cost surface and a lie.
-		if s.Config.LocalOnly && q.Metric == store.MetricCostUSD {
-			continue
-		}
-		status, err := s.Quota.StatusFor(r.Context(), q)
-		if err != nil {
-			continue
-		}
-		if status.AtRisk {
-			nearBreach = append(nearBreach, quotaStatusPayload(status))
-		}
-	}
-	userCount, err := s.Store.CountUsers(r.Context())
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	activeUsers, err := s.Store.ActiveUserCount(r.Context(), time.Now().UTC().Add(-15*time.Minute))
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"range": label, "totals": totals, "series": series,
-		"top_teams":    topTeams,
-		"top_spenders": topSpenders, "top_models": topModels, "by_status": byStatus,
-		"model_counts": modelCounts, "near_breach": nearBreach,
-		"user_count": userCount, "active_users_15m": activeUsers,
-		"model_performance": modelPerformance,
-		// Service-token visibility: their traffic is inside "totals" above,
-		// so the console shows what portion it is and which integrations
-		// drive it.
-		"top_service_tokens":   topServiceTokens,
-		"service_token_totals": serviceTotals,
-		"service_token_counts": serviceTokenCounts,
-	})
+	return topTeams, nil
 }
 
 // handleSystemStatus lives in admin_system.go alongside the database-URL
@@ -1018,12 +1097,20 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, r, err)
 			return
 		}
-		rows = append(rows, map[string]any{
+		row := map[string]any{
 			"id": u.ID, "email": u.Email, "name": u.Name, "role": u.Role, "is_active": u.IsActive,
 			"created_at": u.CreatedAt, "last_login_at": u.LastLoginAt, "groups": groups,
 			"spend_30d_usd": usage.USD(totals.CostNano), "requests_30d": totals.Requests,
 			"tokens_out_30d": totals.TokensOut,
-		})
+		}
+		// A deleted person: content held until held_until, or already purged.
+		if u.HeldUntil != nil {
+			row["held_until"] = u.HeldUntil
+		}
+		if u.ContentPurgedAt != nil {
+			row["content_purged_at"] = u.ContentPurgedAt
+		}
+		rows = append(rows, row)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"users": rows, "total_count": total})
 }
@@ -1079,7 +1166,7 @@ func (s *Server) handleAdminUserDetail(w http.ResponseWriter, r *http.Request) {
 	// tokens_out_lt, sort=tokens_in…), so an admin can narrow one user's
 	// recent traffic to large prompts or long completions without leaving the
 	// People page. The 25-row window is applied after the filter.
-	recentFilter := store.RequestFilter{UserID: user.ID, Limit: 25, Sort: r.URL.Query().Get("requests_sort")}
+	recentFilter := store.RequestFilter{UserID: user.ID, Limit: 25, Sort: r.URL.Query().Get("requests_sort"), SkipTotal: true}
 	applyTokenSizeParams(r, &recentFilter)
 	recent, _, err := s.Store.ListRequests(r.Context(), recentFilter)
 	if err != nil {
@@ -1179,10 +1266,20 @@ func (s *Server) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("You cannot disable your own account."))
 		return
 	}
+	// Reactivating an account takes a licensed seat again, so it needs a
+	// free one (admins and bootstrap admins are exempt, as at sign-in).
+	if active && !user.IsActive && role != store.RoleAdmin && !user.AdminViaGroup && !s.isBootstrapAdmin(user.Email) {
+		if err := s.checkSeatAvailableFor(r.Context(), user.ID); err != nil {
+			WriteError(w, r, newError(http.StatusPaymentRequired, "license.seats_exhausted", "license_error", err.Error()))
+			return
+		}
+	}
+	covered := s.childCoveredNow(r.Context())
 	if err := s.Store.UpdateUserAndTeams(r.Context(), id, role, active, body.TeamIDs); err != nil {
 		teamHTTPError(w, r, err)
 		return
 	}
+	s.childCoverageLost(r.Context(), covered, "an administrator changed their teams")
 	if !active {
 		// A disabled account must stop proxying at once, not after a cache TTL.
 		s.InvalidateTokenCache()
@@ -1199,8 +1296,9 @@ func (s *Server) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteUser performs the documented soft delete: the account is marked
-// disabled and every credential it holds is revoked at once. Usage
-// events and audit history are retained — nothing cascades.
+// disabled and every credential it holds is revoked at once. Their
+// content is held for 30 days (restoring the account brings it back), then
+// purged by the retention job. Usage events and audit history are retained.
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	actor := UserFrom(r.Context())
@@ -1229,7 +1327,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.Store.UpdateUser(r.Context(), id, user.Role, false); err != nil {
+	if err := s.Store.MarkUserDeleted(r.Context(), id); err != nil {
 		WriteError(w, r, err)
 		return
 	}
@@ -1242,7 +1340,11 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, "user_deleted", "user", id,
 		map[string]any{"email": user.Email, "role": user.Role, "is_active": user.IsActive},
 		map[string]any{"is_active": false, "tokens_revoked": true})
-	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true, "tokens_revoked": true})
+	out := map[string]any{"id": id, "deleted": true, "tokens_revoked": true}
+	if after, err := s.Store.UserByID(r.Context(), id); err == nil && after.HeldUntil != nil {
+		out["held_until"] = after.HeldUntil.UTC().Format(time.RFC3339)
+	}
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
@@ -1303,13 +1405,18 @@ func (s *Server) handlePatchGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Members != nil {
+		covered := s.childCoveredNow(r.Context())
 		if err := s.Store.SetGroupMembers(r.Context(), id, *body.Members); err != nil {
 			WriteError(w, r, err)
 			return
 		}
+		s.childCoverageLost(r.Context(), covered, "an administrator changed a group mapped to their team")
 	}
 	// Group membership feeds grant resolution on the proxy hot path.
 	s.InvalidateConfigCache()
+	if body.Members != nil || body.Name != nil {
+		s.reevaluateGroupAdmins(r.Context())
+	}
 	s.audit(r, "group_updated", "group", id, nil, map[string]any{"name": body.Name, "members_set": body.Members != nil})
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "updated": true})
 }
@@ -1321,6 +1428,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.InvalidateConfigCache()
+	s.reevaluateGroupAdmins(r.Context())
 	s.audit(r, "group_deleted", "group", id, map[string]any{"id": id}, nil)
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
 }
@@ -1415,6 +1523,7 @@ func (s *Server) handlePatchTeam(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	covered := s.childCoveredNow(r.Context())
 	err := s.Store.WithTeamAction(r.Context(), id, actor.ID, func(tx *store.Store) error {
 		role, err := tx.TeamActorRole(r.Context(), id, actor.ID)
 		if err != nil {
@@ -1461,17 +1570,25 @@ func (s *Server) handlePatchTeam(w http.ResponseWriter, r *http.Request) {
 		teamHTTPError(w, r, err)
 		return
 	}
+	s.childCoverageLost(r.Context(), covered, "an administrator changed their team's members")
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "updated": true})
 }
 
 func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.Store.DeleteTeam(r.Context(), id); err != nil {
+	covered := s.childCoveredNow(r.Context())
+	moved, err := s.Store.ArchiveTeam(r.Context(), id)
+	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	s.audit(r, "team_deleted", "team", id, map[string]any{"id": id}, nil)
-	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true})
+	// API keys bound to the team now run in personal context; drop cached
+	// copies so the switch applies to the very next request.
+	s.InvalidateTokenCache()
+	s.childCoverageLost(r.Context(), covered, "their team was deleted")
+	s.audit(r, "team_deleted", "team", id, map[string]any{"id": id},
+		map[string]any{"switched_to_personal": moved})
+	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "deleted": true, "switched_to_personal": moved})
 }
 
 // --- Quotas ------------------------------------------------------------------
@@ -1945,6 +2062,11 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 			{"value": "quota_breach", "label": "Quota breached"},
 			{"value": "upstream_down", "label": "Upstream unreachable"},
 			{"value": "system", "label": "System events"},
+			{"value": "family_safety", "label": "Child Safety"},
+			{"value": "pool_member_down", "label": "Pool member taken out of rotation"},
+			{"value": "subscription_reauth", "label": "Personal subscription needs reconnecting"},
+			{"value": "license_expiring", "label": "License expiring or expired"},
+			{"value": "chat_failure", "label": "Chat replies failing"},
 			{"value": "all", "label": "Everything"},
 		},
 	})

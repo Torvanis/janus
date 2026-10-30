@@ -41,6 +41,17 @@ function RouterName({ id }: { id: string }) {
   return <>{list.data?.routers.find((r) => r.id === id)?.name ?? 'Router'}</>;
 }
 
+/** A chat's title from the (already cached) conversation list, never its id. */
+function ChatTitle({ id }: { id: string }) {
+  const list = useQuery({
+    queryKey: ['chat', 'conversations'],
+    queryFn: () => api.get<{ conversations: { id: string; title: string }[] }>('/api/v1/chat/conversations'),
+    staleTime: 30000,
+  });
+  const title = list.data?.conversations.find((c) => c.id === id)?.title;
+  return <>{title || (list.data ? 'New chat' : '…')}</>;
+}
+
 export function Breadcrumb({ path }: { path: string }): ReactNode {
   let segments = path.split('/').filter(Boolean);
   const administration = segments[0] === 'admin' && segments[1] === 'teams';
@@ -57,6 +68,12 @@ export function Breadcrumb({ path }: { path: string }): ReactNode {
           <span>
             {index === teamIndex && segment !== 'import' ? (
               <TeamName id={segment} administration={administration} />
+            ) : index === 1 && segments[0] === 'chat' && segment === 'shared' ? (
+              <>Shared</>
+            ) : index === 2 && segments[0] === 'chat' && segments[1] === 'shared' ? (
+              <>Shared chat</>
+            ) : index === 1 && segments[0] === 'chat' ? (
+              <ChatTitle id={segment} />
             ) : index === 1 && segments[0] === 'subscriptions' ? (
               <SubscriptionProviderName id={segment} />
             ) : index === 3 && segments[1] === 'routing' && segments[2] === 'routers' ? (
@@ -75,6 +92,7 @@ export function Breadcrumb({ path }: { path: string }): ReactNode {
                 status: 'System status',
                 import: 'Import teams',
                 routing: 'Auto-routing',
+                chat: 'Chat',
               }[segment] ?? segment.replace(/-/g, ' '))
             )}
           </span>

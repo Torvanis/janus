@@ -112,14 +112,15 @@ func TestFailedDecisionListingKeepsDecisionModels(t *testing.T) {
 	if m.Status != store.ModelEnabled {
 		t.Errorf("a decision model that reappears is %q, want its previous state enabled", m.Status)
 	}
-	// Chat models keep the old rule: back from stale means re-approval.
+	// Chat models resume their previous state too: a listing gap must not
+	// throw away an admin's approval.
 	_ = st.SetModelStatus(ctx, chat(t, st, up.ID).ID, store.ModelEnabled)
 	hideChat.Store(true)
 	_ = svc.RunFor(ctx, up)
 	hideChat.Store(false)
 	_ = svc.RunFor(ctx, up)
-	if c := chat(t, st, up.ID); c.Status != store.ModelPending {
-		t.Errorf("a chat model back from stale is %q, want pending_approval", c.Status)
+	if c := chat(t, st, up.ID); c.Status != store.ModelEnabled {
+		t.Errorf("a chat model back from stale is %q, want its previous state enabled", c.Status)
 	}
 }
 

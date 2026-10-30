@@ -116,8 +116,19 @@ type Manager struct {
 	log   *slog.Logger
 	now   func() time.Time
 
-	mu    sync.RWMutex
-	state State
+	mu       sync.RWMutex
+	state    State
+	onChange func(State)
+}
+
+// OnRefresh registers fn to run after every refresh (start-up, the hourly
+// re-check, Install, Remove, a sync renewal) with the new state: it keeps
+// the expiry gauge current and raises license alerts. It runs on the
+// refreshing goroutine, outside the manager's lock.
+func (m *Manager) OnRefresh(fn func(State)) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
 }
 
 // NewManager builds a manager. file may be "" (database only). pubs nil means
@@ -156,7 +167,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	m.mu.Lock()
 	prev := m.state
 	m.state = st
+	hook := m.onChange
 	m.mu.Unlock()
+	if hook != nil {
+		defer hook(m.State())
+	}
 	if prev.Status != st.Status || prev.Edition != st.Edition || prev.Installed != st.Installed {
 		m.log.Info("license state", "edition", st.Edition, "status", st.Status, "source", st.Source, "seats", st.Seats, "nodes", st.Nodes, "error", st.Error)
 	}

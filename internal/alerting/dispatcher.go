@@ -28,7 +28,10 @@ type Event struct {
 	Body         string
 	UserID       string
 	NotifyAdmins bool
-	Data         map[string]any
+	// Recovery marks the all-clear for an earlier alert: it passes every
+	// rule's severity floor, so whoever was paged also hears it is over.
+	Recovery bool
+	Data     map[string]any
 }
 
 // Triggers understood by the dispatcher.
@@ -38,7 +41,51 @@ const (
 	TriggerQuotaBreach  = "quota_breach"
 	TriggerUpstreamDown = "upstream_down"
 	TriggerSystem       = "system"
+	// TriggerFamilySafety fires when the Family safety policy blocks a
+	// covered user's message or reply, or answers one with support.
+	TriggerFamilySafety = "family_safety"
+	// TriggerPoolMemberDown fires when a load-balanced pool takes a member
+	// out of rotation (once per ejection, cluster-wide).
+	TriggerPoolMemberDown = "pool_member_down"
+	// TriggerSubscriptionReauth fires, to its owner, when a personal
+	// subscription needs reconnecting.
+	TriggerSubscriptionReauth = "subscription_reauth"
+	// TriggerLicenseExpiring fires when the license is about to expire, is
+	// in its grace period, or has expired.
+	TriggerLicenseExpiring = "license_expiring"
+	// TriggerChatFailure fires when Janus Chat replies fail on the
+	// provider's side (rate-limited per model).
+	TriggerChatFailure = "chat_failure"
 )
+
+// severityRank orders severities for a rule's floor; unknown values rank
+// as warning, the default.
+func severityRank(s string) int {
+	switch s {
+	case "info":
+		return 0
+	case "critical":
+		return 2
+	}
+	return 1
+}
+
+// RuleMatches reports whether a rule delivers an event: enabled, the same
+// trigger (or "all"), and the event at or above the rule's severity. A
+// recovery passes any severity floor.
+func RuleMatches(rule *store.AlertRule, ev Event) bool {
+	if !rule.Enabled || (rule.Trigger != ev.Trigger && rule.Trigger != "all") {
+		return false
+	}
+	return ev.Recovery || severityRank(eventSeverity(ev)) >= severityRank(rule.Severity)
+}
+
+func eventSeverity(ev Event) string {
+	if ev.Severity == "" {
+		return "warning"
+	}
+	return ev.Severity
+}
 
 // SMTPConfig holds outbound email settings; an empty Host disables email.
 type SMTPConfig struct {
@@ -102,10 +149,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, ev Event) {
 			recipients[id] = true
 		}
 	}
-	severity := ev.Severity
-	if severity == "" {
-		severity = "warning"
-	}
+	severity := eventSeverity(ev)
 	for userID := range recipients {
 		if err := d.store.CreateNotification(ctx, &store.Notification{
 			UserID: userID, Severity: severity, Title: ev.Title, Body: ev.Body,
@@ -123,7 +167,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, ev Event) {
 		return
 	}
 	for _, rule := range rules {
-		if !rule.Enabled || (rule.Trigger != ev.Trigger && rule.Trigger != "all") {
+		if !RuleMatches(rule, ev) {
 			continue
 		}
 		for _, channel := range rule.Channels {

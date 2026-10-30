@@ -52,6 +52,11 @@ type User struct {
 	Locale        string    `json:"locale"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastLoginAt   time.Time `json:"last_login_at"`
+	// DeletedAt is set while a deleted account's content is held; it is
+	// purged at HeldUntil unless the person is restored first.
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	HeldUntil       *time.Time `json:"held_until,omitempty"`
+	ContentPurgedAt *time.Time `json:"content_purged_at,omitempty"`
 }
 
 // IsAdmin reports whether the user may reach the /admin/v1 surface.
@@ -107,6 +112,9 @@ type Token struct {
 	CreatedAt   time.Time `json:"created_at"`
 	LastUsedAt  time.Time `json:"last_used_at"`
 	RevokedAt   time.Time `json:"revoked_at"` // zero value = active; MarshalJSON emits "" (never the RFC 3339 zero time)
+	// Kind is "" for user-created tokens and TokenKindChat for the hidden
+	// credential that attributes Janus Chat traffic.
+	Kind string `json:"-"`
 }
 
 // Revoked reports whether the token has been withdrawn.
@@ -417,6 +425,10 @@ type Grant struct {
 	GranteeID    string    `json:"grantee_id"`
 	GranteeName  string    `json:"grantee_name"`
 	CreatedAt    time.Time `json:"created_at"`
+	// ChatName / ChatDescription are how this grant presents the model in
+	// the Janus Chat picker; empty = the catalog name.
+	ChatName        string `json:"chat_name"`
+	ChatDescription string `json:"chat_description"`
 }
 
 // ServiceTokenPrefix marks a credential as belonging to a service token rather
@@ -829,6 +841,14 @@ type UsageEvent struct {
 	// served through (empty otherwise), so quotas scoped to that alias
 	// count routed traffic and rebuild correctly from the event log.
 	ServedManagedModelID string `json:"served_managed_model_id,omitempty"`
+	// ChatMessageID ties a Janus Chat call to the reply it was made for
+	// (every round and sub-call of one reply carries it), so the reply
+	// shows the whole reply's tokens and cost. Empty for API traffic.
+	ChatMessageID string `json:"chat_message_id,omitempty"`
+	// ChatSubcall marks a Chat call after the first of one user action
+	// (tool rounds, retries, media and title calls): its tokens and cost
+	// count in full, but it is not counted again as a request.
+	ChatSubcall bool `json:"chat_subcall,omitempty"`
 	// Classification is the label given to the request ("coding/rust")
 	// when it was classified inline. Background labels are written later,
 	// to classification_result, and joined onto the request log by

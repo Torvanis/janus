@@ -205,3 +205,27 @@ func TestCodexIsPersonalOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestCodexStreamFixesContentType: the ChatGPT backend labels its stream
+// text/plain; the translated chat.completions stream must reach clients as
+// text/event-stream (Janus Chat reads the body by Content-Type). A JSON
+// error type is left alone.
+func TestCodexStreamFixesContentType(t *testing.T) {
+	c := &Codex{}
+	req := codexReq(`{"messages":[{"role":"user","content":"hi"}],"stream":true}`, true)
+	for _, tc := range []struct{ in, want string }{
+		{"text/plain; charset=utf-8", "text/event-stream"},
+		{"", "text/event-stream"},
+		{"text/event-stream; charset=utf-8", "text/event-stream"},
+		{"application/json", "application/json"},
+	} {
+		h := http.Header{}
+		if tc.in != "" {
+			h.Set("Content-Type", tc.in)
+		}
+		c.NewStreamTransformer(req, h)
+		if got := h.Get("Content-Type"); got != tc.want {
+			t.Errorf("Content-Type %q -> %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

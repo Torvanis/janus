@@ -290,7 +290,11 @@ type SecgwSnapshot struct {
 	// Usage insights categories already resolved, so a content-safety
 	// check with method "categories" never reads the database per request.
 	Categories map[string]*SecgwCategory
-	LoadedAt   time.Time
+	// Family is the built-in Family safety policy. It is independent of
+	// the bindings above (Empty does not look at it): it never goes
+	// through Resolve and applies alongside every other policy.
+	Family   *SecgwFamilySnapshot
+	LoadedAt time.Time
 }
 
 // Empty reports whether no binding exists at all — the common case in a
@@ -320,6 +324,9 @@ func (s *Store) LoadSecgwSnapshot(ctx context.Context) (*SecgwSnapshot, error) {
 		snap.Bindings = append(snap.Bindings, b)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if snap.Family, err = s.LoadSecgwFamilySnapshot(ctx); err != nil {
 		return nil, err
 	}
 	if len(snap.Bindings) > 0 {
@@ -570,6 +577,10 @@ func (s *Store) ListSecgwViolations(ctx context.Context, f SecgwViolationFilter)
 		where = append(where, "request_id = ?")
 		args = append(args, f.RequestID)
 	}
+	if f.PolicyID != "" {
+		where = append(where, "policy_id = ?")
+		args = append(args, f.PolicyID)
+	}
 	if f.ModelName != "" {
 		where = append(where, "model_name = ?")
 		args = append(args, f.ModelName)
@@ -657,8 +668,9 @@ func (s *Store) resolveSecgwViolationLabels(ctx context.Context, vs []*SecgwViol
 	fill(lists, `SELECT name FROM secgw_term_list WHERE id = ?`)
 	fill(models, `SELECT COALESCE(NULLIF(display_name, ''), name) FROM model WHERE id = ?`)
 	// Whether each owning policy captures matched text. Only prompt_injection
-	// may capture at all, so any other kind is reported as capture-disabled:
-	// its text was never eligible to be stored.
+	// and content_safety may capture at all (secgw.Violation.CaptureText), so
+	// any other kind is reported as capture-disabled: its text was never
+	// eligible to be stored. Child Safety never keeps what a child wrote.
 	captures := map[string]bool{}
 	for _, v := range vs {
 		if v.PolicyID == "" {
@@ -688,7 +700,12 @@ func (s *Store) resolveSecgwViolationLabels(ctx context.Context, vs []*SecgwViol
 		for _, part := range strings.Split(v.RuleID, ",") {
 			name := catNames[strings.TrimSpace(part)]
 			if name == "" {
-				name = strings.TrimSpace(part)
+				// Child Safety's own categories are not secgw_category rows.
+				if c, ok := ChildCategory(strings.TrimSpace(part)); ok {
+					name = c.Name
+				} else {
+					name = strings.TrimSpace(part)
+				}
 			}
 			v.RuleNames = append(v.RuleNames, name)
 		}
@@ -700,9 +717,13 @@ func (s *Store) resolveSecgwViolationLabels(ctx context.Context, vs []*SecgwViol
 		v.UserLabel = users[v.UserID]
 		v.ServiceTokenName = tokens[v.ServiceTokenID]
 		v.PolicyName = policies[v.PolicyID]
+		if v.PolicyID == SecgwFamilyPolicyID {
+			v.PolicyName = SecgwFamilyPolicyName
+		}
 		v.TermListName = lists[v.RuleID]
 		if !v.HasMatchText {
-			v.CaptureDisabled = v.Kind != string(SecgwCheckPromptInjection) || !captures[v.PolicyID]
+			capturable := v.Kind == string(SecgwCheckPromptInjection) || v.Kind == string(SecgwCheckContentSafety)
+			v.CaptureDisabled = !capturable || v.PolicyID == SecgwFamilyPolicyID || !captures[v.PolicyID]
 		}
 	}
 }
@@ -805,12 +826,8 @@ func (s *Store) SetModelClassifierRole(ctx context.Context, id, role string) err
 		// Decision models may be granted to callers (served on the
 		// decision endpoints), but a chat alias must not end up pointing
 		// at one.
-		var managed int
-		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM managed_model WHERE target_model_id = ? OR fallback_model_id = ?`, id, id).Scan(&managed); err != nil {
+		if err := s.assertNotServedByAlias(ctx, id); err != nil {
 			return err
-		}
-		if managed > 0 {
-			return &ValidationError{Field: "classifier_role", Message: "a managed model points at this model; repoint it first"}
 		}
 		var grants int
 		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM model_grant WHERE model_id = ?`, id).Scan(&grants); err != nil {
@@ -830,15 +847,30 @@ func (s *Store) SetModelClassifierRole(ctx context.Context, id, role string) err
 		if n > 0 {
 			return &ValidationError{Field: "classifier_role", Message: "remove this model's grants first: a classifier must never be directly callable"}
 		}
-		var managed int
-		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM managed_model WHERE target_model_id = ? OR fallback_model_id = ?`, id, id).Scan(&managed); err != nil {
+		if err := s.assertNotServedByAlias(ctx, id); err != nil {
 			return err
-		}
-		if managed > 0 {
-			return &ValidationError{Field: "classifier_role", Message: "a managed model points at this model; repoint it first"}
 		}
 	}
 	return s.setClassifierRole(ctx, id, role)
+}
+
+// assertNotServedByAlias refuses a classifier role for a model a managed
+// model serves through: its target, its fallback, or a member of its pool.
+// A classifier must never answer callers, and an alias would let it.
+func (s *Store) assertNotServedByAlias(ctx context.Context, id string) error {
+	var managed int
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM managed_model WHERE target_model_id = ? OR fallback_model_id = ?`, id, id).Scan(&managed); err != nil {
+		return err
+	}
+	if managed == 0 {
+		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM managed_model_target WHERE model_id = ?`, id).Scan(&managed); err != nil {
+			return err
+		}
+	}
+	if managed > 0 {
+		return &ValidationError{Field: "classifier_role", Message: "a managed model points at this model (as its target, fallback or pool member); repoint it first"}
+	}
+	return nil
 }
 
 // setClassifierRole writes the role and bumps the model revision, so

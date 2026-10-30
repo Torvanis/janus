@@ -9,21 +9,30 @@ import (
 	"time"
 )
 
-const userColumns = `id, auth_provider_id, email, name, role, admin_via_group, is_active, timezone, locale, created_at, last_login_at`
+const userColumns = `id, auth_provider_id, email, name, role, admin_via_group, is_active, timezone, locale, created_at, last_login_at, deleted_at, content_purged_at`
 
 func scanUser(scan func(dest ...any) error) (*User, error) {
 	var u User
 	var active int
-	var created, lastLogin string
+	var created, lastLogin, deleted, purged string
 	// admin_via_group is scanned as a Go bool because the column is a real
 	// BOOLEAN on PostgreSQL and an INTEGER 0/1 on SQLite; database/sql
 	// converts both into bool, whereas an int destination only works on one.
-	if err := scan(&u.ID, &u.AuthID, &u.Email, &u.Name, &u.Role, &u.AdminViaGroup, &active, &u.Timezone, &u.Locale, &created, &lastLogin); err != nil {
+	if err := scan(&u.ID, &u.AuthID, &u.Email, &u.Name, &u.Role, &u.AdminViaGroup, &active, &u.Timezone, &u.Locale, &created, &lastLogin, &deleted, &purged); err != nil {
 		return nil, err
 	}
 	u.IsActive = active == 1
 	u.CreatedAt = ParseTime(created)
 	u.LastLoginAt = ParseTime(lastLogin)
+	if deleted != "" {
+		at := ParseTime(deleted)
+		until := at.Add(UserDeleteHold)
+		u.DeletedAt, u.HeldUntil = &at, &until
+	}
+	if purged != "" {
+		at := ParseTime(purged)
+		u.ContentPurgedAt = &at
+	}
 	return &u, nil
 }
 
@@ -71,7 +80,7 @@ func (s *Store) UpsertUserFromIdentity(ctx context.Context, authID, email, name 
 			IsActive:      true, CreatedAt: nowUTC(), LastLoginAt: nowUTC(),
 		}
 		if err := s.exec(ctx,
-			`INSERT INTO app_user (`+userColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			`INSERT INTO app_user (`+userColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,'','')`,
 			u.ID, u.AuthID, u.Email, u.Name, u.Role, u.AdminViaGroup, 1, "", "", FormatTime(u.CreatedAt), FormatTime(u.LastLoginAt)); err != nil {
 			return nil, false, err
 		}
@@ -198,9 +207,16 @@ func (s *Store) ListUsers(ctx context.Context, f UserFilter) ([]*User, int, erro
 	return out, total, rows.Err()
 }
 
-// UpdateUser applies admin changes to role / active state.
+// UpdateUser applies admin changes to role / active state. Enabling a
+// deleted account restores it: the content hold ends and nothing is purged.
 func (s *Store) UpdateUser(ctx context.Context, id, role string, isActive bool) error {
-	return s.exec(ctx, `UPDATE app_user SET role = ?, is_active = ? WHERE id = ?`, role, boolInt(isActive), id)
+	if err := s.exec(ctx, `UPDATE app_user SET role = ?, is_active = ? WHERE id = ?`, role, boolInt(isActive), id); err != nil {
+		return err
+	}
+	if isActive {
+		return s.clearUserDeleted(ctx, id)
+	}
+	return nil
 }
 
 // UpdateUserPreferences stores viewer-owned display preferences.
@@ -224,6 +240,17 @@ func (s *Store) ActiveSeatCount(ctx context.Context, since time.Time) (int, erro
 		u.last_login_at >= ? OR EXISTS (SELECT 1 FROM usage_event e WHERE e.user_id = u.id AND e.created_at >= ?))`,
 		FormatTime(since), FormatTime(since)).Scan(&n)
 	return n, err
+}
+
+// UserHoldsSeat reports whether the user already counts toward
+// ActiveSeatCount (active and seen since the window start), so a seat check
+// for them must not treat them as an extra seat.
+func (s *Store) UserHoldsSeat(ctx context.Context, userID string, since time.Time) (bool, error) {
+	var n int
+	err := s.queryRow(ctx, `SELECT COUNT(*) FROM app_user u WHERE u.id = ? AND u.is_active = 1 AND (
+		u.last_login_at >= ? OR EXISTS (SELECT 1 FROM usage_event e WHERE e.user_id = u.id AND e.created_at >= ?))`,
+		userID, FormatTime(since), FormatTime(since)).Scan(&n)
+	return n > 0, err
 }
 
 // ActiveUserCount reports distinct users seen in the trailing window.

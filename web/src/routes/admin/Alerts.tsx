@@ -272,7 +272,7 @@ function CreateAlertModal({
         </select>
       </Field>
 
-      <Field label={t('adminAlerts.colSeverity')}>
+      <Field label={t('adminAlerts.colSeverity')} hint={t('adminAlerts.severityHint')}>
         <select className="select" value={severity} onChange={(event) => setSeverity(event.target.value)}>
           <option value="info">{t('adminAlerts.severityInfo')}</option>
           <option value="warning">{t('adminAlerts.severityWarning')}</option>

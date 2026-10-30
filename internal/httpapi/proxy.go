@@ -16,7 +16,6 @@ import (
 
 	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/authz"
-	"github.com/torvanis/janus/internal/classify"
 	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/secgw"
@@ -109,6 +108,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if s.trustsForwardedFor(r) {
 		event.XForwardedFor = truncate(r.Header.Get("X-Forwarded-For"), 512)
 	}
+	// A Janus Chat call: the browser's user agent and referer, the reply it
+	// belongs to, and whether it is a sub-call of that reply.
+	chatCall := chatCallFrom(r.Context())
+	if chatCall != nil {
+		event.ChatMessageID, event.ChatSubcall = chatCall.origin.messageID, chatCall.subcall
+		if chatCall.origin.userAgent != "" {
+			event.UserAgent = truncate(chatCall.origin.userAgent, 1024)
+		}
+		event.Referer = truncate(chatCall.origin.referer, 512)
+	}
 	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "multipart/") {
 		event.AttachmentCount = countMultipartSections(body)
 	} else if strings.Contains(strings.ToLower(ct), "json") && !bodyOverflows {
@@ -195,7 +204,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	} else {
 		tokenPrefix = token.Prefix
 	}
-	signals := authz.SignalsFromRequest(r, event.ClientIP, tokenPrefix, modelName)
+	signals := authz.SignalsFromRequest(r, event.ClientIP, s.trustedForwardedFor(r), tokenPrefix, modelName)
+	if chatCall != nil {
+		// Header rules see the browser's headers, as for its API traffic.
+		signals.Header, signals.UserAgent = chatCallHeaders(chatCall, r.Header), event.UserAgent
+	}
 	if rule, clause := authz.Match(rules, signals); rule != nil {
 		event.BlockingRuleID = rule.ID
 		if err := s.Store.RecordRuleHit(ctx, rule.ID); err != nil {
@@ -215,10 +228,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	//    Buckets live in this process; each replica enforces the configured
 	//    rate independently. Service tokens are bucketed under their own id,
 	//    so a rule targeting a service token throttles that integration only.
-	if refused, resetAt := s.rateLimitExceeded(ctx, quotaSubjectID, r.URL.Path); refused {
-		s.rejectProxyEvent(w, r, ErrRateLimited(
-			"You have exceeded the request rate configured for this endpoint. Wait for the limit to refill and retry.").WithReset(resetAt), event, started)
-		return
+	//    A Chat sub-call (a later round or tool call of one reply) is not
+	//    a request of its own: the user's message was counted once.
+	if !event.ChatSubcall {
+		if refused, resetAt := s.rateLimitExceeded(ctx, quotaSubjectID, r.URL.Path); refused {
+			s.rejectProxyEvent(w, r, ErrRateLimited(
+				"You have exceeded the request rate configured for this endpoint. Wait for the limit to refill and retry.").WithReset(resetAt), event, started)
+			return
+		}
 	}
 
 	// 3. Model resolution and grant check.
@@ -312,7 +329,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// A pool picks its member per request. The per-target runtime
 		// fallback rules don't apply: members are health-checked directly
 		// and the fallback serves only when every member is out.
-		route = s.choosePoolMember(ctx, r, body, event, resolved.Managed)
+		route = chatPoolMembers(s.choosePoolMember(ctx, r, body, event, resolved.Managed))
 		switch {
 		case route != nil:
 			resolved.Model = route.current()
@@ -329,6 +346,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	model := resolved.Model
 	if model != nil && model.ClassifierRole == store.ClassifierRoleDecision {
 		s.rejectProxyEvent(w, r, ErrInvalidRequest(modelName+" resolves to a decision model. Send decision requests to /v1/decisions (OpenAI format) or /v1/systemone (System One format).").WithParam("model"), event, started)
+		return
+	}
+	if model != nil && model.ClassifierRole != "" {
+		// A guard classifier only judges traffic; an alias, fallback or
+		// pool must never let it answer (saving one is refused too).
+		s.rejectProxyEvent(w, r, errClassifierServes(modelName), event, started)
 		return
 	}
 
@@ -402,7 +425,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// model field is rewritten to the native name before the adapter sees it.
 	// Requests already carrying the native name skip this branch entirely and
 	// are forwarded byte-for-byte, exactly as before renames existed.
-	if modelName != model.Name {
+	// A bodyless request (a video job's status check or download: GET
+	// /v1/videos/{id}) names its model in X-Janus-Model or ?model= for
+	// routing only; there is nothing to rewrite and nothing to refuse.
+	if modelName != model.Name && len(body) > 0 {
 		if bodyOverflows {
 			s.rejectProxyEvent(w, r, errAliasRewriteImpossible(modelName, model.Name,
 				"the request body is too large for the gateway to buffer and rewrite"), event, started)
@@ -446,13 +472,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	secgwEff := secgwEng.Resolve(secgwSub)
 	var secgwViolations []secgw.Violation
 	// A live router's classifier call starts now, in parallel with the
-	// guards, unless it can ride on a guard call to the same classifier or
-	// a policy may redact (the classifier must then read the redacted text,
-	// so it is asked after the guards).
+	// guards, unless it can ride on a guard call to the same classifier, a
+	// policy may block or redact (the classifier must then read only text
+	// that is actually forwarded, so it is asked after the guards), or
+	// Child Safety covers the caller (it may stop the message too).
 	var routeExtras []*secgw.Extra
 	if pendRoute != nil && !pendRoute.decided && pendRoute.extra != nil {
 		rides := s.guardWillCall(ctx, secgwEff, pendRoute)
-		if pendRoute.mode == store.RouterModeLive && !rides && !policyRedacts(secgwEff) {
+		if pendRoute.mode == store.RouterModeLive && !rides && !policyMayStop(secgwEff) && !secgwEng.FamilyCovers(event.UserID) {
 			s.startOwnCall(ctx, pendRoute)
 		}
 		if rides {
@@ -498,20 +525,70 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		secgwActionHeader(w, dec.Action, dec.Redactions)
 	}
+	// 3b'. Family safety: the built-in Community policy, for covered users
+	//      only, independent of (and after) every Business policy, so it
+	//      judges the text the upstream will actually see.
+	familyOn := secgwEng.FamilyCovers(event.UserID)
+	// childInstr is what Child Safety adds to this request's prompt (the
+	// age range's base text, the tutor rule, matched categories); it goes
+	// on the final body after every guard and routing pass has read the
+	// caller's own text.
+	childInstr := ""
+	if familyOn {
+		if bodyOverflows {
+			s.rejectProxyEvent(w, r, ErrPayloadTooLarge(maxInMemoryBody), event, started)
+			return
+		}
+		// The name called and the alias or router it names; the model it
+		// resolves to only when no router is addressed (a router's
+		// default may not serve: routing picks a model the child may use).
+		names := []string{modelName}
+		if resolved.Managed != nil {
+			names = append(names, resolved.Managed.ID, resolved.Managed.Name)
+		}
+		if resolved.Model != nil && router == nil {
+			names = append(names, resolved.Model.ID, resolved.Model.PublicName())
+		}
+		if familyModelBlocked(secgwEng, event.UserID, names...) {
+			event.SecgwAction = store.SecgwActionBlocked
+			s.rejectProxyEvent(w, r, errFamily(familyModelNotice), event, started)
+			return
+		}
+		familyStart := time.Now()
+		answered := s.familyIngress(w, r, secgwEng, event, body, secgwViolations, secgwEff.Policy, started, &childInstr)
+		trace.Child("secgw.family_ingress", telemetry.SpanKindInternal, familyStart, time.Now())
+		if answered {
+			return
+		}
+		// The family call ran after the guards: the request waited for both.
+		guardStats.Elapsed = time.Duration(event.ClassifierMs) * time.Millisecond
+		guardStats.Calls = event.ClassifierCalls
+	}
 
 	// quotaAlso lists the managed models the request answers to (the
 	// router or alias the caller addressed, and an alias a route serves
 	// through), so quota rules scoped to them apply too.
 	quotaAlso := []string{event.ManagedModelID}
+	// poolBase is the resolution a pool route serves through, so a retry
+	// onto another member resolves that member's Security Gateway subject.
+	poolBase := resolved
 
 	// 3c. Auto-routing: settle the decision (waiting at most the router's
 	// budget), then serve from the chosen route.
 	var evalCap *evalCapture
+	// servedManaged is the alias or pool a route served through (Child
+	// Safety checks it as well as the model).
+	var servedManaged *store.ManagedModel
+	// insightsBody is the caller's text as forwarded (after every ingress
+	// pass), before Janus adds router or Child Safety instructions: Usage
+	// insights classifies what the caller asked, not the admin's text.
+	var insightsBody []byte
 	if pendRoute != nil {
-		if !pendRoute.decided && pendRoute.mode == store.RouterModeLive && pendRoute.own == nil && (pendRoute.extra == nil || !pendRoute.extra.Ran) && pendRoute.extra != nil {
+		if !pendRoute.decided && pendRoute.extra != nil && !pendRoute.extra.Ran && (pendRoute.mode != store.RouterModeLive || pendRoute.own == nil) {
 			// Not answered on a guard call and not started yet (a policy
-			// may have redacted): ask now, about the forwarded text.
-			if t := classify.TrimText(secgw.NewTurnText(body), pendRoute.st.settings.MaxChars); strings.TrimSpace(t) != "" {
+			// may have redacted): ask about the forwarded text. A shadow
+			// router decides in the background, from the same text.
+			if t := routeTextFrom(body, pendRoute.st.settings.MaxChars); strings.TrimSpace(t) != "" {
 				pendRoute.extra.Text = t
 			}
 			s.startOwnCall(ctx, pendRoute)
@@ -525,7 +602,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		for {
 			switch {
 			case isPool(served):
-				route = s.choosePoolMember(ctx, r, body, event, served.Managed)
+				route = chatPoolMembers(s.choosePoolMember(ctx, r, body, event, served.Managed))
 				switch {
 				case route != nil:
 					served.Model = route.current()
@@ -551,12 +628,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			event.FallbackReason = served.FallbackReason
 		}
 		if served.Managed != nil && served.Managed.ID != router.ID {
+			servedManaged = served.Managed
 			quotaAlso = append(quotaAlso, served.Managed.ID)
 			// Recorded on the event so the alias's quota is consumed (and
 			// rebuilds from the event log count it), not only checked.
 			event.ServedManagedModelID = served.Managed.ID
 		}
 		model = served.Model
+		poolBase = served
+		if model != nil && model.ClassifierRole != "" {
+			s.rejectProxyEvent(w, r, errClassifierServes(modelName), event, started)
+			return
+		}
 		s.stampServedModel(ctx, event, model)
 		if rewritten, ok := rewriteJSONModelField(body, model.Name); ok {
 			body = rewritten
@@ -572,6 +655,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			secgwEff = eff2
 			if !added.Empty() {
 				dec, derr := secgwEng.Ingress(ctx, added, secgw.Request{Body: body, IsServiceToken: serviceToken != nil})
+				// This pass ran after the first: the request waited for
+				// both, and its classifier calls count too.
+				guardStats.Elapsed += dec.Model.Elapsed
+				guardStats.Calls += dec.Model.Calls
 				if derr != nil {
 					s.Logger.ErrorContext(ctx, "secgw: ingress (routed model)", "error", derr.Error(), "request_id", event.RequestID)
 					s.rejectProxyEvent(w, r, ErrInternal(), event, started)
@@ -596,6 +683,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// Router instructions go on the final body, exactly once: after
 		// both ingress passes (the guards judge the caller's text only)
 		// and after any fall back to the default chose who serves.
+		insightsBody = body
 		body = s.applyRouteInstructions(w, pendRoute, event, body)
 		if pendRoute.mode == store.RouterModeLive || pendRoute.extra == nil {
 			defer s.recordRouteDecision(pendRoute, event, model)
@@ -609,12 +697,45 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		defer func() { s.finishEvalSample(evalCap, event) }()
 	}
 
+	if insightsBody == nil {
+		insightsBody = body
+	}
+	// Child Safety: a route the router picked may be a model the child's
+	// age range blocks; then the instructions go on the final body.
+	if familyOn {
+		names := []string{}
+		if model != nil {
+			names = append(names, model.ID, model.PublicName(), model.Name)
+		}
+		if servedManaged != nil {
+			names = append(names, servedManaged.ID, servedManaged.Name)
+		}
+		if len(names) > 0 && familyModelBlocked(secgwEng, event.UserID, names...) {
+			event.SecgwAction = store.SecgwActionBlocked
+			s.rejectProxyEvent(w, r, errFamily(familyModelNotice), event, started)
+			return
+		}
+		out, ok := injectChildInstructions(r.URL.Path, body, childInstr)
+		if !ok {
+			event.SecgwAction = store.SecgwActionBlocked
+			s.rejectProxyEvent(w, r, errFamily(familyEndpointNotice), event, started)
+			return
+		}
+		body = out
+	}
+
 	// 4. Quota enforcement, ahead of any upstream contact so a breached
 	//    principal can never incur provider spend. quotaSubject carries
 	//    whichever principal kind is calling, so a service token is bounded
 	//    by its own rules exactly as a user is bounded by theirs.
 	quotaStart := time.Now()
-	decision, err := s.Quota.Check(ctx, quotaSubject, model.ID, quotaAlso...)
+	var decision quota.Decision
+	if event.ChatSubcall {
+		// Request-count quotas admitted the user's message already.
+		decision, err = s.Quota.CheckIgnoring(ctx, quotaSubject, model.ID, store.MetricRequests, quotaAlso...)
+	} else {
+		decision, err = s.Quota.Check(ctx, quotaSubject, model.ID, quotaAlso...)
+	}
 	s.Metrics.QuotaCheckLatency.Observe(time.Since(quotaStart).Seconds())
 	trace.Child("quota.check", telemetry.SpanKindInternal, quotaStart, time.Now())
 	if err != nil {
@@ -637,7 +758,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if pendingClass != nil && (classExtra == nil || !classExtra.Ran) {
 		// Not answered on a guard call: classify exactly the body the
 		// upstream will see (after any Security Gateway redaction).
-		pendingClass = s.prepareClassificationUnsampled(ctx, pendingClass, body)
+		pendingClass = s.prepareClassificationUnsampled(ctx, pendingClass, insightsBody)
 	}
 	cs := s.finishClassification(ctx, w, pendingClass)
 	trace.Child("classification", telemetry.SpanKindInternal, classifyStart, time.Now())
@@ -681,6 +802,28 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	)
 	if route != nil {
 		defer route.end()
+	}
+	// poolMemberEligible decides whether a retry may move the request onto
+	// another pool member. Every check the first member passed must hold
+	// for it too: it is skipped (never tried) when the Security Gateway
+	// would apply different checks to it than the ones this body already
+	// passed, when Child Safety blocks it for this caller, or when one of
+	// the caller's quotas on it is used up. Skipping rather than re-running
+	// ingress keeps the egress checks (resolved once, above) exactly right.
+	poolMemberEligible := func(next *store.Model) bool {
+		if next.ClassifierRole != "" {
+			return false
+		}
+		served := poolBase
+		served.Model = next
+		if effectiveDiffers(secgwEff, secgwEng.Resolve(secgwSubjectFor(event, groupIDs, router, served))) {
+			return false
+		}
+		if familyOn && familyModelBlocked(secgwEng, event.UserID, next.ID, next.PublicName(), next.Name) {
+			return false
+		}
+		d, qerr := s.Quota.Check(ctx, quotaSubject, next.ID, quotaAlso...)
+		return qerr == nil && d.Allowed
 	}
 	for {
 		if route != nil && route.attempts() > 1 {
@@ -740,6 +883,27 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			body, viaResponses, cfit = s.fitCatalogBody(model.ID, body, catalogFit{})
 			if viaResponses && upstream.AdapterType == "openai_compatible" {
 				providerAdapter = adapter.ResponsesFallback()
+			}
+		}
+		// Provider-run tools (web search, X search) exist only on the
+		// Responses API: serve such a chat request through the Responses
+		// translation, and refuse a tool the provider does not run rather
+		// than send it to fail upstream or silently drop it.
+		if isChat && !bodyOverflows {
+			if hosted := adapter.HostedTools(body); len(hosted) > 0 {
+				runs := adapter.HostedToolsFor(upstream.AdapterType, upstream.BaseURL)
+				if personal != nil {
+					runs = adapter.HostedToolSupport(personal.provider.InferenceBaseURL())
+				}
+				for _, h := range hosted {
+					if !runs[h] {
+						s.rejectProxyEvent(w, r, ErrInvalidRequest(fmt.Sprintf("%s does not run the %s tool, and Janus never runs code or tools itself for a provider. Remove it, or use a model whose provider runs it.", upstream.Name, h)).WithParam("tools"), event, started)
+						return
+					}
+				}
+				if upstream.AdapterType == "openai_compatible" {
+					providerAdapter = adapter.ResponsesFallback()
+				}
 			}
 		}
 		// adapterReq is handed to Prepare AND to the response-side hooks
@@ -802,14 +966,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if route != nil {
 			route.begin(s.poolRegistry())
 		}
-		resp, err = s.upstreamHTTPClient(ctx).Do(outbound)
+		resp, err = s.sendUpstream(ctx, outbound, prepared, event, adapterReq.Body)
 		if err != nil {
 			s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "unreachable").Inc()
 			trace.Child("upstream.call", telemetry.SpanKindClient, upstreamStart, time.Now(),
 				telemetry.String("upstream", upstream.Name), telemetry.String("error", "unreachable"))
 			if route != nil && !clientGone(ctx, err) {
 				s.poolFailure(ctx, route, "unreachable: "+err.Error())
-				if !bodyOverflows && route.advance() {
+				if !bodyOverflows && route.advanceTo(poolMemberEligible) {
 					model = s.poolRetry(ctx, route, event)
 					continue
 				}
@@ -821,7 +985,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if memberFaultStatus(resp.StatusCode) {
 				s.poolFailure(ctx, route, "HTTP "+strconv.Itoa(resp.StatusCode))
 			}
-			if !bodyOverflows && route.advance() {
+			if !bodyOverflows && route.advanceTo(poolMemberEligible) {
 				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 				_ = resp.Body.Close()
 				model = s.poolRetry(ctx, route, event)
@@ -863,7 +1027,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					if out, rerr := http.NewRequestWithContext(ctx, r.Method, again.URL, bytes.NewReader(again.Body)); rerr == nil {
 						out.Header = again.Header
 						out.ContentLength = int64(len(again.Body))
-						if second, derr := s.upstreamHTTPClient(ctx).Do(out); derr == nil {
+						if second, derr := s.sendUpstream(ctx, out, again, event, retryReq.Body); derr == nil {
 							_ = resp.Body.Close()
 							resp = second
 							defer func() { _ = second.Body.Close() }()
@@ -894,7 +1058,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 					if out, rerr := http.NewRequestWithContext(ctx, r.Method, again.URL, bytes.NewReader(again.Body)); rerr == nil {
 						out.Header = again.Header
 						out.ContentLength = int64(len(again.Body))
-						if second, derr := s.upstreamHTTPClient(ctx).Do(out); derr == nil {
+						if second, derr := s.sendUpstream(ctx, out, again, event, retryReq.Body); derr == nil {
 							_ = resp.Body.Close()
 							resp = second
 							defer func() { _ = second.Body.Close() }()
@@ -922,7 +1086,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				break
 			}
-			second, a, req2, sent := s.resendFitted(ctx, r, providerAdapter, up, adapterReq, retry)
+			second, a, req2, sent := s.resendFitted(ctx, r, providerAdapter, up, adapterReq, retry, event)
 			if !sent {
 				break
 			}
@@ -990,6 +1154,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	event.Streaming = streaming
 
 	var extracted adapter.Usage
+	// family is the Family safety reply gate for a covered user.
+	var family *familyEgress
 	// outputEstimateBytes is what the byte-count fallback divides by four
 	// when the upstream reported no usage: the generated text for a stream
 	// (see streamTextCounter), the whole body for a buffered response.
@@ -1005,7 +1171,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if hasEgressChecks(secgwEff) && resp.StatusCode < 300 {
 			hold = stream.New(secgwHoldBytes(secgwEff), secgwEng.MaxSpan(), secgwStreamScanner(secgwEng, secgwEff))
 		}
-		extracted, outputEstimateBytes = s.relayStream(w, r, resp, providerAdapter, transformer, event, hardKill, quotaSubject, rates, hold, &secgwViolations)
+		if familyOn && resp.StatusCode < 300 {
+			family = newFamilyEgress(secgwEng, event, r.URL.Path, adapterReq.Body, &secgwViolations)
+		}
+		extracted, outputEstimateBytes = s.relayStream(w, r, resp, providerAdapter, transformer, event, hardKill, quotaSubject, rates, hold, &secgwViolations, family)
 		if event.ErrorCode == CodeUpstreamInterrupted {
 			s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "stream_interrupted").Inc()
 		}
@@ -1014,15 +1183,18 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if hasEgressChecks(secgwEff) && resp.StatusCode < 300 {
 			egress = &secgwEgress{eng: secgwEng, eff: secgwEff, sink: &secgwViolations, reqBody: adapterReq.Body}
 		}
+		if familyOn && resp.StatusCode < 300 {
+			family = newFamilyEgress(secgwEng, event, r.URL.Path, adapterReq.Body, &secgwViolations)
+		}
 		copyResponseHeaders(w, resp.Header)
-		extracted = s.relayBuffered(w, resp, providerAdapter, adapterReq, event, rates, upstreamStart, egress)
+		extracted = s.relayBuffered(w, resp, providerAdapter, adapterReq, event, rates, upstreamStart, egress, family)
 	}
 	if len(secgwViolations) > 0 {
 		event.SecgwViolations = secgw.Recorded(secgwViolations)
 		if event.SecgwAction == "" {
 			event.SecgwAction = store.SecgwActionObserved
 		}
-	} else if secgwEff != nil && !secgwEff.Empty() && event.SecgwAction == "" {
+	} else if (familyOn || (secgwEff != nil && !secgwEff.Empty())) && event.SecgwAction == "" {
 		// A policy covered this request and found nothing. Recorded so the
 		// log can distinguish "inspected, clean" from "never inspected".
 		event.SecgwAction = store.SecgwActionChecked
@@ -1067,6 +1239,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.attachSecgwViolations(event, secgwEff.Policy, secgwViolations)
+	if family != nil {
+		s.attachFamilyNotice(event, family.notice)
+	}
 	s.recordEvent(ctx, event, quotaSubject, model, trace)
 	s.observeProxyMetrics(event, upstream.Name, started)
 }
@@ -1102,7 +1277,8 @@ func (s *Server) effectiveUpstreamTimeouts(ctx context.Context) config.UpstreamT
 // All three timeout knobs are wired into the transport:
 //   - the dialer timeout bounds connection establishment,
 //   - ResponseHeaderTimeout bounds time-to-first-byte after the request is sent,
-//   - the client timeout bounds the whole exchange.
+//   - the client timeout bounds the whole exchange — except a streamed
+//     proxy reply, which doUpstream bounds by silence instead.
 //
 // TLSClientConfig carries the JANUS_CA_BUNDLE trust store so internally-signed
 // upstreams (corporate vLLM/Ollama behind a private CA) verify; it is nil —
@@ -1126,6 +1302,42 @@ func (s *Server) upstreamHTTPClient(ctx context.Context) *http.Client {
 			"connect_seconds", int(timeouts.Connect.Seconds()),
 			"ttfb_seconds", int(timeouts.TTFB.Seconds()),
 			"total_seconds", int(timeouts.Total.Seconds()))
+	}
+	return next.client
+}
+
+// upstreamHTTPClientFor is upstreamHTTPClient for a request of the given
+// modality. Media generation sends no byte until the media (or its first
+// chunk) is ready: OpenAI's gpt-image models take 30–120 s, and a streamed
+// gpt-4o-mini-tts was measured at 59–82 s to first byte on 5 of 6 direct
+// calls. For image, video, speech and other audio the time-to-first-byte
+// limit is the total timeout; the default 30 s TTFB cut every such request
+// off with a 503 although the provider was working normally. Everything
+// else keeps the configured TTFB, which is what catches a hung text
+// upstream early.
+func (s *Server) upstreamHTTPClientFor(ctx context.Context, modality string) *http.Client {
+	switch modality {
+	case adapter.ModalityImage, adapter.ModalityVideo, adapter.ModalityTTS, adapter.ModalityAudio:
+	default:
+		return s.upstreamHTTPClient(ctx)
+	}
+	timeouts := s.effectiveUpstreamTimeouts(ctx)
+	if timeouts.Total > timeouts.TTFB || timeouts.Total == 0 {
+		timeouts.TTFB = timeouts.Total
+	}
+	if current := s.upstreamMediaClient.Load(); current != nil && current.timeouts == timeouts {
+		return current.client
+	}
+	s.upstreamClientMu.Lock()
+	defer s.upstreamClientMu.Unlock()
+	current := s.upstreamMediaClient.Load()
+	if current != nil && current.timeouts == timeouts {
+		return current.client
+	}
+	next := &upstreamClientState{timeouts: timeouts, client: s.buildUpstreamClient(timeouts)}
+	s.upstreamMediaClient.Store(next)
+	if current != nil {
+		current.client.CloseIdleConnections()
 	}
 	return next.client
 }
@@ -1211,10 +1423,24 @@ func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Us
 		event.AccountingMode = usage.AccountingUpstream
 	case usage.ByteEstimatable(event.Modality):
 		event.TokensIn = usage.EstimateTokensFromBytes(event.RequestBytes)
+		if event.Modality == adapter.ModalitySTT {
+			// The request is an audio upload: ~bytes/4 of it is tens of
+			// thousands of phantom tokens (a 4-second WAV = 46,586).
+			// Whisper's text/srt/vtt formats carry no usage block; only the
+			// transcript is countable.
+			event.TokensIn = 0
+		}
 		if outputBytes < 0 {
 			outputBytes = event.ResponseBytes
 		}
 		event.TokensOut = usage.EstimateTokensFromBytes(outputBytes)
+		if !usage.ByteEstimatableOutput(event.Modality) {
+			// Embeddings return vectors and moderation a verdict, never
+			// generated text: no provider bills output tokens for them, and
+			// ~bytes/4 of a float array (190 KB from Gemini for two lines)
+			// is tens of thousands of phantom tokens fed into quotas.
+			event.TokensOut = 0
+		}
 		// Byte estimation cannot see cache writes; they stay zero so the
 		// cost formula degrades to exactly the pre-cache-write arithmetic.
 		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
@@ -1248,6 +1474,9 @@ func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Us
 		CacheWrite5m: event.TokensCacheWrite5m, CacheWrite1h: event.TokensCacheWrite1h,
 		CachedDisjoint: extracted.CachedDisjoint,
 	}, rates)
+	// Hosted tool fees (web searches at the provider's per-call price) are
+	// part of what the request cost.
+	event.CostNano += extracted.ToolFeeNano
 }
 
 // chooseGrantedCandidate returns the first of preferred+alternatives that the
@@ -1336,6 +1565,67 @@ func throughputHeaders(event *store.UsageEvent) map[string]string {
 	}
 }
 
+// refuseOversizedGuarded decides what happens to a non-streaming response
+// larger than MaxResponseBytes when a reply-side check applies. Such a body
+// cannot be judged whole, so it is never passed through unchecked:
+//
+//   - Child Safety covers the caller: the reply is withheld (the child gets
+//     the stop notice). A reply that cannot be judged is never shown to a
+//     covered child.
+//   - A Business egress policy applies: its deterministic detectors scan the
+//     retained prefix. A hit in block or redact mode withholds the response
+//     (a body relayed unbuffered cannot be rewritten); observe-mode hits are
+//     recorded and the response is relayed as before.
+//
+// It returns true when it answered the request. Unguarded traffic (large
+// image payloads) is relayed byte-for-byte by the caller.
+func (s *Server) refuseOversizedGuarded(w http.ResponseWriter, resp *http.Response, event *store.UsageEvent, payload []byte, egress *secgwEgress, family *familyEgress) bool {
+	if resp.StatusCode >= 300 || (egress == nil && family == nil) {
+		return false
+	}
+	refuse := func(apiErr *APIError, action string, sink []secgw.Violation) {
+		event.ResponseBytes = int64(len(payload))
+		event.SecgwAction = action
+		event.SecgwViolations = secgw.Recorded(sink)
+		// The body says why (a security refusal); the log agrees with it.
+		event.ErrorCode = apiErr.Code
+		apiErr.RequestID = event.RequestID
+		event.HTTPStatus = apiErr.Status()
+		s.Metrics.PolicyRejections.WithLabelValues(apiErr.Code).Inc()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(apiErr.Status())
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": apiErr})
+	}
+	if family != nil {
+		s.Logger.Warn("child safety: oversized reply withheld, it cannot be judged", "bytes_read", len(payload), "request_id", event.RequestID)
+		refuse(errFamily(familyReplyStopNotice), store.SecgwActionBlocked, *family.sink)
+		return true
+	}
+	vs := egress.eng.ScanEgressText(egress.eff, string(payload), 0)
+	stop := store.SecgwCheckKind("")
+	for i := range vs {
+		vs[i].Action = store.SecgwActionObserved
+		if c, ok := egress.eff.Has(vs[i].Kind, store.SecgwDirectionEgress); ok && (c.Mode == store.SecgwModeBlock || c.Mode == store.SecgwModeRedact) {
+			vs[i].Action = store.SecgwActionBlocked
+			if stop == "" {
+				stop = vs[i].Kind
+			}
+		}
+	}
+	*egress.sink = append(*egress.sink, vs...)
+	if stop == "" {
+		if len(vs) > 0 && event.SecgwAction == "" {
+			event.SecgwAction = store.SecgwActionObserved
+		}
+		event.SecgwViolations = secgw.Recorded(*egress.sink)
+		return false
+	}
+	apiErr := ErrSecurityBlocked(stop, false)
+	apiErr.Message = "The model's response was withheld: it is too large to be checked in full, and the part that was checked matched your organisation's security policy."
+	refuse(apiErr, store.SecgwActionBlocked, *egress.sink)
+	return true
+}
+
 // relayBuffered forwards a non-streaming response and extracts token counts.
 //
 // Bodies are buffered up to MaxResponseBytes+1: the extra byte detects
@@ -1346,13 +1636,16 @@ func throughputHeaders(event *store.UsageEvent) map[string]string {
 // skipped for those (the prefix is unparseable JSON); metering falls back to
 // byte counting. What must never happen is the pre-fix behaviour: a truncated
 // body delivered under the upstream's success status with no error signal.
-func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, providerAdapter adapter.Adapter, adapterReq *adapter.Request, event *store.UsageEvent, rates usage.Rates, upstreamStart time.Time, egress *secgwEgress) adapter.Usage {
+func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, providerAdapter adapter.Adapter, adapterReq *adapter.Request, event *store.UsageEvent, rates usage.Rates, upstreamStart time.Time, egress *secgwEgress, family *familyEgress) adapter.Usage {
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, s.Config.MaxResponseBytes+1))
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return adapter.Usage{}
 	}
 	if int64(len(payload)) > s.Config.MaxResponseBytes {
+		if s.refuseOversizedGuarded(w, resp, event, payload, egress, family) {
+			return adapter.Usage{}
+		}
 		w.WriteHeader(resp.StatusCode)
 		total, err := io.Copy(w, io.MultiReader(bytes.NewReader(payload), resp.Body))
 		if err != nil {
@@ -1426,6 +1719,41 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 		}
 	}
 
+	// Family safety, reply side: the whole reply is judged before a byte
+	// of it is returned. Unlike Business content safety this blocks.
+	if family != nil && resp.StatusCode < 300 {
+		stopped := family.judge(adapterReq.Context, s, event, "", secgw.FamilyReplyText(payload))
+		if stopped && family.withheld {
+			// The whole reply gave the answer away: the child gets the
+			// tutor's note instead (a normal 200 reply).
+			s.applyUsage(event, extracted, rates, -1)
+			event.SecgwAction = store.SecgwActionWithheld
+			event.SecgwViolations = secgw.Recorded(*family.sink)
+			WriteJSON(w, http.StatusOK, map[string]any{"id": "chatcmpl-" + event.RequestID, "object": "chat.completion", "created": time.Now().Unix(),
+				"model": event.ModelName, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": familyWithheldNote}, "finish_reason": "stop"}},
+				"usage": map[string]any{"prompt_tokens": extracted.TokensIn, "completion_tokens": extracted.TokensOut, "total_tokens": extracted.TokensIn + extracted.TokensOut}})
+			return extracted
+		}
+		if stopped {
+			s.applyUsage(event, extracted, rates, -1)
+			event.SecgwAction = store.SecgwActionBlocked
+			event.SecgwViolations = secgw.Recorded(*family.sink)
+			event.ErrorCode = CodeSecurityBlocked
+			msg := familyReplyStopNotice
+			if family.notice != nil && family.notice.failed {
+				msg = familyUnavailableNotice
+			}
+			apiErr := errFamily(msg)
+			apiErr.RequestID = event.RequestID
+			event.HTTPStatus = apiErr.Status()
+			s.Metrics.PolicyRejections.WithLabelValues(CodeSecurityBlocked).Inc()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(apiErr.Status())
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": apiErr})
+			return extracted
+		}
+	}
+
 	// Cost is only knowable after the body is parsed, so this header is
 	// meaningful on buffered responses only (streams carry no trailer here).
 	// It must carry the same value the metering pipeline records, so the
@@ -1476,7 +1804,7 @@ const hardKillRecheckInterval = 250 * time.Millisecond
 // already has a 200, so the event keeps that status but carries
 // upstream.stream_interrupted, and the client gets the same in-band error
 // frame as every other cut instead of a stream that just stops.
-func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.Response, providerAdapter adapter.Adapter, transformer adapter.StreamTransformer, event *store.UsageEvent, hardKill bool, subject quota.Subject, rates usage.Rates, hold *stream.Holdback, violations *[]secgw.Violation) (adapter.Usage, int64) {
+func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.Response, providerAdapter adapter.Adapter, transformer adapter.StreamTransformer, event *store.UsageEvent, hardKill bool, subject quota.Subject, rates usage.Rates, hold *stream.Holdback, violations *[]secgw.Violation, family *familyEgress) (adapter.Usage, int64) {
 	s.Metrics.StreamsActive.Inc()
 	defer s.Metrics.StreamsActive.Dec()
 
@@ -1493,15 +1821,53 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 	// text is older than the hold window and scanned clean; on a blocking
 	// match it drops everything held (never written) and reports a cut.
 	// Returns false when the stream must stop.
-	write := func(out []byte) bool {
-		if hold == nil {
-			if _, err := w.Write(out); err != nil {
+	// The Family safety gate sits after the Business hold-back: a frame
+	// leaves only once both have cleared it. The gate holds whole judged
+	// paragraphs, so it only ever releases text a classifier has passed.
+	var gate *stream.ParagraphGate
+	if family != nil {
+		gate = family.gate(r.Context(), s, event)
+	}
+	familyCut := func() {
+		s.Logger.InfoContext(r.Context(), "stream cut by family safety", "request_id", event.RequestID)
+		s.writeFamilyStreamCut(w, flusher, event, family.notice != nil && family.notice.failed, family.withheld)
+	}
+	// emit writes frames the Business hold-back released, through the
+	// family gate when one applies. Returns false when the stream must stop.
+	emit := func(frames [][]byte, final bool) bool {
+		if gate != nil {
+			var out [][]byte
+			for _, f := range frames {
+				gr := gate.Feed(f)
+				if gr.Cut {
+					familyCut()
+					return false
+				}
+				out = append(out, gr.Release...)
+			}
+			if final {
+				gr := gate.Flush()
+				if gr.Cut {
+					familyCut()
+					return false
+				}
+				out = append(out, gr.Release...)
+			}
+			frames = out
+		}
+		for _, f := range frames {
+			if _, err := w.Write(f); err != nil {
 				return false
 			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-			return true
+		}
+		if len(frames) > 0 && flusher != nil {
+			flusher.Flush()
+		}
+		return true
+	}
+	write := func(out []byte) bool {
+		if hold == nil {
+			return emit([][]byte{out}, false)
 		}
 		res := hold.Feed(out)
 		if violations != nil {
@@ -1522,15 +1888,7 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 		if res.Redactions > 0 && event.SecgwAction == "" {
 			event.SecgwAction = store.SecgwActionRedacted
 		}
-		for _, f := range res.Release {
-			if _, err := w.Write(f); err != nil {
-				return false
-			}
-		}
-		if len(res.Release) > 0 && flusher != nil {
-			flusher.Flush()
-		}
-		return true
+		return emit(res.Release, false)
 	}
 	cutByPolicy := false
 
@@ -1612,6 +1970,17 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 			if err != io.EOF {
 				readErr = err
 			}
+			if err == io.EOF && !stopped {
+				// A translation whose provider sends no [DONE] closes the
+				// stream itself (Gemini native).
+				if fin, ok := transformer.(adapter.StreamFinisher); ok {
+					if out := fin.FinishStream(); len(out) > 0 {
+						text.Feed(out)
+						sawDone = true
+						_ = write(out)
+					}
+				}
+			}
 			break
 		}
 	}
@@ -1628,20 +1997,43 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 				"relayed_bytes", total, "cause", cause)
 			event.ErrorCode = CodeUpstreamInterrupted
 			// Release what the hold window still holds before the error so
-			// the client sees everything the model actually produced.
+			// the client sees everything the model actually produced (that
+			// Family safety, when it applies, has judged).
+			var held [][]byte
 			if hold != nil {
-				for _, f := range hold.Flush() {
+				held = hold.Flush()
+				hold = nil
+			}
+			released := true
+			if gate != nil {
+				released = emit(held, true)
+				gate = nil
+			} else {
+				for _, f := range held {
 					if _, err := w.Write(f); err != nil {
 						break
 					}
 				}
-				hold = nil
 			}
-			s.writeStreamInterruptedError(w, flusher, cause, event.RequestID)
+			if released {
+				s.writeStreamInterruptedError(w, flusher, cause, event.RequestID)
+			} else {
+				cutByPolicy = event.SecgwAction == store.SecgwActionStreamCut
+			}
 		}
 	}
-	if hold != nil && !cutByPolicy {
-		// End of stream: release whatever the hold window still holds.
+	if (hold != nil || gate != nil) && !cutByPolicy && !stopped {
+		// End of stream: release whatever the hold window still holds,
+		// and judge what the family gate still holds.
+		var held [][]byte
+		if hold != nil {
+			held = hold.Flush()
+		}
+		_ = emit(held, true)
+	} else if hold != nil && gate == nil && !cutByPolicy {
+		// The gateway stopped the stream (quota, cap, client gone): the
+		// Business hold-back releases what it holds as before. With a
+		// family gate nothing unjudged is ever released.
 		for _, f := range hold.Flush() {
 			if _, err := w.Write(f); err != nil {
 				break
@@ -1882,8 +2274,12 @@ func (s *Server) recordEvent(ctx context.Context, event *store.UsageEvent, subje
 		if model != nil {
 			modelID = model.ID
 		}
+		requests := int64(1)
+		if event.ChatSubcall {
+			requests = 0 // counted once, on the reply's first call
+		}
 		if err := s.Quota.Record(bg, subject, modelID, quota.Delta{
-			TokensIn: event.TokensIn, TokensOut: event.TokensOut, CostNano: event.CostNano, Requests: 1,
+			TokensIn: event.TokensIn, TokensOut: event.TokensOut, CostNano: event.CostNano, Requests: requests,
 		}, event.ManagedModelID, event.ServedManagedModelID); err != nil {
 			s.Logger.ErrorContext(bg, "record quota consumption", "error", err.Error(), "request_id", event.RequestID)
 		}
@@ -1960,6 +2356,8 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	var noPersonal []map[string]any
+	s.childFilterCatalog(r.Context(), user, &catalog, &noPersonal)
 	data := make([]map[string]any, 0, len(catalog.Models)+len(catalog.Managed))
 	for _, m := range catalog.Models {
 		// The listed id is the caller-facing catalog name (the admin-set
@@ -1994,6 +2392,8 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 	if personalModels, err := s.personalCatalog(r.Context(), user); err != nil {
 		s.Logger.WarnContext(r.Context(), "list personal subscription models", "error", err.Error())
 	} else {
+		var empty GrantedCatalog
+		s.childFilterCatalog(r.Context(), user, &empty, &personalModels)
 		data = append(data, personalModels...)
 	}
 	for _, mm := range catalog.Managed {
@@ -2140,6 +2540,25 @@ func extractModelName(body []byte, r *http.Request) string {
 	return ""
 }
 
+// usesHostedTools reports a request that asks the provider to run tools
+// itself (any tool type other than a client-side function).
+func usesHostedTools(body []byte) bool {
+	var probe struct {
+		Tools []struct {
+			Type string `json:"type"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(body, &probe) != nil {
+		return false
+	}
+	for _, t := range probe.Tools {
+		if t.Type != "" && t.Type != "function" && t.Type != "custom" {
+			return true
+		}
+	}
+	return false
+}
+
 func isStreamingRequest(body []byte) bool {
 	var probe struct {
 		Stream bool `json:"stream"`
@@ -2195,6 +2614,15 @@ func copyResponseHeaders(w http.ResponseWriter, src http.Header) {
 			w.Header().Add(key, v)
 		}
 	}
+}
+
+// trustedForwardedFor is the X-Forwarded-For chain when it came through a
+// trusted proxy, "" otherwise (what policy rules may match on).
+func (s *Server) trustedForwardedFor(r *http.Request) string {
+	if !s.trustsForwardedFor(r) {
+		return ""
+	}
+	return r.Header.Get("X-Forwarded-For")
 }
 
 func (s *Server) trustsForwardedFor(r *http.Request) bool {

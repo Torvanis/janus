@@ -23,6 +23,7 @@ const CODES_EMITTED_BY_GATEWAY = [
   'policy.subscription_reauth_required',
   'license.required',
   'license.feature_not_licensed',
+  'license.seats_exhausted',
   'not_found_error',
   'upstream.unavailable',
   'upstream.rate_limit',

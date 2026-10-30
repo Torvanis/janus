@@ -277,7 +277,7 @@ func TestCaptureRoundTripDatabaseEncryptedAndDisk(t *testing.T) {
 			} else if !strings.HasPrefix(c.RequestBody, "enc:") {
 				t.Fatalf("database body must be stored through the cipher: %q", c.RequestBody)
 			}
-			req, resp, err := rec.Bodies(c)
+			req, resp, err := rec.Bodies(ctx, c)
 			if err != nil {
 				t.Fatalf("read bodies: %v", err)
 			}

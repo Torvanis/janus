@@ -45,6 +45,7 @@ type poolRoute struct {
 	order   []*store.Model
 	reason  string
 	next    int
+	tried   int // members actually tried (skipped ineligible ones excluded)
 	release func()
 	tokens  float64
 }
@@ -140,7 +141,7 @@ func (s *Server) choosePoolMember(ctx context.Context, r *http.Request, body []b
 	if len(pick.Order) == 0 {
 		return nil
 	}
-	route := &poolRoute{poolID: managed.ID, reason: pick.Reason, tokens: balancer.EstimatePromptTokens(body)}
+	route := &poolRoute{poolID: managed.ID, reason: pick.Reason, tokens: balancer.EstimatePromptTokens(body), tried: 1}
 	for _, m := range pick.Order {
 		if model := byID[m.ID]; model != nil {
 			route.order = append(route.order, model)
@@ -169,18 +170,52 @@ func (p *poolRoute) end() {
 	}
 }
 
-// advance moves to the next member when a retry is allowed.
-func (p *poolRoute) advance() bool {
-	if p == nil || p.next+1 >= len(p.order) || p.next+1 >= maxPoolAttempts {
+// advanceTo moves to the next member that eligible accepts, skipping the
+// rest, when a retry is allowed. When none is left the route stays on the
+// member that just failed, exactly as when the pool is exhausted.
+func (p *poolRoute) advanceTo(eligible func(*store.Model) bool) bool {
+	if p == nil || p.tried >= maxPoolAttempts {
 		return false
 	}
-	p.next++
-	p.reason = balancer.ReasonRetry
-	return true
+	for i := p.next + 1; i < len(p.order); i++ {
+		if eligible(p.order[i]) {
+			p.next = i
+			p.tried++
+			p.reason = balancer.ReasonRetry
+			return true
+		}
+	}
+	return false
 }
 
 // attempts is how many members have been tried.
-func (p *poolRoute) attempts() int { return p.next + 1 }
+func (p *poolRoute) attempts() int {
+	if p.tried == 0 {
+		return p.next + 1
+	}
+	return p.tried
+}
+
+// chatPoolMembers drops pool members that carry a classifier role: a
+// classifier never answers chat, even when it was made one after joining
+// the pool. A pool of classifiers only (a decision pool called on the chat
+// path) is left as is, so the proxy refuses it with a message that says why.
+func chatPoolMembers(p *poolRoute) *poolRoute {
+	if p == nil {
+		return nil
+	}
+	kept := p.order[:0:0]
+	for _, m := range p.order {
+		if m.ClassifierRole == "" {
+			kept = append(kept, m)
+		}
+	}
+	if len(kept) == 0 {
+		return p
+	}
+	p.order = kept
+	return p
+}
 
 // poolRetry switches the request to the route's next member and restamps
 // the usage event, which records the member that finally served.
@@ -215,6 +250,7 @@ func (s *Server) poolFailure(ctx context.Context, p *poolRoute, why string) {
 		if err := s.Store.EjectPoolMember(ctx, e); err != nil {
 			s.Logger.WarnContext(ctx, "publish pool ejection", "error", err.Error())
 		}
+		s.alertPoolMemberDown(ctx, p.poolID, model, until, why)
 	}()
 }
 
@@ -228,6 +264,7 @@ func (s *Server) poolSuccess(ctx context.Context, p *poolRoute) {
 		// Lift the published ejection early so other replicas re-admit it
 		// now rather than at the deadline.
 		_ = s.Store.ClearPoolMemberEjection(ctx, p.poolID, model.ID)
+		_, _ = s.Store.ReleaseAlert(ctx, poolAlertKey(p.poolID, model.ID))
 		s.Logger.InfoContext(ctx, "pool member reinstated", "pool_id", p.poolID, "model", model.PublicName())
 	}
 }
@@ -406,4 +443,10 @@ func (s *Server) handlePoolHealth(w http.ResponseWriter, r *http.Request) {
 		out = append(out, h)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"pool": m.Pool, "members": out, "checked_at": now.UTC()})
+}
+
+// errClassifierServes refuses a chat request that resolves to a Security
+// Gateway classifier (through an alias, a fallback or a pool member).
+func errClassifierServes(name string) *APIError {
+	return ErrInvalidRequest(name + " resolves to a Security Gateway classifier, which only checks traffic and never answers requests. Ask an administrator to point it at a chat model.").WithParam("model")
 }

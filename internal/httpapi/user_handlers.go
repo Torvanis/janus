@@ -59,6 +59,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			leads = append(leads, t.ID)
 		}
 	}
+	chatOK, chatWhy := s.chatAllowedFor(r.Context(), user)
 	WriteJSON(w, http.StatusOK, map[string]any{
 		// The EFFECTIVE role, not the stored column. A user promoted through
 		// an admin group has full admin capability at the API, but their
@@ -77,7 +78,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"endpoint": s.Config.PublicURL + "/v1",
 		// Local-only mode (JANUS_LOCAL_ONLY): the SPA hides every
 		// cost/spend/pricing surface when true.
-		"local_only": s.Config.LocalOnly,
+		"local_only":   s.Config.LocalOnly,
+		"chat_preview": chatOK,
+		// Why Chat is unavailable (instance off / not in the allowed
+		// groups), so the SPA can explain instead of hiding silently.
+		"chat_unavailable_reason": chatWhy,
 		// Whether the Subscriptions page (personal vendor plans) is offered:
 		// the administrator's switch, and never in offline mode.
 		"personal_subscriptions": personalSubs,
@@ -218,7 +223,9 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTokenDetail(w http.ResponseWriter, r *http.Request) {
 	user := UserFrom(r.Context())
 	token, err := s.Store.TokenByID(r.Context(), chi.URLParam(r, "id"))
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && token.Kind != "") {
+		// Gateway-owned credentials (Janus Chat attribution) are not user
+		// tokens: they cannot be viewed, revoked or reported on here.
 		WriteError(w, r, ErrNotFoundf("That token"))
 		return
 	}
@@ -237,7 +244,9 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFrom(r.Context())
 	id := chi.URLParam(r, "id")
 	token, err := s.Store.TokenByID(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && token.Kind != "") {
+		// Gateway-owned credentials (Janus Chat attribution) are not user
+		// tokens: they cannot be viewed, revoked or reported on here.
 		WriteError(w, r, ErrNotFoundf("That token"))
 		return
 	}
@@ -297,9 +306,23 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// The caller's own connected plans (my/<provider>/<model>), the same
+	// list /v1/models appends. They are not grants and never depend on the
+	// "Working under" selection: the owner's plan pays, wherever they work.
+	// A failure here hides them rather than failing the whole catalog.
+	personal, err := s.personalCatalog(r.Context(), user)
+	if err != nil {
+		s.Logger.WarnContext(r.Context(), "list personal subscription models", "error", err.Error())
+		personal = nil
+	}
+	if personal == nil {
+		personal = []map[string]any{}
+	}
+	s.childFilterCatalog(r.Context(), user, &catalog, &personal)
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"models":         catalog.Models,
-		"managed_models": catalog.Managed,
+		"models":          catalog.Models,
+		"managed_models":  catalog.Managed,
+		"personal_models": personal,
 	})
 }
 
@@ -723,39 +746,44 @@ func (s *Server) handlePersonalDashboard(w http.ResponseWriter, r *http.Request)
 	// exclusion survives any future change to how the scope is built.
 	scope := store.UsageScope{UserID: user.ID, Start: start, End: end, Principal: store.PrincipalUsers}
 
-	totals, err := s.Store.AggregateUsage(r.Context(), scope)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	// Model breakdowns are catalog-filtered by the store: names recorded from
-	// requests with invalid model identifiers are logged there, never graphed.
-	byModel, err := s.Store.BreakdownUsage(r.Context(), scope, "model", store.BreakdownMetricCost)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	byModality, err := s.Store.BreakdownUsage(r.Context(), scope, "modality", store.BreakdownMetricCost)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
-	byToken, err := s.Store.BreakdownUsage(r.Context(), scope, "token", store.BreakdownMetricCost)
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
+	ctx := r.Context()
+	var (
+		totals                    store.Totals
+		byModel, byModality, byTk []store.Breakdown
+		series                    []store.TimePoint
+		recent                    []*store.UsageEvent
+	)
 	bucket, buckets := seriesShape(label)
-	series, err := s.Store.UsageSeries(r.Context(), scope, bucket, buckets)
+	// Independent reads over the same range: run together so the page waits
+	// for the slowest one, not their sum.
+	err := parallel(
+		func() (err error) { totals, err = s.Store.AggregateUsage(ctx, scope); return },
+		// Model breakdowns are catalog-filtered by the store: names recorded
+		// from requests with invalid model identifiers are logged there,
+		// never graphed.
+		func() (err error) {
+			byModel, err = s.Store.BreakdownUsage(ctx, scope, "model", store.BreakdownMetricCost)
+			return
+		},
+		func() (err error) {
+			byModality, err = s.Store.BreakdownUsage(ctx, scope, "modality", store.BreakdownMetricCost)
+			return
+		},
+		func() (err error) {
+			byTk, err = s.Store.BreakdownUsage(ctx, scope, "token", store.BreakdownMetricCost)
+			return
+		},
+		func() (err error) { series, err = s.Store.UsageSeries(ctx, scope, bucket, buckets); return },
+		func() (err error) {
+			recent, _, err = s.Store.ListRequests(ctx, store.RequestFilter{UserID: user.ID, Limit: 5, SkipTotal: true})
+			return
+		},
+	)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	recent, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{UserID: user.ID, Limit: 5})
-	if err != nil {
-		WriteError(w, r, err)
-		return
-	}
+	byToken := byTk
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"range": label, "start": start, "end": end,
 		"totals": totals, "per_model": byModel, "per_modality": byModality,
@@ -955,7 +983,7 @@ func (s *Server) handleGlobalDashboard(w http.ResponseWriter, r *http.Request) {
 	// identity — so the decorative layer never becomes an information leak on
 	// a shared screen. The window matches the series above.
 	recent, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{
-		Start: now.Add(-2 * time.Hour), End: now, Limit: 60,
+		Start: now.Add(-2 * time.Hour), End: now, Limit: 60, SkipTotal: true,
 	})
 	if err != nil {
 		WriteError(w, r, err)
@@ -1019,7 +1047,9 @@ func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
 	user := UserFrom(r.Context())
 	tokenID := chi.URLParam(r, "id")
 	token, err := s.Store.TokenByID(r.Context(), tokenID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && token.Kind != "") {
+		// Gateway-owned credentials (Janus Chat attribution) are not user
+		// tokens: they cannot be viewed, revoked or reported on here.
 		WriteError(w, r, ErrNotFoundf("That token"))
 		return
 	}
@@ -1036,7 +1066,7 @@ func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
 	// range (not just the recent page), and per_model must not include the
 	// user's other tokens.
 	scope := store.UsageScope{TokenID: tokenID, Start: start, End: end}
-	events, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{TokenID: tokenID, Start: start, End: end, Limit: 25})
+	events, _, err := s.Store.ListRequests(r.Context(), store.RequestFilter{TokenID: tokenID, Start: start, End: end, Limit: 25, SkipTotal: true})
 	if err != nil {
 		WriteError(w, r, err)
 		return

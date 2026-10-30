@@ -225,6 +225,12 @@ type pendingRoute struct {
 	st     *routingState
 	cands  []routing.Candidate
 	text   string
+	// contextual is set when text carries earlier turns as context, so it
+	// is not the text the guards judge and cannot share their call.
+	contextual bool
+	// sticky is the conversation's remembered route when only this
+	// turn's difficulty is still asked (the route's thinking scales).
+	sticky *routing.Decision
 	// stickyKey identifies the conversation (empty when stickiness is off
 	// or the request carries nothing stable to key on).
 	stickyKey string
@@ -308,9 +314,12 @@ func (s *Server) prepareRoute(ctx context.Context, r *http.Request, body []byte,
 		pr.settle(routing.Default(cfg, 0, store.RouteReasonNoText, nil))
 		return pr
 	}
-	// The new turn, exactly as the guards read it, so the questions can
-	// share their call. An own call trims it to the routing limit.
-	pr.text = secgw.NewTurnText(body)
+	// The new turn with the earlier conversation as context: a follow-up
+	// ("Keep going", "What about Ohio?") is routed by what the
+	// conversation is about. A first turn is the new turn exactly as the
+	// guards read it, so the questions can share their call.
+	pr.text = secgw.ContextText(body, st.settings.MaxChars)
+	pr.contextual = pr.text != secgw.NewTurnText(body)
 	if strings.TrimSpace(pr.text) == "" {
 		pr.text = classify.TrimText(classify.ExtractText(body, classify.ScopeLastUser, false), st.settings.MaxChars)
 	}
@@ -344,7 +353,19 @@ func (s *Server) prepareRoute(ctx context.Context, r *http.Request, body []byte,
 				rc := s.routingContext(ctx, body, granted, subject, router.ID)
 				if d, ok := routing.ByRouteID(cfg, pr.cands, hit.routeID, hit.difficulty, rc); ok {
 					pr.answer = routing.Answer{Category: hit.category, Difficulty: hit.difficulty}
-					pr.settle(d)
+					if !routing.ThinkingScales(cfg, hit.routeID) {
+						pr.settle(d)
+						return pr
+					}
+					// The conversation keeps its model (switching would
+					// throw away the model's cached context), but this
+					// turn's thinking follows this turn's difficulty:
+					// ask difficulty only. Failing that, the remembered
+					// level serves.
+					pr.sticky = &d
+					codeStyle := st.settings.DifficultyStyle == store.RoutingDifficultyCategory
+					pr.extra = &secgw.Extra{ClassifierKey: st.classifier.Key(), Text: pr.text, Questions: routing.DifficultyQuestions(hit.category, codeStyle),
+						Feature: routingFeature, AnyStyle: true, Timeout: time.Duration(cfg.BudgetMs) * time.Millisecond}
 					return pr
 				}
 			}
@@ -403,7 +424,9 @@ func hasAssistantTurn(body []byte) bool {
 // ingress call to the routing classifier about the same text, so the
 // routing questions can ride on it.
 func (s *Server) guardWillCall(ctx context.Context, eff *secgw.Effective, pr *pendingRoute) bool {
-	if eff.Empty() || pr.st == nil {
+	if eff.Empty() || pr.st == nil || pr.contextual {
+		// A follow-up is classified with its conversation as context:
+		// not the text a guard judges, so it is asked in parallel.
 		return false
 	}
 	for _, kind := range []store.SecgwCheckKind{store.SecgwCheckPromptInjection, store.SecgwCheckContentSafety} {
@@ -424,18 +447,29 @@ func (s *Server) guardWillCall(ctx context.Context, eff *secgw.Effective, pr *pe
 	return false
 }
 
-// policyRedacts reports whether any ingress check may rewrite the body: the
-// classifier must then only ever see the redacted text.
-func policyRedacts(eff *secgw.Effective) bool {
+// policyMayStop reports whether any ingress check may rewrite the body
+// (redact) or refuse it (block): the routing classifier must then only ever
+// see the text that is actually forwarded, so it is asked after the guards
+// passed. An observe-only policy cannot stop or change anything.
+func policyMayStop(eff *secgw.Effective) bool {
 	if eff.Empty() {
 		return false
 	}
 	for _, c := range eff.Checks {
-		if c.Enabled && c.Mode == store.SecgwModeRedact && c.Direction != store.SecgwDirectionEgress {
+		if c.Enabled && (c.Mode == store.SecgwModeRedact || c.Mode == store.SecgwModeBlock) && c.Direction != store.SecgwDirectionEgress {
 			return true
 		}
 	}
 	return false
+}
+
+// routeTextFrom is the text the routing classifier reads from body: the new
+// turn with the conversation as context, or the last user message.
+func routeTextFrom(body []byte, maxChars int) string {
+	if t := secgw.ContextText(body, maxChars); strings.TrimSpace(t) != "" {
+		return t
+	}
+	return classify.TrimText(classify.ExtractText(body, classify.ScopeLastUser, false), maxChars)
 }
 
 // startOwnCall starts the routing classifier call on its own, bounded by
@@ -448,6 +482,10 @@ func (s *Server) startOwnCall(ctx context.Context, pr *pendingRoute) {
 	rt := s.routingRT()
 	if rt.inflight.Add(1) > int64(pr.st.settings.MaxConcurrentDecisions) {
 		rt.inflight.Add(-1)
+		if pr.sticky != nil {
+			pr.settle(*pr.sticky) // the remembered level serves
+			return
+		}
 		pr.settle(routing.Default(pr.cfg, 0, store.RouteReasonBusy, nil))
 		return
 	}
@@ -469,7 +507,19 @@ func (s *Server) startOwnCall(ctx context.Context, pr *pendingRoute) {
 // ride-along answer, the own call, or the default. It waits at most what is
 // left of the router's budget.
 func (s *Server) finishRoute(ctx context.Context, pr *pendingRoute, rc routing.Context) {
-	if pr == nil || pr.decided {
+	if pr == nil {
+		return
+	}
+	s.decideRoute(ctx, pr, rc)
+	if pr.mode == store.RouterModeLive {
+		// A default the caller may not use (Child Safety blocks its
+		// model) hands the request to the first route they may use.
+		pr.decision = routing.AvoidBlockedDefault(pr.cfg, pr.cands, pr.decision, pr.answer.Difficulty, rc)
+	}
+}
+
+func (s *Server) decideRoute(ctx context.Context, pr *pendingRoute, rc routing.Context) {
+	if pr.decided {
 		return
 	}
 	if pr.mode != store.RouterModeLive {
@@ -497,6 +547,10 @@ func (s *Server) finishRoute(ctx context.Context, pr *pendingRoute, rc routing.C
 		}
 		pr.waited = time.Since(pr.started)
 	default:
+		if pr.sticky != nil {
+			pr.settle(*pr.sticky)
+			return
+		}
 		pr.settle(routing.Default(pr.cfg, 0, store.RouteReasonError, nil))
 		return
 	}
@@ -506,10 +560,27 @@ func (s *Server) finishRoute(ctx context.Context, pr *pendingRoute, rc routing.C
 			reason = store.RouteReasonTimeout
 		}
 		pr.status, pr.errText = "error", truncate(err.Error(), 300)
+		if pr.sticky != nil {
+			// Only the thinking level was in question: keep the
+			// conversation's route at its remembered level.
+			pr.settle(*pr.sticky)
+			return
+		}
 		pr.settle(routing.Default(pr.cfg, 0, reason, nil))
 		return
 	}
 	pr.status = "ok"
+	if pr.sticky != nil {
+		d := *pr.sticky
+		if diff := routing.InterpretDifficulty(res, pr.answer.Category); diff > 0 {
+			pr.answer.Difficulty = diff
+			if fresh, ok := routing.ByRouteID(pr.cfg, pr.cands, d.RouteID, diff, rc); ok {
+				d = fresh
+			}
+		}
+		pr.settle(d)
+		return
+	}
 	pr.answer = routing.Interpret(res)
 	pr.settle(routing.Choose(pr.cfg, pr.cands, pr.answer, pr.st.minConf, rc))
 }
@@ -536,7 +607,9 @@ func (s *Server) applyRoute(ctx context.Context, w http.ResponseWriter, pr *pend
 	if d.Reason == store.RouteReasonMatched && pr.answer.Category != "" {
 		reason += ":" + pr.answer.Category
 	}
-	event.RouteReason = reason
+	// Child Safety ran first and may have noted what it answered
+	// appropriately ("child=..."): keep it after the routing decision.
+	event.RouteReason = keepChildNote(event.RouteReason, reason)
 	if pr.cfg.Disclose {
 		w.Header().Set(headerRoute, routeLabel(pr.cfg, d))
 		w.Header().Set(headerRouteReason, reason)
@@ -618,7 +691,30 @@ func applyThinking(body []byte, effort, adapterType string) ([]byte, string, boo
 
 // routingContext builds the selection context for one request.
 func (s *Server) routingContext(ctx context.Context, body []byte, granted map[string]string, subject quota.Subject, routerID string) routing.Context {
+	var blocked func(string) bool
+	if subject.UserID != "" && subject.ServiceTokenID == "" {
+		if eng, err := s.secgwEngine(ctx); err == nil {
+			if p := eng.FamilyProfile(subject.UserID); p != nil && len(p.BlockedModels) > 0 {
+				// Child Safety: a route whose model (or the alias it
+				// serves through) the child's age range blocks is
+				// treated like one they are not granted.
+				blocked = func(modelID string) bool {
+					names := []string{modelID}
+					if res, err := s.resolveRouteTarget(ctx, modelID); err == nil {
+						if res.Managed != nil {
+							names = append(names, res.Managed.ID, res.Managed.Name)
+						}
+						if res.Model != nil {
+							names = append(names, res.Model.ID, res.Model.PublicName(), res.Model.Name)
+						}
+					}
+					return p.Blocks(names...)
+				}
+			}
+		}
+	}
 	return routing.Context{
+		Blocked:         blocked,
 		EstimatedTokens: int64(len(body) / 4),
 		Granted: func(modelID string) bool {
 			_, ok := granted[modelID]
@@ -760,7 +856,9 @@ func (s *Server) shadowRoute(pr *pendingRoute, event *store.UsageEvent, body []b
 	budget := time.Duration(pr.cfg.BudgetMs) * time.Millisecond
 	select {
 	case s.routingRT().shadow <- func() {
-		ctx, cancel := context.WithTimeout(classify.WithFeature(context.Background(), routingFeature, "async"), budget*4)
+		// The request id rides along so the call's usage event is tied to
+		// the request that caused it.
+		ctx, cancel := context.WithTimeout(classify.WithFeature(context.WithValue(context.Background(), ctxRequestID, requestID), routingFeature, "async"), budget*4)
 		defer cancel()
 		started := time.Now()
 		res, err := pr.st.classifier.Decide(ctx, text, questions)
@@ -779,6 +877,14 @@ func (s *Server) shadowRoute(pr *pendingRoute, event *store.UsageEvent, body []b
 func (s *Server) evalSample(w http.ResponseWriter, pr *pendingRoute, event *store.UsageEvent, body []byte) (http.ResponseWriter, *evalCapture) {
 	if pr == nil || pr.mode != store.RouterModeLive || pr.decision.IsDefault() || pr.decision.Index < 0 || pr.decision.Index >= len(pr.cfg.Routes) {
 		return w, nil
+	}
+	// A child's conversation is never replayed for evaluation: the replay
+	// and the judge call run without Child Safety's rules and could reach
+	// a model the child's age range blocks.
+	if event.UserID != "" {
+		if eng, err := s.secgwEngine(context.Background()); err != nil || eng.FamilyCovers(event.UserID) {
+			return w, nil
+		}
 	}
 	route := pr.cfg.Routes[pr.decision.Index]
 	ev := route.Eval

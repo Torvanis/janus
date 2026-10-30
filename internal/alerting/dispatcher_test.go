@@ -307,3 +307,35 @@ func TestSendTestDeliversWebhook(t *testing.T) {
 		t.Errorf("SendTest without a webhook URL = %v, want an explicit webhook error", err)
 	}
 }
+
+// A rule's Severity is a floor: a "critical" rule only delivers critical
+// events, an "info" rule delivers everything, and a recovery reaches every
+// rule that matches its trigger.
+func TestDispatchAppliesRuleSeverityAsMinimum(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	var critical, info atomic.Int64
+	critSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { critical.Add(1) }))
+	defer critSrv.Close()
+	infoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { info.Add(1) }))
+	defer infoSrv.Close()
+	for _, rule := range []*store.AlertRule{
+		{Trigger: TriggerSystem, Severity: "critical", Channels: []string{"webhook"}, WebhookURL: critSrv.URL, Enabled: true},
+		{Trigger: TriggerSystem, Severity: "info", Channels: []string{"webhook"}, WebhookURL: infoSrv.URL, Enabled: true},
+	} {
+		if err := f.db.CreateAlertRule(ctx, rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := f.dispatcher(SMTPConfig{})
+	d.Dispatch(ctx, Event{Trigger: TriggerSystem, Severity: "warning", Title: "w"})
+	d.Dispatch(ctx, Event{Trigger: TriggerSystem, Severity: "info", Title: "i"})
+	if critical.Load() != 0 || info.Load() != 2 {
+		t.Fatalf("critical rule got %d, info rule got %d; want 0 and 2", critical.Load(), info.Load())
+	}
+	d.Dispatch(ctx, Event{Trigger: TriggerSystem, Severity: "critical", Title: "c"})
+	d.Dispatch(ctx, Event{Trigger: TriggerSystem, Severity: "info", Recovery: true, Title: "r"})
+	if critical.Load() != 2 || info.Load() != 4 {
+		t.Fatalf("critical rule got %d, info rule got %d; want 2 and 4", critical.Load(), info.Load())
+	}
+}

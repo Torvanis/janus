@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-// RateLimitRule caps how many proxied requests per minute a person may make to
-// an endpoint. An empty SubjectID applies the rule to every user individually
-// (each person gets their own bucket). Endpoint is an exact path, a prefix
+// RateLimitRule caps how many proxied requests per minute a person or a
+// service token (SubjectType "user" or "service_token") may make to an
+// endpoint. An empty SubjectID applies the rule to every caller individually
+// (each person and each service token gets its own bucket). Endpoint is an exact path, a prefix
 // ending in '*', or '*' for every proxied path.
 type RateLimitRule struct {
 	ID                string    `json:"id"`
@@ -53,7 +54,11 @@ func (s *Store) ListRateLimitRules(ctx context.Context) ([]*RateLimitRule, error
 		return nil, err
 	}
 	for _, r := range out {
-		if r.SubjectID != "" {
+		if r.SubjectID != "" && r.SubjectType == "service_token" {
+			if t, err := s.ServiceTokenByID(ctx, r.SubjectID); err == nil {
+				r.SubjectName = t.Name
+			}
+		} else if r.SubjectID != "" {
 			if u, err := s.UserByID(ctx, r.SubjectID); err == nil {
 				r.SubjectName = displayName(u)
 			}

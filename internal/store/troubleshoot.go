@@ -26,6 +26,11 @@ const (
 	// directory (JANUS_TROUBLESHOOT_DIR); the row keeps only metadata and
 	// a storage_ref naming the files.
 	TroubleshootStorageDisk = "disk"
+	// TroubleshootStorageObject keeps bodies in the S3-compatible file
+	// storage (internal/blobstore), encrypted by Janus before upload; the
+	// row keeps a storage_ref ("s3:troubleshoot/<day>/<id>") naming them.
+	// Offered only while file storage is set to S3.
+	TroubleshootStorageObject = "object"
 )
 
 // Filter combinators for TroubleshootingFilter.Match.
@@ -405,8 +410,15 @@ type TroubleshootingConfig struct {
 	MaxBodyBytes int64 `json:"max_body_bytes"`
 }
 
-// Validate normalises defaults and rejects impossible configurations.
+// Validate normalises defaults and rejects impossible configurations. It
+// is ValidateBackends with object storage unavailable.
 func (c *TroubleshootingConfig) Validate(diskAvailable bool) error {
+	return c.ValidateBackends(diskAvailable, false)
+}
+
+// ValidateBackends is Validate for a gateway that may also offer the
+// object (S3 file storage) backend.
+func (c *TroubleshootingConfig) ValidateBackends(diskAvailable, objectAvailable bool) error {
 	if err := c.Filter.Validate(); err != nil {
 		return err
 	}
@@ -421,8 +433,12 @@ func (c *TroubleshootingConfig) Validate(diskAvailable bool) error {
 		if !diskAvailable {
 			return errors.New("storage=disk requires JANUS_TROUBLESHOOT_DIR to be configured on the gateway")
 		}
+	case TroubleshootStorageObject:
+		if !objectAvailable {
+			return errors.New("storage=object requires file storage to be set to S3-compatible (Settings → General → File storage)")
+		}
 	default:
-		return fmt.Errorf("storage must be %q or %q", TroubleshootStorageDatabase, TroubleshootStorageDisk)
+		return fmt.Errorf("storage must be %q, %q or %q", TroubleshootStorageDatabase, TroubleshootStorageDisk, TroubleshootStorageObject)
 	}
 	if c.MaxBodyBytes <= 0 {
 		c.MaxBodyBytes = TroubleshootDefaultMaxBodyBytes

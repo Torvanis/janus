@@ -8,7 +8,8 @@ import type { Breakdown, ModelPerformanceSeries, QuotaStatus, TimePoint, Totals 
 import { formatNumber, formatUSD } from '../../lib/format';
 import { cacheMeta } from '../../lib/cache';
 import { AreaChart, BarList, LineChart } from '../../components/charts';
-import { AsyncSection, Badge } from '../../components/ui';
+import { Badge } from '../../components/ui';
+import { ChartPlaceholder, ListPlaceholder, Piece, TilePlaceholder } from '../../components/progressive';
 import { useUrlState } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
 import { useDefaultMetric, useLocalOnly, type DashboardMetric } from '../../app/session';
@@ -44,11 +45,19 @@ export function AdminOverview(): ReactNode {
   const metric = localOnly && rawMetric === 'cost' ? 'requests' : rawMetric;
   const [direction, setDirection] = useUrlState<TokenDirection>('direction', 'total');
 
-  const overview = useQuery({
-    queryKey: ['admin', 'overview', range],
-    queryFn: () => api.get<AdminOverviewData>(`/api/v1/admin/overview${qs({ range })}`),
+  // Each piece loads on its own (the server computes them independently):
+  // the tiles paint first and every chart fills in as its data arrives.
+  const part = (name: string) => ({
+    queryKey: ['admin', 'overview', range, name],
+    queryFn: () => api.get<AdminOverviewData>(`/api/v1/admin/overview${qs({ range, part: name })}`),
     refetchInterval: 20_000,
   });
+  const totalsQ = useQuery(part('totals'));
+  const seriesQ = useQuery(part('series'));
+  const leadersQ = useQuery(part('leaders'));
+  const perfQ = useQuery(part('performance'));
+  const quotasQ = useQuery(part('quotas'));
+  const pending = totalsQ.data?.model_counts?.pending_approval ?? 0;
 
   return (
     <div className="page">
@@ -62,169 +71,208 @@ export function AdminOverview(): ReactNode {
         </div>
       </header>
 
-      <AsyncSection query={overview}>
+      {pending > 0 ? (
+        <div className="banner banner-info">
+          <div className="row-between" style={{ width: '100%' }}>
+            <span>
+              <strong>{t('adminOverview.pendingBanner', { count: pending })}</strong>{' '}
+              {t(localOnly ? 'adminOverview.pendingBannerBodyLocalOnly' : 'adminOverview.pendingBannerBody')}
+            </span>
+            <Link className="btn btn-sm" to="/admin/models?status=pending_approval">
+              {t('adminOverview.reviewNow')}
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      <Piece
+        query={totalsQ}
+        placeholder={
+          <div className="grid grid-tiles">
+            <TilePlaceholder label={localOnly ? t('adminOverview.accounts') : t('dashboard.spend')} />
+            <TilePlaceholder label={t('dashboard.requests')} />
+            <TilePlaceholder label={t('tables.tokens')} />
+            <TilePlaceholder label={t('adminOverview.activeUsers')} />
+          </div>
+        }
+      >
         {(data) => (
-          <>
-            {(data.model_counts.pending_approval ?? 0) > 0 ? (
-              <div className="banner banner-info">
-                <div className="row-between" style={{ width: '100%' }}>
-                  <span>
-                    <strong>{t('adminOverview.pendingBanner', { count: data.model_counts.pending_approval ?? 0 })}</strong>{' '}
-                    {t(localOnly ? 'adminOverview.pendingBannerBodyLocalOnly' : 'adminOverview.pendingBannerBody')}
-                  </span>
-                  <Link className="btn btn-sm" to="/admin/models?status=pending_approval">
-                    {t('adminOverview.reviewNow')}
-                  </Link>
-                </div>
-              </div>
-            ) : null}
+          <div className="grid grid-tiles">
+            {localOnly ? (
+              <Tile label={t('adminOverview.accounts')} value={formatNumber(data.user_count)} />
+            ) : (
+              <Tile
+                label={t('dashboard.spend')}
+                value={formatUSD(data.totals.cost_nanousd)}
+                meta={t('adminOverview.acrossAccounts', { count: data.user_count })}
+              />
+            )}
+            <Tile
+              label={t('dashboard.requests')}
+              value={formatNumber(data.totals.request_count, { compact: true })}
+              meta={t('adminOverview.failedCount', { count: formatNumber(data.totals.error_count) })}
+            />
+            <Tile
+              label={t('tables.tokens')}
+              value={formatNumber(data.totals.tokens_in + data.totals.tokens_out, { compact: true })}
+              meta={cacheMeta(data.totals)}
+            />
+            <Tile
+              label={t('adminOverview.activeUsers')}
+              value={formatNumber(data.active_users_15m)}
+              meta={t('adminOverview.last15m')}
+            />
+          </div>
+        )}
+      </Piece>
 
-            <div className="grid grid-tiles">
-              {localOnly ? (
-                <Tile label={t('adminOverview.accounts')} value={formatNumber(data.user_count)} />
-              ) : (
-                <Tile
-                  label={t('dashboard.spend')}
-                  value={formatUSD(data.totals.cost_nanousd)}
-                  meta={t('adminOverview.acrossAccounts', { count: data.user_count })}
-                />
-              )}
-              <Tile
-                label={t('dashboard.requests')}
-                value={formatNumber(data.totals.request_count, { compact: true })}
-                meta={t('adminOverview.failedCount', { count: formatNumber(data.totals.error_count) })}
-              />
-              <Tile
-                label={t('tables.tokens')}
-                value={formatNumber(data.totals.tokens_in + data.totals.tokens_out, { compact: true })}
-                meta={cacheMeta(data.totals)}
-              />
-              <Tile
-                label={t('adminOverview.activeUsers')}
-                value={formatNumber(data.active_users_15m)}
-                meta={t('adminOverview.last15m')}
-              />
+      <section className="card">
+        <div className="card-header">
+          <h2>{t('adminOverview.orgTrend')}</h2>
+          <div className="row" style={{ gap: 'var(--janus-space-3)', flexWrap: 'wrap' }}>
+            {metric === 'tokens' ? <TokenDirectionPicker value={direction} onChange={setDirection} /> : null}
+            {/* Metric selector: opens on the emphasis default resolved
+                above; a click writes ?metric= which then overrides the
+                instance-wide setting for this view. Local-only mode has
+                no spend surface, so 'cost' is dropped there. */}
+            <div className="segmented" role="group" aria-label={t('tables.metric')}>
+              {(localOnly ? (['requests', 'tokens'] as const) : (['cost', 'requests', 'tokens'] as const)).map((key) => (
+                <button key={key} type="button" aria-pressed={metric === key} onClick={() => setMetric(key)}>
+                  {key === 'cost' ? t('dashboard.spend') : key === 'tokens' ? t('tables.tokens') : t('dashboard.requests')}
+                </button>
+              ))}
             </div>
+          </div>
+        </div>
+        <Piece query={seriesQ} placeholder={<ChartPlaceholder height={200} label="Loading the trend…" />}>
+          {(data) =>
+            metric === 'tokens' ? (
+              <AreaChart series={tokenDirectionSeries(data.series, direction)} metric="tokens" height={200} />
+            ) : (
+              <AreaChart series={data.series} metric={metric} height={200} />
+            )
+          }
+        </Piece>
+      </section>
 
+      <Piece
+        query={perfQ}
+        placeholder={
+          <section className="card" data-testid="model-performance-loading">
+            <div className="card-header">
+              <h2>{t('adminOverview.modelPerformance')}</h2>
+            </div>
+            <ChartPlaceholder height={150} label="Loading model performance…" />
+          </section>
+        }
+      >
+        {(data) => <ModelPerformanceCard perf={data.model_performance} />}
+      </Piece>
+
+      <Piece query={leadersQ} placeholder={null}>
+        {(data) =>
+          (data.top_teams?.length ?? 0) > 0 ? (
             <section className="card">
               <div className="card-header">
-                <h2>{t('adminOverview.orgTrend')}</h2>
-                <div className="row" style={{ gap: 'var(--janus-space-3)', flexWrap: 'wrap' }}>
-                  {metric === 'tokens' ? <TokenDirectionPicker value={direction} onChange={setDirection} /> : null}
-                  {/* Metric selector: opens on the emphasis default resolved
-                      above; a click writes ?metric= which then overrides the
-                      instance-wide setting for this view. Local-only mode has
-                      no spend surface, so 'cost' is dropped there. */}
-                  <div className="segmented" role="group" aria-label={t('tables.metric')}>
-                    {(localOnly ? (['requests', 'tokens'] as const) : (['cost', 'requests', 'tokens'] as const)).map((key) => (
-                      <button key={key} type="button" aria-pressed={metric === key} onClick={() => setMetric(key)}>
-                        {key === 'cost' ? t('dashboard.spend') : key === 'tokens' ? t('tables.tokens') : t('dashboard.requests')}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <h2>Most popular teams</h2>
+                <Link className="small" to="/reports">
+                  Team reports
+                </Link>
               </div>
-              {metric === 'tokens' ? (
-                <AreaChart series={tokenDirectionSeries(data.series, direction)} metric="tokens" height={200} />
-              ) : (
-                <AreaChart series={data.series} metric={metric} height={200} />
-              )}
+              <p className="small muted">Ranked by output tokens</p>
+              <BarList items={data.top_teams ?? []} metric="tokens_out" max={10} />
             </section>
+          ) : null
+        }
+      </Piece>
 
-            <ModelPerformanceCard perf={data.model_performance} />
-
-            {(data.top_teams?.length ?? 0) > 0 ? (
-              <section className="card">
-                <div className="card-header">
-                  <h2>Most popular teams</h2>
-                  <Link className="small" to="/reports">
-                    Team reports
-                  </Link>
-                </div>
-                <p className="small muted">Ranked by output tokens</p>
-                <BarList items={data.top_teams ?? []} metric="tokens_out" max={10} />
-              </section>
-            ) : null}
-
-            <div className="grid grid-halves">
-              {localOnly ? null : (
-                <section className="card">
-                  <div className="card-header">
-                    <h2>{t('adminOverview.topSpenders')}</h2>
-                    <Link className="small" to="/admin/users">
-                      {t('adminOverview.allPeople')}
-                    </Link>
-                  </div>
-                  <BarList items={data.top_spenders} metric="tokens_out" emptyLabel={t('adminOverview.noAttributedSpend')} />
-                </section>
+      <div className="grid grid-halves">
+        {localOnly ? null : (
+          <section className="card">
+            <div className="card-header">
+              <h2>{t('adminOverview.topSpenders')}</h2>
+              <Link className="small" to="/admin/users">
+                {t('adminOverview.allPeople')}
+              </Link>
+            </div>
+            <Piece query={leadersQ} placeholder={<ListPlaceholder label="Loading top people…" />}>
+              {(data) => (
+                <BarList items={data.top_spenders} metric="tokens_out" emptyLabel={t('adminOverview.noAttributedSpend')} />
               )}
-
-              <section className="card">
-                <div className="card-header">
-                  <h2>{t('adminOverview.mostUsedModels')}</h2>
-                  <Link className="small" to="/admin/models">
-                    {t('adminOverview.manageModels')}
-                  </Link>
-                </div>
-                <BarList items={data.top_models} metric={metric} emptyLabel={t('adminOverview.noModelUsage')} />
-              </section>
-            </div>
-
-            <div className="grid grid-halves">
-              <section className="card">
-                <div className="card-header">
-                  <h2>{t('adminOverview.outcomes')}</h2>
-                </div>
-                <BarList items={data.by_status} metric="requests" emptyLabel={t('adminOverview.noRequests')} />
-              </section>
-
-              <section className="card">
-                <div className="card-header">
-                  <h2>{t('adminOverview.nearBreach')}</h2>
-                  <Link className="small" to="/admin/quotas">
-                    {t('adminOverview.manageQuotas')}
-                  </Link>
-                </div>
-                {data.near_breach.length === 0 ? (
-                  <p className="small muted">{t('adminOverview.noneNearBreach')}</p>
-                ) : (
-                  <>
-                    <p className="small muted">Current evaluated at-risk quotas; independent of the usage time range.</p>
-                    <Collection
-                      name="At-risk quotas"
-                      rows={sortCollection(data.near_breach, (quota) => quota.percent, false)}
-                      rowKey={(quota) => quota.id}
-                      columns={[
-                        {
-                          id: 'subject',
-                          label: 'Subject',
-                          value: (quota) => quota.subject_name || quota.subject_type,
-                          render: (quota) => quota.subject_name || quota.subject_type,
-                        },
-                        {
-                          id: 'metric',
-                          label: 'Metric / window',
-                          value: (quota) => `${quota.metric_label} ${quota.window_label}`,
-                          render: (quota) => `${quota.metric_label} ${quota.window_label}`,
-                        },
-                        {
-                          id: 'usage',
-                          label: 'Utilization',
-                          value: (quota) => quota.percent,
-                          render: (quota) => (
-                            <Badge tone={quota.breached ? 'danger' : 'warning'}>{Math.round(quota.percent)}%</Badge>
-                          ),
-                        },
-                      ]}
-                    />
-                  </>
-                )}
-              </section>
-            </div>
-          </>
+            </Piece>
+          </section>
         )}
-      </AsyncSection>
+
+        <section className="card">
+          <div className="card-header">
+            <h2>{t('adminOverview.mostUsedModels')}</h2>
+            <Link className="small" to="/admin/models">
+              {t('adminOverview.manageModels')}
+            </Link>
+          </div>
+          <Piece query={leadersQ} placeholder={<ListPlaceholder label="Loading top models…" />}>
+            {(data) => <BarList items={data.top_models} metric={metric} emptyLabel={t('adminOverview.noModelUsage')} />}
+          </Piece>
+        </section>
+      </div>
+
+      <div className="grid grid-halves">
+        <section className="card">
+          <div className="card-header">
+            <h2>{t('adminOverview.outcomes')}</h2>
+          </div>
+          <Piece query={leadersQ} placeholder={<ListPlaceholder rows={3} label="Loading outcomes…" />}>
+            {(data) => <BarList items={data.by_status} metric="requests" emptyLabel={t('adminOverview.noRequests')} />}
+          </Piece>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <h2>{t('adminOverview.nearBreach')}</h2>
+            <Link className="small" to="/admin/quotas">
+              {t('adminOverview.manageQuotas')}
+            </Link>
+          </div>
+          <Piece query={quotasQ} placeholder={<ListPlaceholder rows={2} label="Checking quotas…" />}>
+            {(data) => <NearBreach rows={data.near_breach} />}
+          </Piece>
+        </section>
+      </div>
     </div>
+  );
+}
+
+function NearBreach({ rows }: { rows: QuotaStatus[] }): ReactNode {
+  if (rows.length === 0) return <p className="small muted">{t('adminOverview.noneNearBreach')}</p>;
+  return (
+    <>
+      <p className="small muted">Current evaluated at-risk quotas; independent of the usage time range.</p>
+      <Collection
+        name="At-risk quotas"
+        rows={sortCollection(rows, (quota) => quota.percent, false)}
+        rowKey={(quota) => quota.id}
+        columns={[
+          {
+            id: 'subject',
+            label: 'Subject',
+            value: (quota) => quota.subject_name || quota.subject_type,
+            render: (quota) => quota.subject_name || quota.subject_type,
+          },
+          {
+            id: 'metric',
+            label: 'Metric / window',
+            value: (quota) => `${quota.metric_label} ${quota.window_label}`,
+            render: (quota) => `${quota.metric_label} ${quota.window_label}`,
+          },
+          {
+            id: 'usage',
+            label: 'Utilization',
+            value: (quota) => quota.percent,
+            render: (quota) => <Badge tone={quota.breached ? 'danger' : 'warning'}>{Math.round(quota.percent)}%</Badge>,
+          },
+        ]}
+      />
+    </>
   );
 }
 

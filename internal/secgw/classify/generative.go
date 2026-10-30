@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	dec "github.com/torvanis/janus/internal/classify"
 )
 
 // ProtocolGenerativeGuard is the Llama Guard wire shape: an OpenAI chat
@@ -129,8 +131,9 @@ func (g *generativeGuard) Judge(ctx context.Context, turns []Turn) (Verdict, err
 	}
 	started := time.Now()
 	resp, err := g.up.Client.Do(req)
+	var used dec.Usage
 	if g.up.Meter != nil {
-		defer func() { g.up.Meter(ctx, time.Since(started), chars, err) }()
+		defer func() { g.up.Meter(ctx, time.Since(started), chars, used, err) }()
 	}
 	var body []byte
 	defer func() { traceCall(ctx, g.up, ProtocolGenerativeGuard, url, started, payload, body, err) }()
@@ -153,10 +156,24 @@ func (g *generativeGuard) Judge(ctx context.Context, turns []Turn) (Verdict, err
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *struct {
+			PromptTokens        int64    `json:"prompt_tokens"`
+			CompletionTokens    int64    `json:"completion_tokens"`
+			Cost                *float64 `json:"cost"`
+			PromptTokensDetails struct {
+				CachedTokens int64 `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+		} `json:"usage"`
 	}
 	if jerr := json.Unmarshal(body, &cc); jerr != nil || len(cc.Choices) == 0 {
 		err = fmt.Errorf("guard response is not a chat completion: %s", truncate(string(body), 200))
 		return Verdict{}, err
+	}
+	if u := cc.Usage; u != nil {
+		used = dec.Usage{TokensIn: u.PromptTokens, TokensOut: u.CompletionTokens, TokensCached: u.PromptTokensDetails.CachedTokens}
+		if u.Cost != nil {
+			used.CostUSD, used.CostReported = *u.Cost, true
+		}
 	}
 	v, perr := ParseGuardVerdict(cc.Choices[0].Message.Content)
 	if perr != nil {

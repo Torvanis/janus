@@ -42,9 +42,15 @@ export class ApiError extends Error {
   }
 }
 
-function readCookie(name: string): string {
+export function readCookie(name: string): string {
   const match = document.cookie.split('; ').find((row) => row.startsWith(`${name}=`));
   return match ? decodeURIComponent(match.slice(name.length + 1)) : '';
+}
+
+/** The CSRF header every mutating app-API call must carry (double-submit cookie). */
+export function csrfHeaders(): Record<string, string> {
+  const csrf = readCookie('janus_csrf');
+  return csrf ? { 'X-Janus-CSRF': csrf } : {};
 }
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -57,10 +63,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   if (method !== 'GET') {
     // Double-submit CSRF: the cookie is readable, the header is not forgeable
     // cross-origin. Bearer-token callers do not need this.
-    const csrf = readCookie('janus_csrf');
-    if (csrf) {
-      headers['X-Janus-CSRF'] = csrf;
-    }
+    Object.assign(headers, csrfHeaders());
   }
 
   let response: Response;

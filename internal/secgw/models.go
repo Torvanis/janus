@@ -580,7 +580,7 @@ func (e *Engine) injectionFromDecision(c ResolvedCheck, msgs []Message, dc *deci
 	if !ok {
 		return checkOutcome{ran: true}
 	}
-	return checkOutcome{ran: true, vs: []Violation{{Kind: c.Kind, RuleID: "INJECTION", Severity: string(detect.SeverityHigh), Direction: store.SecgwDirectionIngress,
+	return checkOutcome{ran: true, vs: []Violation{{Kind: c.Kind, RuleID: "INJECTION", Severity: string(detect.SeverityHigh), Direction: ingressDirection(m),
 		MessageIndex: m.Index, Text: m.Text, Length: len(m.Text), PolicyID: c.PolicyID, BindingID: c.BindingID, Record: true,
 		ClassifierScore: yes, ClassifierModel: c.ClassifierModelID}}}
 }
@@ -628,6 +628,9 @@ func (e *Engine) safetyFromDecision(c ResolvedCheck, direction string, msgs []Me
 	action := store.SecgwActionObserved
 	if direction == store.SecgwDirectionIngress && c.Mode == store.SecgwModeBlock && opts.Enforces(codes) {
 		action = store.SecgwActionBlocked
+	}
+	if direction == store.SecgwDirectionIngress {
+		direction = ingressDirection(m)
 	}
 	return checkOutcome{ran: true, vs: []Violation{{Kind: c.Kind, RuleID: strings.Join(codes, ","), Severity: string(detect.SeverityHigh),
 		Direction: direction, Action: action, MessageIndex: m.Index, Text: m.Text, Length: len(m.Text), Record: true,

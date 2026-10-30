@@ -1,11 +1,11 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Janus \u2014 corporate API gateway",
+    "title": "Janus — corporate API gateway",
     "version": "1.0.0",
-    "description": "Janus is an authenticated, metered gateway between an organisation's people and its approved AI providers. It exposes three surfaces: an OpenAI-compatible proxy under /v1 (bearer token auth \u2014 point any OpenAI SDK at PUBLIC_URL/v1), a first-party application API under /api/v1 (session cookie + CSRF header), and an admin API under /api/v1/admin (admin session). This document is served by the gateway itself at /openapi.json, so it always matches the running build.",
+    "description": "Janus is an authenticated, metered gateway between an organisation's people and its approved AI providers. It exposes three surfaces: an OpenAI-compatible proxy under /v1 (bearer token auth — point any OpenAI SDK at PUBLIC_URL/v1), a first-party application API under /api/v1 (session cookie + CSRF header), and an admin API under /api/v1/admin (admin session). This document is served by the gateway itself at /openapi.json, so it always matches the running build.",
     "license": {
-      "name": "Proprietary \u2014 see NOTICE for third-party attributions"
+      "name": "Proprietary — see NOTICE for third-party attributions"
     }
   },
   "servers": [
@@ -47,7 +47,7 @@
           "Admin"
         ],
         "summary": "List admin groups",
-        "description": "Identity-provider groups whose members are promoted to administrator on sign-in. Returns the groups managed here plus env_admin_groups (JANUS_ADMIN_GROUPS), which are unioned at sign-in but cannot be edited through the API. Admin capability composes from three independent sources \u2014 the bootstrap email list, an explicit per-user grant, and admin-group membership \u2014 so withdrawing one never revokes the others.",
+        "description": "Identity-provider groups whose members are promoted to administrator on sign-in. Returns the groups managed here plus env_admin_groups (JANUS_ADMIN_GROUPS), which are unioned at sign-in but cannot be edited through the API. Admin capability composes from three independent sources — the bootstrap email list, an explicit per-user grant, and admin-group membership — so withdrawing one never revokes the others.",
         "responses": {
           "200": {
             "description": "The configured admin groups."
@@ -288,7 +288,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Current flags: leaderboards_enabled, per_user_rate_limits_enabled, reduce_motion_preferred, otel_enabled, and spend_emphasis (dashboard graphs default to the Spend metric when on, Tokens when off \u2014 usage emphasis, the shipped default)."
+            "description": "Current flags: leaderboards_enabled, per_user_rate_limits_enabled, reduce_motion_preferred, otel_enabled, and spend_emphasis (dashboard graphs default to the Spend metric when on, Tokens when off — usage emphasis, the shipped default)."
           }
         }
       },
@@ -305,6 +305,42 @@
         "responses": {
           "200": {
             "description": "Updated; audit-logged. Accepts a map of flag name to boolean (any flag from the GET response, e.g. spend_emphasis); unknown flags are rejected. Changes are reflected in /api/v1/me feature_flags immediately."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/chat": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Janus Chat settings",
+        "description": "Instance-wide Chat configuration: enabled, access (everyone | restricted to groups/teams/users; restricting is Business), default model, temporary-chat lifetime, share links, export, personal plans, organization instructions, starter prompts, and per-model picker settings (hidden, category, order, recommended). access_licensed says whether a restriction applies on this edition.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Janus Chat settings",
+        "description": "Same shape as GET. Changing access to restricted needs a Business license (402 license.feature_not_licensed). Audited.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved settings."
           }
         }
       }
@@ -376,6 +412,30 @@
         "responses": {
           "200": {
             "description": "Revoked; audit-logged."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/grants/{id}/chat": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set how a grant names a model in Janus Chat",
+        "description": "Body: {chat_name, chat_description} (empty strings clear them). The most specific grant that applies to a person (direct > group > all users; team > all teams in a team context) decides the name and description the Chat picker shows; blank falls back to the catalog name. Audited.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated grant."
           }
         }
       }
@@ -810,6 +870,17 @@
             "sessionCookie": []
           }
         ],
+        "parameters": [
+          {
+            "name": "part",
+            "in": "query",
+            "required": false,
+            "description": "Return only these pieces (comma-separated): totals, series, leaders, performance, quotas. Without it the whole document is returned. The console loads each piece separately so charts fill in as their data arrives.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Totals, top users ranked by output-token volume, near-breach quotas, active users."
@@ -1012,7 +1083,7 @@
           "admin"
         ],
         "summary": "Bundled reference rate cards",
-        "description": "The rate-card seed shipped inside the binary. List prices at authoring time \u2014 a starting point, not a live feed.",
+        "description": "The rate-card seed shipped inside the binary. List prices at authoring time — a starting point, not a live feed.",
         "security": [
           {
             "sessionCookie": []
@@ -1305,80 +1376,650 @@
         ],
         "responses": {
           "200": {
-            "description": "Upstream health, database, and build information. discovery.interval_minutes is the EFFECTIVE discovery cadence and discovery.interval the full DiscoveryInterval document (default, override, source, next run). metering reports how the last 30 days of successful requests were counted: ok is false when any media response was recorded unmetered (the upstream returned no usage the adapter could read \u2014 a configuration gap), and summary lists counts per accounting method plus the affected models (gaps: model_name, upstream_name, modality, requests, last_seen_at)."
+            "description": "Upstream health, database, and build information. discovery.interval_minutes is the EFFECTIVE discovery cadence and discovery.interval the full DiscoveryInterval document (default, override, source, next run). metering reports how the last 30 days of successful requests were counted: ok is false when any media response was recorded unmetered (the upstream returned no usage the adapter could read — a configuration gap), and summary lists counts per accounting method plus the affected models (gaps: model_name, upstream_name, modality, requests, last_seen_at)."
           }
         }
       }
     },
     "/auth/local/status": {
-      "get": { "tags": ["auth"], "summary": "Local sign-in availability", "responses": { "200": { "description": "enabled (any Janus account exists, or no IdP is configured) and needs_setup (no way to sign in yet: the first-run setup form is offered)." } } }
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Local sign-in availability",
+        "responses": {
+          "200": {
+            "description": "enabled (any Janus account exists, or no IdP is configured) and needs_setup (no way to sign in yet: the first-run setup form is offered)."
+          }
+        }
+      }
     },
     "/auth/local/setup": {
-      "post": { "tags": ["auth"], "summary": "Create the first administrator", "responses": { "200": { "description": "Session cookies set; redirect_to. Only while needs_setup is true — 404 afterwards, forever." }, "400": { "description": "Invalid email or password shorter than 12 characters." } } }
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create the first administrator",
+        "responses": {
+          "200": {
+            "description": "Session cookies set; redirect_to. Only while needs_setup is true — 404 afterwards, forever."
+          },
+          "400": {
+            "description": "Invalid email or password shorter than 12 characters."
+          }
+        }
+      }
     },
     "/auth/local/login": {
-      "post": { "tags": ["auth"], "summary": "Sign in with email and password", "responses": { "200": { "description": "signed_in=true with session cookies and redirect_to (\"/settings?password=change\" when the password is temporary); or signed_in=false, totp_required=true with a 5-minute pending token for POST /auth/local/totp." }, "401": { "description": "bad_credentials (same for wrong email and wrong password)." }, "423": { "description": "Locked after 10 failed attempts (15 minutes)." }, "429": { "description": "Rate limited per client address." }, "503": { "description": "directory_unavailable — a configured LDAP directory could not be reached; Janus-account passwords still work." } } }
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in with email and password",
+        "responses": {
+          "200": {
+            "description": "signed_in=true with session cookies and redirect_to (\"/settings?password=change\" when the password is temporary); or signed_in=false, totp_required=true with a 5-minute pending token for POST /auth/local/totp."
+          },
+          "401": {
+            "description": "bad_credentials (same for wrong email and wrong password)."
+          },
+          "423": {
+            "description": "Locked after 10 failed attempts (15 minutes)."
+          },
+          "429": {
+            "description": "Rate limited per client address."
+          },
+          "503": {
+            "description": "directory_unavailable — a configured LDAP directory could not be reached; Janus-account passwords still work."
+          }
+        }
+      }
     },
     "/auth/local/totp": {
-      "post": { "tags": ["auth"], "summary": "Second step: authenticator or recovery code", "responses": { "200": { "description": "Session cookies set; redirect_to." }, "401": { "description": "bad_code, or pending_expired after 5 minutes / 5 attempts." } } }
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Second step: authenticator or recovery code",
+        "responses": {
+          "200": {
+            "description": "Session cookies set; redirect_to."
+          },
+          "401": {
+            "description": "bad_code, or pending_expired after 5 minutes / 5 attempts."
+          }
+        }
+      }
     },
     "/api/v1/me/local": {
-      "get": { "tags": ["me"], "summary": "Caller's local sign-in status", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "has_password, totp_enabled, must_change, recovery_codes_left." } } }
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Caller's local sign-in status",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "has_password, totp_enabled, must_change, recovery_codes_left."
+          }
+        }
+      }
     },
     "/api/v1/me/local/password": {
-      "put": { "tags": ["me"], "summary": "Change or add password", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "Changed; every other session revoked; fresh session cookie issued." }, "403": { "description": "Current password incorrect (not required when must_change is set or no password exists)." } } }
+      "put": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Change or add password",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Changed; every other session revoked; fresh session cookie issued."
+          },
+          "403": {
+            "description": "Current password incorrect (not required when must_change is set or no password exists)."
+          }
+        }
+      }
     },
     "/api/v1/me/local/totp/start": {
-      "post": { "tags": ["me"], "summary": "Begin TOTP enrollment", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "secret and otpauth_url; not active until confirmed." } } }
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Begin TOTP enrollment",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "secret and otpauth_url; not active until confirmed."
+          }
+        }
+      }
     },
     "/api/v1/me/local/totp/qr.png": {
-      "get": { "tags": ["me"], "summary": "QR image for the staged enrollment", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "image/png" }, "404": { "description": "No pending enrollment." } } }
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "QR image for the staged enrollment",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "image/png"
+          },
+          "404": {
+            "description": "No pending enrollment."
+          }
+        }
+      }
     },
     "/api/v1/me/local/totp/confirm": {
-      "post": { "tags": ["me"], "summary": "Confirm TOTP with a code", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "enabled; ten single-use recovery_codes, shown once." }, "400": { "description": "bad_code." } } }
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Confirm TOTP with a code",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "enabled; ten single-use recovery_codes, shown once."
+          },
+          "400": {
+            "description": "bad_code."
+          }
+        }
+      }
     },
     "/api/v1/me/local/totp/disable": {
-      "post": { "tags": ["me"], "summary": "Disable TOTP (password required)", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "enabled=false." }, "403": { "description": "Password incorrect." } } }
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "Disable TOTP (password required)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "enabled=false."
+          },
+          "403": {
+            "description": "Password incorrect."
+          }
+        }
+      }
     },
     "/api/v1/admin/users/local": {
-      "post": { "tags": ["admin"], "summary": "Create a Janus account with a temporary password", "security": [{ "sessionCookie": [] }], "responses": { "201": { "description": "User; must_change is set so the temporary password works once." }, "400": { "description": "Duplicate email or weak password." }, "402": { "description": "license.required / license.seats_exhausted." } } }
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a Janus account with a temporary password",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "User; must_change is set so the temporary password works once."
+          },
+          "400": {
+            "description": "Duplicate email or weak password."
+          },
+          "402": {
+            "description": "license.required / license.seats_exhausted."
+          }
+        }
+      }
     },
     "/api/v1/admin/users/{id}/password": {
-      "post": { "tags": ["admin"], "summary": "Reset a user's password (temporary, must change)", "security": [{ "sessionCookie": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "reset; all sessions revoked." } } }
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset a user's password (temporary, must change)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "reset; all sessions revoked."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{id}/purge": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a deleted person's held content now",
+        "description": "Removes a deleted person's held content (files, chats, tokens) at once instead of at the end of the 30-day hold. Refused for an active person.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "content deleted; returns the updated user."
+          },
+          "400": {
+            "description": "the person is not deleted."
+          },
+          "404": {
+            "description": "no such user."
+          }
+        }
+      }
     },
     "/api/v1/admin/users/{id}/totp": {
-      "delete": { "tags": ["admin"], "summary": "Remove a user's second factor", "security": [{ "sessionCookie": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "enabled=false." } } }
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Remove a user's second factor",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "enabled=false."
+          }
+        }
+      }
     },
     "/auth/providers": {
-      "get": { "tags": ["auth"], "summary": "Sign-in buttons for the login page", "parameters": [{ "name": "redirect_uri", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "providers: slug ('' = environment-configured SSO), name, url." } } }
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign-in buttons for the login page",
+        "parameters": [
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "providers: slug ('' = environment-configured SSO), name, url."
+          }
+        }
+      }
     },
     "/auth/start/{slug}": {
-      "get": { "tags": ["auth"], "summary": "Begin sign-in with an admin-configured provider", "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "302": { "description": "Redirect to the provider's authorization endpoint." } } }
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Begin sign-in with an admin-configured provider",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider's authorization endpoint."
+          }
+        }
+      }
     },
     "/auth/callback/{slug}": {
-      "get": { "tags": ["auth"], "summary": "Provider callback (per-slug redirect URI)", "parameters": [{ "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "302": { "description": "Session established; redirect to the requested page." } } }
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Provider callback (per-slug redirect URI)",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Session established; redirect to the requested page."
+          }
+        }
+      }
     },
     "/api/v1/admin/identity-providers": {
-      "get": { "tags": ["admin"], "summary": "List admin-configured OIDC providers", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "providers[] (never includes secrets; callback_url per provider) and licensed." } } },
-      "post": { "tags": ["admin"], "summary": "Create a provider", "security": [{ "sessionCookie": [] }], "responses": { "201": { "description": "Created." }, "400": { "description": "Bad slug (2–40 [a-z0-9-]), non-https issuer, missing client id/secret." }, "402": { "description": "license.feature_not_licensed (multi_oidc)." }, "409": { "description": "Slug taken." } } }
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List admin-configured OIDC providers",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "providers[] (never includes secrets; callback_url per provider) and licensed."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a provider",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created."
+          },
+          "400": {
+            "description": "Bad slug (2–40 [a-z0-9-]), non-https issuer, missing client id/secret."
+          },
+          "402": {
+            "description": "license.feature_not_licensed (multi_oidc)."
+          },
+          "409": {
+            "description": "Slug taken."
+          }
+        }
+      }
     },
     "/api/v1/admin/identity-providers/test": {
-      "post": { "tags": ["admin"], "summary": "Probe OIDC discovery for a candidate issuer", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "ok with issuer and endpoints, or ok=false with error." }, "402": { "description": "multi_oidc not licensed." } } }
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Probe OIDC discovery for a candidate issuer",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok with issuer and endpoints, or ok=false with error."
+          },
+          "402": {
+            "description": "multi_oidc not licensed."
+          }
+        }
+      }
     },
     "/api/v1/admin/identity-providers/{id}": {
-      "put": { "tags": ["admin"], "summary": "Update a provider (blank client_secret keeps the stored one)", "security": [{ "sessionCookie": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Updated; cached adapter rebuilt on next use." }, "404": { "description": "Unknown id." }, "409": { "description": "Slug taken." } } },
-      "delete": { "tags": ["admin"], "summary": "Delete a provider (accounts are kept)", "security": [{ "sessionCookie": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Deleted." }, "404": { "description": "Unknown id." } } }
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a provider (blank client_secret keeps the stored one)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated; cached adapter rebuilt on next use."
+          },
+          "404": {
+            "description": "Unknown id."
+          },
+          "409": {
+            "description": "Slug taken."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a provider (accounts are kept)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "404": {
+            "description": "Unknown id."
+          }
+        }
+      }
     },
     "/api/v1/admin/directory": {
-      "get": { "tags": ["admin"], "summary": "LDAP directory configuration", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "directory (null when none; has_bind_password instead of the secret) and licensed." } } },
-      "put": { "tags": ["admin"], "summary": "Create or replace the directory (blank bind_password keeps the stored one)", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "Saved." }, "400": { "description": "url not ldap(s)://, missing base_dn, user_filter without {login}, group_filter without {dn}." }, "402": { "description": "license.feature_not_licensed (ldap)." } } },
-      "delete": { "tags": ["admin"], "summary": "Disconnect the directory (accounts are kept)", "security": [{ "sessionCookie": [] }], "responses": { "204": { "description": "Removed." }, "404": { "description": "Nothing configured." } } }
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "LDAP directory configuration",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "directory (null when none; has_bind_password instead of the secret) and licensed."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create or replace the directory (blank bind_password keeps the stored one)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved."
+          },
+          "400": {
+            "description": "url not ldap(s)://, missing base_dn, user_filter without {login}, group_filter without {dn}."
+          },
+          "402": {
+            "description": "license.feature_not_licensed (ldap)."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Disconnect the directory (accounts are kept)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "404": {
+            "description": "Nothing configured."
+          }
+        }
+      }
     },
     "/api/v1/admin/directory/test": {
-      "post": { "tags": ["admin"], "summary": "Bind with candidate settings and optionally resolve a login", "security": [{ "sessionCookie": [] }], "responses": { "200": { "description": "ok; with login: user {dn, email, name, groups, would_be_admin}. ok=false carries the reason." }, "402": { "description": "ldap not licensed." } } }
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Bind with candidate settings and optionally resolve a login",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok; with login: user {dn, email, name, groups, would_be_admin}. ok=false carries the reason."
+          },
+          "402": {
+            "description": "ldap not licensed."
+          }
+        }
+      }
     },
     "/api/v1/admin/audit/export": {
-      "get": { "tags": ["admin"], "summary": "Download the filtered audit log as CSV (Business: audit_export)", "security": [{ "sessionCookie": [] }], "parameters": [{ "name": "actor", "in": "query", "schema": { "type": "string" } }, { "name": "action", "in": "query", "schema": { "type": "string" } }, { "name": "resource_type", "in": "query", "schema": { "type": "string" } }, { "name": "start", "in": "query", "schema": { "type": "string", "format": "date-time" } }, { "name": "end", "in": "query", "schema": { "type": "string", "format": "date-time" } }], "responses": { "200": { "description": "text/csv attachment: created_at, actor, actor_user_id, action, resource_type, resource_id, old_value, new_value. The download itself is audited (audit.export)." }, "402": { "description": "license.feature_not_licensed (audit_export)." } } }
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Download the filtered audit log as CSV (Business: audit_export)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "actor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/csv attachment: created_at, actor, actor_user_id, action, resource_type, resource_id, old_value, new_value. The download itself is audited (audit.export)."
+          },
+          "402": {
+            "description": "license.feature_not_licensed (audit_export)."
+          }
+        }
+      }
     },
     "/api/v1/admin/system/license": {
       "get": {
@@ -1413,7 +2054,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["key"],
+                "required": [
+                  "key"
+                ],
                 "properties": {
                   "key": {
                     "type": "string",
@@ -1456,41 +2099,80 @@
     },
     "/api/v1/admin/system/license/sync": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "License sync configuration and health",
-        "security": [{"sessionCookie": []}],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "responses": {
-          "200": {"description": "Enabled (off by default), has_token (never the token), enabled_managed and token_managed environment pins, mode manual|online|offline|file, health never|healthy|stale|error|disabled, last_attempt_at, last_success_at, fresh_until, sanitized error_code and optional subscription metadata. No network request is made by this read."}
+          "200": {
+            "description": "Enabled (off by default), has_token (never the token), enabled_managed and token_managed environment pins, mode manual|online|offline|file, health never|healthy|stale|error|disabled, last_attempt_at, last_success_at, fresh_until, sanitized error_code and optional subscription metadata. No network request is made by this read."
+          }
         }
       },
       "put": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Configure opt-in automatic license sync",
-        "security": [{"sessionCookie": []}],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "description": "Administrator session and CSRF required. Adding a token does not enable sync. Environment-managed fields are read-only. Offline overrides remote sync; mounted key files are never written.",
         "requestBody": {
           "required": true,
-          "content": {"application/json": {"schema": {
-            "type": "object",
-            "properties": {
-              "enabled": {"type": "boolean"},
-              "token": {"type": "string", "writeOnly": true, "description": "Raw portal sync token, or license_id.token with an exact match to the installed license. Foreign identities and header text are rejected. Blank or omitted preserves the stored credential."},
-              "clear_token": {"type": "boolean", "description": "Explicitly remove stored credential; cannot combine with a nonblank token."}
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "token": {
+                    "type": "string",
+                    "writeOnly": true,
+                    "description": "Raw portal sync token, or license_id.token with an exact match to the installed license. Foreign identities and header text are rejected. Blank or omitted preserves the stored credential."
+                  },
+                  "clear_token": {
+                    "type": "boolean",
+                    "description": "Explicitly remove stored credential; cannot combine with a nonblank token."
+                  }
+                }
+              }
             }
-          }}}
+          }
         },
         "responses": {
-          "200": {"description": "Configuration saved; credentials are never returned."},
-          "400": {"description": "Invalid or contradictory settings."}
+          "200": {
+            "description": "Configuration saved; credentials are never returned."
+          },
+          "400": {
+            "description": "Invalid or contradictory settings."
+          }
         }
       },
       "post": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Sync license now",
-        "security": [{"sessionCookie": []}],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "description": "Administrator session and CSRF required. Runs the configured opt-in license sync, separate from software update checking. Preserves signed expiry and grace authority.",
         "responses": {
-          "200": {"description": "Sync result. Read configuration and license state for current health and renewal notice."}
+          "200": {
+            "description": "Sync result. Read configuration and license state for current health and renewal notice."
+          }
         }
       }
     },
@@ -1823,7 +2505,7 @@
             }
           }
         },
-        "description": "Soft-deletes the upstream: every model it hosts is disabled and the upstream disappears from listings while usage history is retained. Refused with 409 while an enabled managed model still targets one of the hosted models \u2014 the response names the aliases; repoint or disable them (see GET /api/v1/admin/upstreams/{id}/dependents for the full blast radius) or retry with ?force=true to break them deliberately. ?purge_grants=true additionally removes the direct grants on the upstream's models, which would otherwise dangle on disabled models."
+        "description": "Soft-deletes the upstream: every model it hosts is disabled and the upstream disappears from listings while usage history is retained. Refused with 409 while an enabled managed model still targets one of the hosted models — the response names the aliases; repoint or disable them (see GET /api/v1/admin/upstreams/{id}/dependents for the full blast radius) or retry with ?force=true to break them deliberately. ?purge_grants=true additionally removes the direct grants on the upstream's models, which would otherwise dangle on disabled models."
       }
     },
     "/api/v1/admin/upstreams/{id}/dependents": {
@@ -2054,7 +2736,7 @@
           {
             "name": "range",
             "in": "query",
-            "description": "Window covered by usage_series and usage_totals: day, week, month (default, ~30 daily buckets), quarter, or custom with start/end RFC 3339 params \u2014 mirrors /api/v1/admin/overview.",
+            "description": "Window covered by usage_series and usage_totals: day, week, month (default, ~30 daily buckets), quarter, or custom with start/end RFC 3339 params — mirrors /api/v1/admin/overview.",
             "schema": {
               "type": "string",
               "enum": [
@@ -2677,6 +3359,7 @@
           "app"
         ],
         "summary": "Granted models with pricing and health",
+        "description": "Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms — the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarised as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields.",
         "security": [
           {
             "sessionCookie": []
@@ -2693,8 +3376,7 @@
               }
             }
           }
-        },
-        "description": "Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms \u2014 the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarised as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields."
+        }
       }
     },
     "/api/v1/notifications": {
@@ -2705,9 +3387,33 @@
         "summary": "List notifications",
         "description": "Server-paged inbox, newest first with id as a stable tie-breaker. Response includes notifications, unread_count (entire inbox), has_more, offset and limit. Follow has_more using offset + limit; totals are not implied by page length. Offset pages reflect current data, not a frozen snapshot.",
         "parameters": [
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "minimum": 1, "maximum": 200 } },
-          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0, "minimum": 0 } },
-          { "name": "unread", "in": "query", "schema": { "type": "boolean", "default": false } }
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
         ],
         "security": [
           {
@@ -3142,7 +3848,7 @@
           "app"
         ],
         "summary": "Own request log",
-        "description": "Metadata only \u2014 request and response bodies are never stored. Admins may widen the scope: scope=all lists every user's requests and user_id=<id> narrows to one user (user_id wins when both are sent). Cross-user responses attach the owning user's identity to each event as user_email and user_name; non-admins always receive only their own events regardless of these parameters. Events also carry client_app: the calling application (agent harness, IDE plugin, app) when it identifies itself via X-Janus-Agent, X-OpenRouter-Title, X-Title, or HTTP-Referer. It is empty when the client sends no attribution header \u2014 client_user_agent only ever names the SDK. Service-token events carry an empty user_id plus service_token_id/service_token_name; filter the two populations apart with principal=users|service_tokens.",
+        "description": "Metadata only — request and response bodies are never stored. Admins may widen the scope: scope=all lists every user's requests and user_id=<id> narrows to one user (user_id wins when both are sent). Cross-user responses attach the owning user's identity to each event as user_email and user_name; non-admins always receive only their own events regardless of these parameters. Events also carry client_app: the calling application (agent harness, IDE plugin, app) when it identifies itself via X-Janus-Agent, X-OpenRouter-Title, X-Title, or HTTP-Referer. It is empty when the client sends no attribution header — client_user_agent only ever names the SDK. Service-token events carry an empty user_id plus service_token_id/service_token_name; filter the two populations apart with principal=users|service_tokens.",
         "security": [
           {
             "sessionCookie": []
@@ -3153,19 +3859,29 @@
             "name": "source",
             "in": "query",
             "description": "organization excludes requests served by a user's own connected subscription; subscription keeps only those.",
-            "schema": { "type": "string", "enum": ["organization", "subscription"] }
+            "schema": {
+              "type": "string",
+              "enum": [
+                "organization",
+                "subscription"
+              ]
+            }
           },
           {
             "name": "classified",
             "in": "query",
             "description": "Admin only. Usage insights label: a category slug, category/subcategory, * (any classified request) or - (not classified).",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "token_id",
             "in": "query",
             "description": "Narrow to one personal API token within the caller's authorized request scope. Does not widen access to another user's events.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "range",
@@ -3359,13 +4075,21 @@
             "name": "source",
             "in": "query",
             "description": "organization excludes requests served by a user's own connected subscription; subscription keeps only those.",
-            "schema": { "type": "string", "enum": ["organization", "subscription"] }
+            "schema": {
+              "type": "string",
+              "enum": [
+                "organization",
+                "subscription"
+              ]
+            }
           },
           {
             "name": "token_id",
             "in": "query",
             "description": "Narrow to one personal API token within the caller's authorized request scope. Does not widen access to another user's events.",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "range",
@@ -3479,6 +4203,939 @@
         "responses": {
           "200": {
             "description": "CSV stream."
+          }
+        }
+      }
+    },
+    "/api/v1/chat/settings": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Your chat preferences",
+        "description": "Your own instructions for every chat (sent first, as a system message, before the conversation's own instructions), the model new chats start on, and your own image_model, video_model and music_model (\"\" = automatic: your plan's model when chatting on a plan, else the organization's). Your own media models are used in every chat while they are available to you.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Save your chat preferences",
+        "description": "Sets instructions (at most 8,000 characters, stored encrypted), default_model, image_model, video_model and/or music_model (\"\" = automatic). Fields left out are unchanged.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Instructions or a model name too long"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/memory": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Your memory",
+        "description": "What the assistant remembers about you across chats (owner-only; administrators cannot read it): enabled, available (the administrator has not turned Memory off), memories (id, content, from_conversation_id/title, created_at, updated_at) and limit (200). Temporary chats never read or write memory.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Turn memory on or off",
+        "description": "Body {enabled}. Off: chats stop reading your memories and the model can no longer save new ones; nothing is deleted.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Add a memory",
+        "description": "Body {content} (at most 500 characters, stored encrypted).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Empty, too long, or memory is full"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Delete every memory",
+        "description": "Removes all your memories.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/memory/{id}": {
+      "patch": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Edit a memory",
+        "description": "Body {content} (at most 500 characters).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not your memory"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Delete a memory",
+        "description": "Removes one memory.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Not your memory"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/conversations/{id}/export": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Export a conversation",
+        "description": "The current branch as Markdown (default) or JSON (format=json, \"janus-chat-v1\"): instructions, each message with model, tokens and cost, attachments by name. Downloaded as a file.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "400": {
+            "description": "format is not markdown or json"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "json"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/conversations/{id}/shares": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "List a conversation's share links",
+        "description": "Live links with message count and views.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Make a share link",
+        "description": "A read-only snapshot of the current branch for anyone signed in to this Janus. Instructions, tokens and costs are left out; later messages are not shared. Not for temporary chats; at most 20 links per chat. Audited.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "400": {
+            "description": "Temporary chat, nothing to share yet, or too many links"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/conversations/{id}/shares/{share}": {
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Stop sharing",
+        "description": "Ends the link and drops its snapshot. Deleting the conversation ends all its links. Audited.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "share",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/shared/{share}": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Open a shared chat",
+        "description": "Any signed-in user. Returns title, shared_by (display name), shared_at, own and messages. Counts a view unless the owner opens it.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        },
+        "parameters": [
+          {
+            "name": "share",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/prompts": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "List your saved prompts",
+        "description": "Your own library, by command name. Bodies may contain {{variables}}.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Save a prompt",
+        "description": "name (the / command: 1-40 lowercase letters, digits or dashes, unique per user), optional title, body (at most 20,000 characters, stored encrypted). At most 200 prompts.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "400": {
+            "description": "Invalid name or body, or the library is full"
+          },
+          "409": {
+            "description": "You already have a prompt with that name"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/prompts/{id}": {
+      "patch": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Update a saved prompt",
+        "description": "name, title and/or body.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "400": {
+            "description": "Invalid name or body"
+          },
+          "409": {
+            "description": "Name taken"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Delete a saved prompt",
+        "description": "Removes it.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/chat/catalog": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Chat picker metadata",
+        "description": "For the models the caller may use under the current Working-under context: chat_name and description (from the applicable grant), category, order, recommended; plus hidden models, the default model, starter prompts, the category list, and which Chat features are on (shares, export, personal_plans). Each model lists the tools it can use (tools: web_search and x_search where its provider runs them, create_image when the caller has an image model) after the administrator's switches; tools describes every tool; image_models lists the image models create_image can use for the caller (their plan's first) and default_image_model the administrator's choice.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Picker metadata."
+          }
+        }
+      }
+    },
+    "/api/v1/chat/search": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Search own chat conversations",
+        "description": "Whole-word search (light stemming; every word must appear in the conversation) over the caller's chats, through a keyed blind index: content stays encrypted at rest. Substring search is not supported. Returns {results:[{conversation_id,title,updated_at,snippet}]}, best matches first. Session only (preview).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search words (each at least 2 characters).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW)"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/chat/reindex": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Rebuild the chat search index",
+        "description": "Rebuilds every user's chat search index from the encrypted content (needed after an encryption-key change or an upgrade). Returns counts: messages_indexed, messages_cleared, titles_indexed, unreadable, pruned_rows. Administrators never see chat content.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW)"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/attachments": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Upload a chat attachment",
+        "description": "multipart/form-data, one file in field 'file'. Images (PNG, JPEG, GIF, WebP; up to 40 megapixels) or documents (PDF, DOCX, UTF-8 text and source files), checked by content as well as extension; documents are reduced to text. Limit: the smaller of JANUS_CHAT_MAX_UPLOAD_BYTES (default 20 MiB) and the file storage object limit. Stored encrypted in file storage. Returns id, kind, filename, mime, size_bytes, est_tokens, width, height, truncated. Send it with a message via attachment_ids; uploads never sent are purged after 24 hours. Session only (preview).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "The file type is not accepted, or the file is unreadable"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "413": {
+            "description": "The file is larger than the upload limit"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/attachments/{id}": {
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Delete an unsent chat attachment",
+        "description": "Owner only. A file already sent with a message is removed with its conversation instead (409).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          },
+          "409": {
+            "description": "The file was already sent with a message"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/attachments/{id}/content": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Download a chat attachment",
+        "description": "Owner only. Images are served as their own type; every other file as application/octet-stream with Content-Disposition attachment. Always sent with X-Content-Type-Options nosniff and a sandboxing Content-Security-Policy.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The original file"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/conversations": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "List own chat conversations",
+        "description": "Pinned first, then most recent. Temporary chats are never listed. Each carries pinned, temporary, instructions and reasoning_effort. Session only (preview).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Start a chat conversation",
+        "description": "Body: model, title, and optionally temporary (never listed or searchable, removed once idle for a day), instructions (this chat only, at most 8,000 characters, stored encrypted) and reasoning_effort (\"\", low, medium, high). Billed to the session's Working under selection.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/conversations/{id}": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Get a conversation with every message",
+        "description": "Messages form a tree (parent_id); runs maps streaming message id to its run id. Finished replies carry notes from the request log when something noteworthy happened: requested_model (auto-routing or an alias answered with another model), route_reason, fallback_reason, reasoning_adjustment and secgw_action / secgw_violations (observed, redacted, stream_cut, blocked).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Update a conversation",
+        "description": "title, model, current_leaf_id (switch branch), pinned, instructions, reasoning_effort, tools_off (tools turned off for this chat: web_search, x_search, web_fetch, code_execution, create_image; tools are on by default) or image_model (the model create_image uses here; empty = automatic). A temporary chat cannot be pinned.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Delete a conversation",
+        "description": "Soft delete.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/conversations/{id}/messages": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Send a message",
+        "description": "Starts a server-owned run through the normal proxy pipeline and returns its run_id. parent_id forks a branch (edit); regenerate re-answers parent_id. attachment_ids (up to 10 uploads) are sent with the new message: document text in full, images as image parts for vision models or a placeholder otherwise (see warnings in the response). When model is an image model (catalog modality image without chat), the message content is sent as an /v1/images/generations prompt instead; the reply carries the generated images as attachments (stored encrypted, owner-only) and the provider's revised prompt as its content. Attachments are refused for image models. Chat models get the chat's tools: provider-run web_search, x_search, web_fetch and code_execution wherever the model's provider runs them (OpenAI, xAI, Anthropic, Gemini 3+; never run on Janus), Janus-run web_search for other models when an administrator configured a search service, and create_image (Janus makes the image with the chat's image model as its own metered request, stores it on the reply, and the model finishes its answer). Janus also runs create_file (text files the model hands over, stored on the reply as attachments of kind file and shown as file cards), create_video and create_music (the chat's video/music model, each its own metered request; stored on the reply as kind video/audio) and remember/forget (the person's memory, see /api/v1/chat/memory). compare_models (up to two more models) answers the same message with each, side by side: the response lists the extra runs in compare, and the replies share compare_group. research: true runs deep research (many searches and page reads on the public web, then a cited report, also saved on the reply as a Markdown file).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/runs/{id}/events": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Follow a run (SSE)",
+        "description": "text/event-stream of delta frames (content/reasoning with byte offsets), activity frames ({activity, sources}: what the model is searching or making and the sources found so far, sent whenever they change) and one done frame. Resume with content_from/reasoning_from. Works on any replica.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reasoning_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/runs/{id}/stop": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Stop a run",
+        "description": "Any replica; the owning pod cancels the upstream request.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
           }
         }
       }
@@ -3722,6 +5379,20 @@
         "responses": {
           "200": {
             "description": "Process is up."
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Readiness probe",
+        "description": "Checks the database and, when one is configured, the identity provider. Returns {\"ready\": bool, \"checks\": {...}}.",
+        "responses": {
+          "200": {
+            "description": "Ready to serve."
+          },
+          "503": {
+            "description": "A dependency is unreachable."
           }
         }
       }
@@ -4385,9 +6056,10 @@
                         "type": "string",
                         "enum": [
                           "database",
-                          "disk"
+                          "disk",
+                          "object"
                         ],
-                        "description": "disk requires JANUS_TROUBLESHOOT_DIR"
+                        "description": "disk requires JANUS_TROUBLESHOOT_DIR; object requires file storage set to S3-compatible (bodies are written to the bucket encrypted)"
                       },
                       "capture_request_body": {
                         "type": "boolean"
@@ -4522,7 +6194,7 @@
             "description": "Usage event id of the captured request."
           }
         ],
-        "description": "Every classifier call the request caused (Security Gateway guards and Usage insights, inline or background): feature, classifier, mode, timing, status, and \u2014 when the session captures request bodies \u2014 the exact request and response. Viewing is audited.",
+        "description": "Every classifier call the request caused (Security Gateway guards and Usage insights, inline or background): feature, classifier, mode, timing, status, and — when the session captures request bodies — the exact request and response. Viewing is audited.",
         "responses": {
           "200": {
             "description": "{classifier_runs: [...]}"
@@ -4785,7 +6457,9 @@
     },
     "/api/v1/admin/requests/{id}/security": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "What the security gateway did on one request",
         "description": "Lists the classifier calls the gateway made while inspecting this request, with their verdicts, plus any violations from non-model checks. Classifier calls are usage events of their own (so their cost stays attributable) and are hidden from the request log by default; this is where they are reported, attached to the request that caused them. A run with an empty findings list means the classifier answered and the content was clean. {id} is a usage event ID; runs are matched by that event's request_id.",
         "parameters": [
@@ -4793,13 +6467,19 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "Usage event ID of the request."
           }
         ],
         "responses": {
-          "200": { "description": "OK" },
-          "404": { "description": "No such request" }
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "description": "No such request"
+          }
         }
       }
     },
@@ -5186,7 +6866,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "text, optional classifier_model_id (compare before switching), router_id or config (an unsaved router from the builder)."
+                "description": "text, optional history (earlier conversation as \"User: ...\" / \"Assistant: ...\" lines, classified as context the way live follow-ups are), optional classifier_model_id (compare before switching), router_id or config (an unsaved router from the builder)."
               }
             }
           }
@@ -5982,6 +7662,378 @@
         }
       }
     },
+    "/api/v1/admin/storage": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "File storage configuration",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file storage backend for chat attachments and troubleshooting captures (database or S3-compatible), which fields the deployment sets, and database usage. Objects are encrypted by Janus before they reach either backend. The S3 secret is never returned (secret_set only).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "database",
+                        "s3"
+                      ]
+                    },
+                    "s3": {
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string",
+                          "description": "S3 endpoint URL, e.g. https://s3.eu-central-1.amazonaws.com or http://seaweedfs:8333."
+                        },
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "region": {
+                          "type": "string",
+                          "description": "Defaults to us-east-1."
+                        },
+                        "path_style": {
+                          "type": "boolean",
+                          "description": "Address the bucket as a path (required by most self-hosted S3 servers)."
+                        },
+                        "prefix": {
+                          "type": "string",
+                          "description": "Optional key prefix inside the bucket."
+                        },
+                        "access_key_id": {
+                          "type": "string"
+                        },
+                        "ca_bundle": {
+                          "type": "string",
+                          "description": "Optional PEM certificates trusted for the endpoint (private CA)."
+                        },
+                        "secret_set": {
+                          "type": "boolean",
+                          "description": "A secret access key is stored. The secret itself is never returned."
+                        }
+                      }
+                    },
+                    "env_managed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Fields set by the deployment (JANUS_STORAGE_MODE, JANUS_S3_*); read-only in the UI and refused by PUT."
+                    },
+                    "max_object_bytes": {
+                      "type": "integer",
+                      "description": "JANUS_STORAGE_MAX_OBJECT_BYTES (default 25 MiB)."
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "objects": {
+                              "type": "integer"
+                            },
+                            "bytes": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "backends": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "notes": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Configure file storage",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "database",
+                      "s3"
+                    ]
+                  },
+                  "s3": {
+                    "type": "object",
+                    "properties": {
+                      "endpoint": {
+                        "type": "string",
+                        "description": "S3 endpoint URL, e.g. https://s3.eu-central-1.amazonaws.com or http://seaweedfs:8333."
+                      },
+                      "bucket": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string",
+                        "description": "Defaults to us-east-1."
+                      },
+                      "path_style": {
+                        "type": "boolean",
+                        "description": "Address the bucket as a path (required by most self-hosted S3 servers)."
+                      },
+                      "prefix": {
+                        "type": "string",
+                        "description": "Optional key prefix inside the bucket."
+                      },
+                      "access_key_id": {
+                        "type": "string"
+                      },
+                      "ca_bundle": {
+                        "type": "string",
+                        "description": "Optional PEM certificates trusted for the endpoint (private CA)."
+                      },
+                      "secret_access_key": {
+                        "type": "string",
+                        "description": "Write-only. Empty keeps the stored secret."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved; returns the updated configuration document. Changing the mode does not move existing files: each stays readable from the backend that holds it. Audit-logged as storage.configure (without the secret).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "database",
+                        "s3"
+                      ]
+                    },
+                    "s3": {
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string",
+                          "description": "S3 endpoint URL, e.g. https://s3.eu-central-1.amazonaws.com or http://seaweedfs:8333."
+                        },
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "region": {
+                          "type": "string",
+                          "description": "Defaults to us-east-1."
+                        },
+                        "path_style": {
+                          "type": "boolean",
+                          "description": "Address the bucket as a path (required by most self-hosted S3 servers)."
+                        },
+                        "prefix": {
+                          "type": "string",
+                          "description": "Optional key prefix inside the bucket."
+                        },
+                        "access_key_id": {
+                          "type": "string"
+                        },
+                        "ca_bundle": {
+                          "type": "string",
+                          "description": "Optional PEM certificates trusted for the endpoint (private CA)."
+                        },
+                        "secret_set": {
+                          "type": "boolean",
+                          "description": "A secret access key is stored. The secret itself is never returned."
+                        }
+                      }
+                    },
+                    "env_managed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Fields set by the deployment (JANUS_STORAGE_MODE, JANUS_S3_*); read-only in the UI and refused by PUT."
+                    },
+                    "max_object_bytes": {
+                      "type": "integer",
+                      "description": "JANUS_STORAGE_MAX_OBJECT_BYTES (default 25 MiB)."
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "objects": {
+                              "type": "integer"
+                            },
+                            "bytes": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "backends": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "notes": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid configuration, or file storage is set by the deployment (JANUS_STORAGE_MODE)."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/storage/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test a file storage configuration",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "database",
+                      "s3"
+                    ]
+                  },
+                  "s3": {
+                    "type": "object",
+                    "properties": {
+                      "endpoint": {
+                        "type": "string",
+                        "description": "S3 endpoint URL, e.g. https://s3.eu-central-1.amazonaws.com or http://seaweedfs:8333."
+                      },
+                      "bucket": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string",
+                        "description": "Defaults to us-east-1."
+                      },
+                      "path_style": {
+                        "type": "boolean",
+                        "description": "Address the bucket as a path (required by most self-hosted S3 servers)."
+                      },
+                      "prefix": {
+                        "type": "string",
+                        "description": "Optional key prefix inside the bucket."
+                      },
+                      "access_key_id": {
+                        "type": "string"
+                      },
+                      "ca_bundle": {
+                        "type": "string",
+                        "description": "Optional PEM certificates trusted for the endpoint (private CA)."
+                      },
+                      "secret_access_key": {
+                        "type": "string",
+                        "description": "Write-only. Empty keeps the stored secret."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Writes, reads back and deletes a probe object with the posted (unsaved) configuration; an empty secret uses the stored one. Under JANUS_STORAGE_MODE the deployment's configuration is tested and the body is ignored. ok=false carries the provider's error text in error (never the secret). An S3 bucket that does not exist is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "latency_ms": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/system/discovery-interval": {
       "get": {
         "tags": [
@@ -6073,6 +8125,45 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/child-safety": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Child Safety settings",
+        "description": "Child Safety (every edition): on/off, safety model, the age ranges (profiles) with each category's outcome (off, answer appropriately, block) and instructions, blocked models, the users and teams assigned to each age range, the built-in text and tutor rule, the fixed safety categories, eligible classifiers, the protecting/not-protecting verdict with reasons, and recent events.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Configure Child Safety",
+        "description": "Sets enabled, classifier_model_id (a decision or generative-guard model), ask (together|separately), profiles (age ranges: [{id, name, base, categories: {slug: {outcome: off|answer|block, instructions}}, blocked_models}]; built-ins cannot be removed; omit to leave unchanged) and assignments [{scope_type: user|team, scope_id, profile_id}]. Not license-gated (Community). Audited as secgw_family_updated.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid age range, outcome, classifier or assignment"
           }
         }
       }
@@ -6463,7 +8554,7 @@
           "admin"
         ],
         "summary": "Bind a policy to a scope",
-        "description": "One binding per scope; a second is refused with 400. Precedence is org \u2192 group \u2192 model \u2192 managed_model \u2192 service_token, most specific wins, subject to the mandatory floor. Audited.",
+        "description": "One binding per scope; a second is refused with 400. Precedence is org → group → model → managed_model → service_token, most specific wins, subject to the mandatory floor. Audited.",
         "security": [
           {
             "sessionCookie": []
@@ -6548,7 +8639,7 @@
           "admin"
         ],
         "summary": "List term lists",
-        "description": "Metadata only \u2014 name, mode, severity, term_count. Terms are never included: the list is itself confidential.",
+        "description": "Metadata only — name, mode, severity, term_count. Terms are never included: the list is itself confidential.",
         "security": [
           {
             "sessionCookie": []
@@ -7177,7 +9268,7 @@
           "admin"
         ],
         "summary": "Explain the effective policy for a caller and model",
-        "description": "Resolves every binding that applies and returns the merged checks with provenance (policy, binding, scope, floor) plus a trace naming each binding's outcome \u2014 including every relaxation refused by a mandatory org policy.",
+        "description": "Resolves every binding that applies and returns the merged checks with provenance (policy, binding, scope, floor) plus a trace naming each binding's outcome — including every relaxation refused by a mandatory org policy.",
         "security": [
           {
             "sessionCookie": []
@@ -7583,18 +9674,37 @@
                     "my_role": {
                       "type": "string",
                       "description": "Legacy effective actor role; use membership_role for membership labels.",
-                      "enum": ["", "admin", "leader", "moderator", "member"]
+                      "enum": [
+                        "",
+                        "admin",
+                        "leader",
+                        "moderator",
+                        "member"
+                      ]
                     },
                     "membership_role": {
                       "type": "string",
-                      "enum": ["", "leader", "moderator", "member"],
+                      "enum": [
+                        "",
+                        "leader",
+                        "moderator",
+                        "member"
+                      ],
                       "description": "Actual team membership, independent of organization administration."
                     },
                     "actor_role": {
                       "type": "string",
-                      "enum": ["", "admin", "leader", "moderator", "member"]
+                      "enum": [
+                        "",
+                        "admin",
+                        "leader",
+                        "moderator",
+                        "member"
+                      ]
                     },
-                    "can_manage": { "type": "boolean" },
+                    "can_manage": {
+                      "type": "boolean"
+                    },
                     "pending_request_count": {
                       "type": "integer",
                       "minimum": 0,
@@ -7872,7 +9982,7 @@
                       "string",
                       "null"
                     ],
-                    "description": "Trimmed, 1\u2013200 bytes when non-null."
+                    "description": "Trimmed, 1–200 bytes when non-null."
                   },
                   "listed": {
                     "type": [
@@ -9647,7 +11757,7 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "Trimmed, 1\u2013200 bytes."
+                    "description": "Trimmed, 1–200 bytes."
                   },
                   "expires_at": {
                     "type": [
@@ -9669,7 +11779,7 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "Trimmed, 1\u2013200 bytes."
+                    "description": "Trimmed, 1–200 bytes."
                   },
                   "expires_at": {
                     "type": [
@@ -14678,7 +16788,7 @@
         "tags": [
           "app"
         ],
-        "summary": "Change an existing token\u2019s team affinity",
+        "summary": "Change an existing token’s team affinity",
         "description": "Owner browser session and CSRF header required. The secret does not change. Future-only preserves historical requests. move_history reassigns persisted requests for this token; work still in flight retains its admitted context. New reports and team quotas reflect reassignment; already generated report artifacts remain snapshots. Target team requires active membership.",
         "security": [
           {
@@ -14746,6 +16856,25 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/chat/search-test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test a Chat web search service",
+        "description": "Runs one search with {provider, url, key, query} (searxng, brave, exa, tavily). An empty key uses the stored one. Returns {ok, results, ms} or {ok:false, error} naming the problem. The key is never stored by this call.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result of the test search."
           }
         }
       }
@@ -15009,7 +17138,7 @@
               "user",
               "team"
             ],
-            "description": "Ignored on the lead surface \u2014 the subject is always the team in the path."
+            "description": "Ignored on the lead surface — the subject is always the team in the path."
           },
           "subject_id": {
             "type": "string"
@@ -15146,7 +17275,7 @@
           },
           "adapter_type": {
             "type": "string",
-            "description": "Upstream adapter type (openai_compatible, anthropic, bedrock, \u2026)."
+            "description": "Upstream adapter type (openai_compatible, anthropic, bedrock, …)."
           },
           "name": {
             "type": "string",
@@ -15212,7 +17341,7 @@
           },
           "grant_source": {
             "type": "string",
-            "description": "How the caller obtained access (direct, group, all users, \u2026)."
+            "description": "How the caller obtained access (direct, group, all users, …)."
           },
           "request_count_10m": {
             "type": "integer",
@@ -15224,7 +17353,7 @@
           },
           "error_rate_percent": {
             "type": "number",
-            "description": "error_count_10m / request_count_10m \u00d7 100, rounded to one decimal; 0 when there was no traffic."
+            "description": "error_count_10m / request_count_10m × 100, rounded to one decimal; 0 when there was no traffic."
           },
           "upstream_reachable": {
             "type": "boolean",
@@ -15251,7 +17380,7 @@
               "down",
               "unknown"
             ],
-            "description": "Derived verdict. down: the upstream probe failed, or \u22653 requests in the window all failed. degraded: error_rate_percent \u2265 10 with traffic. unknown: never probed and no traffic. healthy: otherwise."
+            "description": "Derived verdict. down: the upstream probe failed, or ≥3 requests in the window all failed. degraded: error_rate_percent ≥ 10 with traffic. unknown: never probed and no traffic. healthy: otherwise."
           },
           "metadata": {
             "type": "object",

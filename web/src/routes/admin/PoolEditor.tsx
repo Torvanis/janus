@@ -49,6 +49,21 @@ export function poolDraftFrom(pool: ManagedModelPool | undefined, targetId: stri
   };
 }
 
+/**
+ * A server added to the pool. Under Failover it gets the next priority
+ * number, so it is a standby behind the servers already there (the lowest
+ * number serves; equal numbers share). Other policies share traffic by
+ * weight, so it joins at the same priority as the rest.
+ */
+export function newMember(draft: PoolDraft, modelId: string): PoolDraft['members'][number] {
+  const priorities = draft.members.map((x) => x.priority);
+  let priority = 0;
+  if (priorities.length > 0) {
+    priority = draft.policy === 'failover' ? Math.max(...priorities) + 1 : Math.min(...priorities);
+  }
+  return { model_id: modelId, weight: 1, priority, enabled: true, context_capacity: 0 };
+}
+
 /** Mirrors ManagedModelPool.IsLoadBalanced on the server (the licensed shape). */
 export function isLoadBalanced(draft: PoolDraft): boolean {
   return draft.members.filter((m) => m.enabled).length > 1 || draft.policy !== 'failover';
@@ -230,7 +245,7 @@ export function PoolEditor({
           onClick={() => {
             onChange({
               ...draft,
-              members: [...draft.members, { model_id: adding, weight: 1, priority: 0, enabled: true, context_capacity: 0 }],
+              members: [...draft.members, newMember(draft, adding)],
             });
             setAdding('');
           }}

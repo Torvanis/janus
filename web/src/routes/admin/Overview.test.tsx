@@ -257,7 +257,12 @@ describe('Model performance charts', () => {
   });
 
   it('adds the upstream to the legend only when two plotted models share a name', async () => {
-    const twin = (key: string, upstream: string) => ({ ...perf.models[1]!, key, model_name: 'qwen3.8-27b', upstream_name: upstream });
+    const twin = (key: string, upstream: string) => ({
+      ...perf.models[1]!,
+      key,
+      model_name: 'qwen3.8-27b',
+      upstream_name: upstream,
+    });
     mocked.get.mockResolvedValue({
       ...overviewData(),
       model_performance: { ...perf, models: [perf.models[0], twin('a', 'qwen-vllm-a'), twin('b', 'qwen-llama-a')] },

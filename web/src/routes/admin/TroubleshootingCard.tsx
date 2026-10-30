@@ -61,7 +61,7 @@ interface FormState {
   captureResponseBody: boolean;
   encrypt: boolean;
   maxBodyKb: string;
-  storage: 'database' | 'disk';
+  storage: 'database' | 'disk' | 'object';
   maxAgeHours: string;
   maxCount: string;
   maxMb: string;
@@ -431,7 +431,7 @@ export function TroubleshootingCard(): ReactNode {
                       {!current.encryption_available ? ` (${t('adminSystem.troubleshoot.encryptUnavailable')})` : ''}
                     </span>
                   </label>
-                  {bodiesCaptured && !form.encrypt ? (
+                  {bodiesCaptured && !form.encrypt && form.storage !== 'object' ? (
                     <div className="banner banner-danger small" role="alert">
                       {t('adminSystem.troubleshoot.unencryptedWarning')}
                     </div>
@@ -448,11 +448,18 @@ export function TroubleshootingCard(): ReactNode {
                         <option key={backend} value={backend}>
                           {backend === 'disk'
                             ? t('adminSystem.troubleshoot.storageDisk')
-                            : t('adminSystem.troubleshoot.storageDatabase')}
+                            : backend === 'object'
+                              ? t('adminSystem.troubleshoot.storageObject')
+                              : t('adminSystem.troubleshoot.storageDatabase')}
                         </option>
                       ))}
                     </select>
                   </Field>
+                  {form.storage === 'object' ? (
+                    <p className="small secondary" style={{ margin: 0 }}>
+                      {t('adminSystem.troubleshoot.storageObjectHint')}
+                    </p>
+                  ) : null}
                   <Field
                     label={t('adminSystem.troubleshoot.maxBodyKb')}
                     hint={t('adminSystem.troubleshoot.maxBodyHint', { max: formatBytes(current.max_body_bytes_ceiling) })}

@@ -52,6 +52,9 @@ func (s *Server) mountSecgwRoutes(r chi.Router) {
 	r.Get("/admin/secgw/classifiers", s.handleListSecgwClassifiers)
 	r.Put("/admin/secgw/classifiers/{modelID}", s.handleSetSecgwClassifier)
 	r.Get("/admin/secgw/rules", s.handleListSecgwRules)
+	// Child Safety is every edition's: no license gate on either route.
+	r.Get("/admin/child-safety", s.handleGetSecgwFamily)
+	r.Put("/admin/child-safety", s.handlePutSecgwFamily)
 	s.mountSecgwCategoryRoutes(r)
 }
 
@@ -140,6 +143,13 @@ func (s *Server) handleCreateSecgwPolicy(w http.ResponseWriter, r *http.Request)
 	}
 	if u := UserFrom(r.Context()); u != nil {
 		p.CreatedBy = u.ID
+	}
+	if p.Capture.PromptInjectionBodies == nil {
+		// A new policy keeps no matched text unless asked, as the editor
+		// does. (An omitted value on a stored policy still reads as on, so
+		// existing policies are unchanged.)
+		off := false
+		p.Capture.PromptInjectionBodies = &off
 	}
 	if err := s.Store.CreateSecgwPolicy(r.Context(), &p); err != nil {
 		writeSecgwError(w, r, err)
@@ -579,7 +589,11 @@ func (s *Server) handleSecgwEffective(w http.ResponseWriter, r *http.Request) {
 	if trace == nil {
 		trace = []secgw.TraceEntry{}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"subject": sub, "checks": checks, "trace": trace})
+	covered := false
+	if sub.UserID != "" {
+		covered, _ = s.Store.SecgwFamilyCovers(ctx, sub.UserID)
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"subject": sub, "checks": checks, "trace": trace, "family_covered": covered})
 }
 
 func (s *Server) secgwSubjectFromQuery(ctx context.Context, r *http.Request) (secgw.Subject, error) {

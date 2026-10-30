@@ -13,7 +13,7 @@ import (
 // (for Business features) absent. Everything already configured keeps working:
 // proxying, SSO/SCIM sync, guardrails, quotas, HA, reports. Edits and deletes
 // are never gated. The error is a 402 so clients and the SPA can tell it apart
-// from an authorization failure and route the admin to Admin → System.
+// from an authorization failure and route the admin to Administration → Settings → License & updates.
 
 // CodeLicenseRequired is returned when creation is blocked by license state.
 const CodeLicenseRequired = "license.required"
@@ -26,18 +26,20 @@ const CodeFeatureNotLicensed = "license.feature_not_licensed"
 // installed. what names the thing being created ("upstream", "token"…).
 func ErrLicenseRequired(what string) *APIError {
 	return newError(http.StatusPaymentRequired, CodeLicenseRequired, "license_error",
-		"Creating a new "+what+" requires a valid license. Everything already configured keeps running. Install or renew the key under Admin → System (https://janusedge.com/portal).")
+		"Creating a new "+what+" requires a valid license. Everything already configured keeps running. Install or renew the key under Administration → Settings → License & updates (https://janusedge.com/portal).")
 }
 
 // ErrFeatureNotLicensed reports a Business/Enterprise feature the current
 // edition does not include.
 func ErrFeatureNotLicensed(feature string) *APIError {
 	return newError(http.StatusPaymentRequired, CodeFeatureNotLicensed, "license_error",
-		"The "+featureLabel(feature)+" feature is not included in the "+"current edition. Upgrade at https://janusedge.com/pricing, then install the new key under Admin → System.")
+		"The "+featureLabel(feature)+" feature is not included in the "+"current edition. Upgrade at https://janusedge.com/pricing, then install the new key under Administration → Settings → License & updates.")
 }
 
 func featureLabel(f string) string {
 	switch f {
+	case "chat_access":
+		return "restricting who may use Janus Chat"
 	case "scim":
 		return "SCIM provisioning"
 	case "ldap":
@@ -101,6 +103,14 @@ func (s *Server) gateFeature(feature string, next http.HandlerFunc) http.Handler
 
 // requireFeature is the inline form for handlers that need to check only when
 // a request actually turns a feature on.
+// featureRuns reports whether something already configured under a
+// Business feature keeps running: the key includes the feature, even past
+// its grace period (the ruling above). Creating and enabling stay behind
+// requireFeature. A key that fails verification includes nothing.
+func (s *Server) featureRuns(feature string) bool {
+	return s.licenseState().Has(feature)
+}
+
 func (s *Server) requireFeature(feature string) error {
 	st := s.licenseState()
 	if !st.Has(feature) {

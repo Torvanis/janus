@@ -440,7 +440,16 @@ function ManagedModelDialog({
   });
   // Only enabled models can be a target — pointing an alias at a disabled
   // model would create a broken alias on purpose.
-  const targets = useMemo(() => (models.data?.models ?? []).filter((m) => m.status === 'enabled'), [models.data]);
+  // Guard classifiers only check traffic and can never answer through an
+  // alias or pool (the gateway refuses them); decision models stay listed
+  // for decision aliases.
+  const targets = useMemo(
+    () =>
+      (models.data?.models ?? []).filter(
+        (m) => m.status === 'enabled' && (!m.classifier_role || m.classifier_role === 'decision'),
+      ),
+    [models.data],
+  );
 
   const effectiveName = editing ? ((name || model?.name) ?? '') : name;
   const storedPool = model?.pool;

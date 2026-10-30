@@ -63,7 +63,7 @@ func (s *Server) runSubscriptionChecks(ctx context.Context) {
 	if err != nil || len(enabled) == 0 {
 		return
 	}
-	conns, err := s.Store.ListAllSubscriptions(ctx)
+	conns, err := s.Store.ListCheckableSubscriptions(ctx)
 	if err != nil {
 		s.Logger.WarnContext(ctx, "list subscriptions for check", "error", err.Error())
 		return
@@ -120,7 +120,7 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 	if err != nil {
 		var reauth *subscription.ReauthError
 		if errors.As(err, &reauth) {
-			_ = s.Store.MarkSubscriptionReauth(ctx, conn.ID, reauth.Reason)
+			s.markSubscriptionReauth(ctx, conn, provider.DisplayName(), reauth.Reason)
 			s.Logger.WarnContext(ctx, "subscription check: needs reconnect", "subscription_id", conn.ID, "provider", provider.ID(), "reason", reauth.Reason)
 			return reauth.Reason
 		}

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/torvanis/janus/internal/alerting"
+	dec "github.com/torvanis/janus/internal/classify"
 	"github.com/torvanis/janus/internal/secgw"
 	"github.com/torvanis/janus/internal/secgw/classify"
 	"github.com/torvanis/janus/internal/secgw/stream"
@@ -115,10 +118,16 @@ type classifierResolver struct {
 // cache TTL, so a request with several model-backed checks and a live
 // router no longer costs two queries per check before it is forwarded.
 type classifierLookup struct {
-	model *store.Model
-	prof  store.ClassifierProfile
-	sig   string
+	model    *store.Model
+	upstream *store.Upstream
+	prof     store.ClassifierProfile
+	sig      string
 }
+
+// errClassifierUnavailable marks a classifier whose catalog model an
+// administrator disabled or that discovery marked stale: it is not called,
+// and the check's fail mode (open or closed) decides what happens.
+var errClassifierUnavailable = errors.New("classifier model is not available")
 
 func (r *classifierResolver) lookup(ctx context.Context, modelID string) (classifierLookup, error) {
 	return cachedModelRead(&r.s.configCache, r.s.Store.ModelRevision(), "classifier_lookup|"+modelID, func() (classifierLookup, error) {
@@ -129,9 +138,18 @@ func (r *classifierResolver) lookup(ctx context.Context, modelID string) (classi
 		if model.ClassifierRole == "" {
 			return classifierLookup{}, fmt.Errorf("model %s has no classifier role", model.PublicName())
 		}
+		upstream, err := r.s.Store.UpstreamByID(ctx, model.UpstreamID)
+		if err != nil {
+			return classifierLookup{}, fmt.Errorf("classifier upstream: %w", err)
+		}
 		// The signature covers what the classifier is built from, so a role
-		// or profile change rebuilds it (and drops its breaker state).
-		out := classifierLookup{model: model, sig: model.ClassifierRole}
+		// or profile change rebuilds it (and drops its breaker state). The
+		// upstream's base URL and key ciphertext are part of it: rotating the
+		// key or moving the upstream reaches every replica within the config
+		// cache TTL instead of only after a restart.
+		keyHash := sha256.Sum256([]byte(upstream.EncryptedKey()))
+		out := classifierLookup{model: model, upstream: upstream,
+			sig: model.ClassifierRole + "|" + upstream.BaseURL + "|" + hex.EncodeToString(keyHash[:8])}
 		if model.ClassifierRole == store.ClassifierRoleDecision {
 			if out.prof, err = r.s.Store.ClassifierProfileFor(ctx, model.UpstreamID, model.Name); err != nil {
 				return classifierLookup{}, err
@@ -148,6 +166,11 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 		return nil, err
 	}
 	model, prof, sig := lk.model, lk.prof, lk.sig
+	if !r.bench && (model.Status == store.ModelDisabled || model.Status == store.ModelStale) {
+		// A disabled or stale catalog model stops receiving prompts; an
+		// administrator's benchmark may still exercise it.
+		return nil, fmt.Errorf("%w: %s is %s in the model catalog", errClassifierUnavailable, model.PublicName(), model.Status)
+	}
 	r.mu.Lock()
 	if b, ok := r.breakers[modelID]; ok && r.roles[modelID] == sig {
 		r.mu.Unlock()
@@ -155,10 +178,7 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 	}
 	r.mu.Unlock()
 
-	upstream, err := r.s.Store.UpstreamByID(ctx, model.UpstreamID)
-	if err != nil {
-		return nil, fmt.Errorf("classifier upstream: %w", err)
-	}
+	upstream := lk.upstream
 	apiKey := ""
 	if upstream.HasAPIKey {
 		if apiKey, err = r.s.Cipher.Decrypt(upstream.EncryptedKey()); err != nil {
@@ -188,15 +208,39 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 				return
 			}
 			r.s.Logger.Error("secgw: classifier circuit breaker opened", "model", model.PublicName(), "error", cause.Error())
-			if r.s.Alerts != nil {
-				r.s.Alerts.Dispatch(context.Background(), alerting.Event{
-					Trigger: alerting.TriggerSystem, Severity: "critical", NotifyAdmins: true,
-					Title: "Security classifier unavailable: " + model.PublicName(),
-					Body: "The classifier backing prompt-injection checks failed repeatedly (" + cause.Error() +
-						"). Policies with fail=closed are refusing requests until it recovers.",
-					Data: map[string]any{"model_id": model.ID, "reason": "secgw_classifier_breaker_open"},
-				})
+			// One alert per outage across every replica: the breaker
+			// reopens every cooldown while the classifier stays down, on
+			// each replica, and only the first claim is announced.
+			if r.s.Alerts == nil || !r.s.claimAlert(context.Background(), breakerAlertKey(id), breakerAlertWindow) {
+				return
 			}
+			r.s.Alerts.Dispatch(context.Background(), alerting.Event{
+				Trigger: alerting.TriggerSystem, Severity: "critical", NotifyAdmins: true,
+				Title: "Security classifier unavailable: " + model.PublicName(),
+				Body: "The classifier backing prompt-injection checks failed repeatedly (" + cause.Error() +
+					"). Policies with fail=closed are refusing requests until it recovers.",
+				Data: map[string]any{"model_id": model.ID, "reason": "secgw_classifier_breaker_open"},
+			})
+		},
+		OnClose: func(id string) {
+			if r.bench || r.s.Alerts == nil {
+				return
+			}
+			released, err := r.s.Store.ReleaseAlert(context.Background(), breakerAlertKey(id))
+			if err != nil {
+				r.s.Logger.Warn("secgw: release classifier alert", "error", err.Error())
+				return
+			}
+			if !released {
+				return // the outage was never announced, or another replica sent the recovery
+			}
+			r.s.Logger.Info("secgw: classifier recovered", "model", model.PublicName())
+			r.s.Alerts.Dispatch(context.Background(), alerting.Event{
+				Trigger: alerting.TriggerSystem, Severity: "info", NotifyAdmins: true, Recovery: true,
+				Title: "Security classifier recovered: " + model.PublicName(),
+				Body:  "The classifier answers again. Policies with fail=closed accept requests again.",
+				Data:  map[string]any{"model_id": model.ID, "reason": "secgw_classifier_breaker_closed"},
+			})
 		}}
 	r.mu.Lock()
 	r.breakers[modelID] = b
@@ -205,24 +249,62 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 	return b, nil
 }
 
+// breakerAlertWindow bounds one "classifier unavailable" claim: an outage
+// still running after it is announced again (once, cluster-wide).
+const breakerAlertWindow = 6 * time.Hour
+
+func breakerAlertKey(modelID string) string { return "secgw_breaker:" + modelID }
+
+// claimAlert claims a cluster-wide alert key; true means this replica sends
+// it. A database error fails open (send) so an outage is never silent.
+func (s *Server) claimAlert(ctx context.Context, key string, window time.Duration) bool {
+	ok, err := s.Store.ClaimAlert(ctx, key, window)
+	if err != nil {
+		s.Logger.Warn("alert dedup claim failed; sending anyway", "key", key, "error", err.Error())
+		return true
+	}
+	return ok
+}
+
 // meterClassifierCall writes a usage event for every classifier call on the
 // platform-overhead subject: no user, no service token. Finance sees what
-// the security feature costs; the caller's quota does not move.
-func (s *Server) meterClassifierCall(model *store.Model, upstream *store.Upstream) func(context.Context, time.Duration, int, error) {
-	return func(ctx context.Context, elapsed time.Duration, inputChars int, callErr error) {
+// the security feature costs; the caller's quota does not move. A call that
+// reported token usage (a generative guard on a chat API) is priced like a
+// decision-classifier call, from the model's rate card or the provider's
+// reported cost; an encoder (TEI /predict) reports none and stays free of
+// charge unless the model has a per-request fee.
+func (s *Server) meterClassifierCall(model *store.Model, upstream *store.Upstream) func(context.Context, time.Duration, int, dec.Usage, error) {
+	return func(ctx context.Context, elapsed time.Duration, inputChars int, u dec.Usage, callErr error) {
 		event := &store.UsageEvent{
 			ModelID: model.ID, ModelName: model.PublicName(), UpstreamID: upstream.ID,
-			EndpointPath: "/internal/secgw/classify", HTTPMethod: http.MethodPost, Modality: "classification",
+			HTTPMethod: http.MethodPost, Modality: "classification",
 			RequestBytes: int64(inputChars), LatencyMs: int(elapsed.Milliseconds()), UpstreamMs: int(elapsed.Milliseconds()),
-			ClientApp: "janus-security-gateway", RequestID: RequestIDFrom(ctx), HTTPStatus: http.StatusOK,
+			RequestID: RequestIDFrom(ctx), HTTPStatus: http.StatusOK,
 			AccountingMode: usage.AccountingNone,
 		}
+		event.ClientApp, event.EndpointPath = classifierCallOwner(ctx)
 		if callErr != nil {
 			event.HTTPStatus = http.StatusBadGateway
 			event.ErrorCode = CodeUpstreamDown
+		} else if s.classifierCallPriced(ctx, model, u) {
+			event.TokensIn, event.TokensOut, event.TokensCached = u.TokensIn, u.TokensOut, u.TokensCached
+			call := decisionCallFromUsage(u, 1)
+			event.CostNano, event.AccountingMode = s.decisionCost(ctx, model, call)
+			event.CostStatus = s.decisionCostStatus(ctx, model, call, event.CostNano)
 		}
 		s.writeUsage(ctx, event, "secgw: write classifier usage event", nil)
 	}
+}
+
+// classifierCallPriced reports whether a guard call has anything to price:
+// reported token usage or cost, or a per-request fee on the model. A call
+// with none (an encoder on TEI) stays an unbilled observability row.
+func (s *Server) classifierCallPriced(ctx context.Context, model *store.Model, u dec.Usage) bool {
+	if u.TokensIn > 0 || u.TokensOut > 0 || u.CostReported {
+		return true
+	}
+	set, _ := s.cachedDecisionSetting(ctx, model.ID)
+	return set.RequestFeeNano > 0
 }
 
 // secgwSubject builds the resolver subject from the already-resolved

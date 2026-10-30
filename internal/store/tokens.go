@@ -39,12 +39,12 @@ func HashToken(plaintext string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-const tokenColumns = `id, user_id, prefix, description, created_at, last_used_at, revoked_at, team_id`
+const tokenColumns = `id, user_id, prefix, description, created_at, last_used_at, revoked_at, team_id, kind`
 
 func scanToken(scan func(...any) error) (*Token, error) {
 	var t Token
 	var created, lastUsed, revoked string
-	if err := scan(&t.ID, &t.UserID, &t.Prefix, &t.Description, &created, &lastUsed, &revoked, &t.TeamID); err != nil {
+	if err := scan(&t.ID, &t.UserID, &t.Prefix, &t.Description, &created, &lastUsed, &revoked, &t.TeamID, &t.Kind); err != nil {
 		return nil, err
 	}
 	t.CreatedAt = ParseTime(created)
@@ -79,9 +79,11 @@ func (s *Store) CreateTeamToken(ctx context.Context, userID, description, teamID
 	return t, plaintext, nil
 }
 
-// ListTokens returns the user's credentials, newest first.
+// ListTokens returns the user's credentials, newest first. Hidden
+// gateway-owned credentials (Janus Chat's per-team attribution tokens) are
+// never listed: the user did not create them and cannot present them.
 func (s *Store) ListTokens(ctx context.Context, userID string) ([]*Token, error) {
-	rows, err := s.query(ctx, `SELECT `+tokenColumns+` FROM api_token WHERE user_id = ? ORDER BY created_at DESC`, userID)
+	rows, err := s.query(ctx, `SELECT `+tokenColumns+` FROM api_token WHERE user_id = ? AND kind = '' ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}

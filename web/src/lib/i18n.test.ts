@@ -126,6 +126,7 @@ describe('i18n catalog', () => {
         value: 'x',
         provider: 'x',
         days: 30,
+        date: 'x',
         gate: 'x',
         kinds: 'x',
         who: 'x',

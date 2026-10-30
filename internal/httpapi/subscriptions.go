@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/subscription"
 )
@@ -200,13 +201,13 @@ func (s *Server) subscriptionAccessToken(ctx context.Context, route *personalRou
 		if err == nil {
 			reason = "The sign-in expired and this provider cannot renew it."
 		}
-		_ = s.Store.MarkSubscriptionReauth(ctx, fresh.ID, reason)
+		s.markSubscriptionReauth(ctx, fresh, route.provider.DisplayName(), reason)
 		return "", subscriptionReauthError(route.provider, reason)
 	}
 	tokens, err := route.provider.Refresh(ctx, s.upstreamHTTPClient(ctx), refresh)
 	var reauth *subscription.ReauthError
 	if errors.As(err, &reauth) {
-		_ = s.Store.MarkSubscriptionReauth(ctx, fresh.ID, reauth.Reason)
+		s.markSubscriptionReauth(ctx, fresh, route.provider.DisplayName(), reauth.Reason)
 		s.Logger.WarnContext(ctx, "subscription needs reconnect", "subscription_id", fresh.ID, "provider", route.provider.ID(), "reason", reauth.Reason)
 		return "", subscriptionReauthError(route.provider, reauth.Reason)
 	}
@@ -275,6 +276,10 @@ func (s *Server) personalCatalog(ctx context.Context, user *store.User) ([]map[s
 					"upstream": p.DisplayName(), "adapter_type": p.AdapterType(), "native_name": m,
 					"grant_source": "personal_subscription", "managed": false,
 					"personal_subscription": map[string]any{"provider": c.Provider, "subscription_id": c.ID},
+					// What the model does (chat, image, video…), guessed from
+					// its id: plan catalogs carry no modalities, and a chat
+					// picker must not offer a video model as a chat model.
+					"modalities": adapter.GuessModalities(m),
 				},
 			}
 			// The accepted reasoning_effort values, when known: an empty
@@ -744,7 +749,7 @@ func (s *Server) handleRefreshSubscriptionModels(w http.ResponseWriter, r *http.
 	models, catalog, err := subscription.FetchModels(r.Context(), provider, s.upstreamHTTPClient(r.Context()), token)
 	var reauth *subscription.ReauthError
 	if errors.As(err, &reauth) {
-		_ = s.Store.MarkSubscriptionReauth(r.Context(), conn.ID, reauth.Reason)
+		s.markSubscriptionReauth(r.Context(), conn, provider.DisplayName(), reauth.Reason)
 		WriteError(w, r, subscriptionReauthError(provider, reauth.Reason))
 		return
 	}
@@ -834,15 +839,7 @@ func (s *Server) disconnectSubscription(w http.ResponseWriter, r *http.Request, 
 	// Revoke at the vendor first (best effort, bounded) so the credential
 	// stops working even if a copy survived somewhere; the local delete
 	// happens regardless.
-	if provider, ok := subscription.Get(conn.Provider); ok {
-		if refresh, err := s.Cipher.Decrypt(conn.EncryptedRefreshToken()); err == nil && refresh != "" {
-			rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := provider.Revoke(rctx, s.upstreamHTTPClient(ctx), refresh); err != nil {
-				s.Logger.WarnContext(ctx, "revoke subscription at vendor", "subscription_id", conn.ID, "provider", conn.Provider, "error", err.Error())
-			}
-			cancel()
-		}
-	}
+	s.revokeSubscriptionAtVendor(ctx, conn)
 	if err := s.Store.DeleteSubscription(ctx, conn.ID); err != nil {
 		WriteError(w, r, err)
 		return

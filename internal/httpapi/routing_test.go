@@ -82,6 +82,11 @@ func newRouteDecider(t *testing.T) *routeDecider {
 				if strings.Contains(state, "lock-free") {
 					lvl = "l5"
 				}
+				// "now rename" judged in context: an easy step of a hard
+				// task (the latest message decides).
+				if i := strings.LastIndex(state, "request to judge:"); i >= 0 && strings.Contains(state[i:], "rename") {
+					lvl = "l1"
+				}
 				answers[id] = map[string]any{"type": "choice", "choice": lvl, "probabilities": map[string]float64{lvl: 1}}
 			default:
 				answers[id] = map[string]any{"type": "choice", "choice": "other", "probabilities": map[string]float64{"other": 1}}
@@ -406,6 +411,134 @@ func TestRouterStickinessKeepsAConversationOnItsRoute(t *testing.T) {
 	}
 	if n := len(rig.decider.seen()); n != 0 {
 		t.Fatalf("a sticky turn must not call the classifier, made %d calls", n)
+	}
+}
+
+// A short follow-up is classified with its conversation as context: on its
+// own "keep going" is trivial and fits no category, and "what about the
+// other one?" is not legal. Judged alone, both fell to the default.
+func TestRouterClassifiesAFollowUpWithItsConversation(t *testing.T) {
+	rig := newRoutingRig(t, store.RouterStatusLive)
+	cfg := rig.router.Config
+	cfg.Sticky = false // every turn decided afresh
+	if _, err := rig.h.store.UpdateRouter(context.Background(), rig.router.ID, store.RouterInput{Name: rig.router.Name, Status: store.RouterStatusLive, Config: cfg}); err != nil {
+		t.Fatal(err)
+	}
+	rig.h.server.InvalidateConfigCache()
+	turns := func(first, reply, next string) []map[string]string {
+		return []map[string]string{{"role": "user", "content": first}, {"role": "assistant", "content": reply}, {"role": "user", "content": next}}
+	}
+	rig.decider.reset()
+	rec := rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test",
+		"messages": turns("Write a lock-free python queue", "Here is the ring buffer…", "keep going")})
+	if !strings.Contains(rec.Body.String(), "answer from opus") || rig.opus.last()["reasoning_effort"] != "high" {
+		t.Fatalf("a follow-up to hard coding must stay hard coding: %s", rec.Body.String())
+	}
+	rig.decider.mu.Lock()
+	state := rig.decider.states[len(rig.decider.states)-1]
+	rig.decider.mu.Unlock()
+	for _, want := range []string{"Earlier in this conversation (context only):\nUser: Write a lock-free python queue\nAssistant: Here is the ring buffer…",
+		"The latest message, which is the request to judge:\nUser: keep going"} {
+		if !strings.Contains(state, want) {
+			t.Fatalf("classifier text missing %q:\n%s", want, state)
+		}
+	}
+	rec = rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test",
+		"messages": turns("Review this contract clause", "Clause 4 caps liability…", "what about the other one?")})
+	if !strings.Contains(rec.Body.String(), "answer from onprem") {
+		t.Fatalf("a legal follow-up must stay legal: %s", rec.Body.String())
+	}
+	// A first turn is classified on its own, exactly as before.
+	rig.decider.reset()
+	rig.chat(t, "what is the capital of France", nil)
+	rig.decider.mu.Lock()
+	state = rig.decider.states[len(rig.decider.states)-1]
+	rig.decider.mu.Unlock()
+	if state != "what is the capital of France" {
+		t.Fatalf("first turn text changed: %q", state)
+	}
+}
+
+// A follow-up's context is not the text a guard judges: routing asks on
+// its own call rather than riding the guard's (which judges the new turn
+// alone), so neither feature reads the wrong text.
+func TestRouterFollowUpDoesNotRideTheGuardCall(t *testing.T) {
+	rig := newRoutingRig(t, store.RouterStatusLive)
+	rig.h.secgwPolicy(t, store.SecgwPolicy{Name: "guards", Enabled: true, Checks: []store.SecgwCheck{
+		{Kind: store.SecgwCheckPromptInjection, Enabled: true, Mode: store.SecgwModeBlock, Fail: store.SecgwFailOpen, Direction: store.SecgwDirectionIngress,
+			ClassifierModelID: rig.classifier.ID, Options: json.RawMessage(`{"timeout_ms":3000}`)},
+	}})
+	if err := rig.h.store.SetClassifierProfile(context.Background(), store.ClassifierProfile{UpstreamID: rig.classifier.UpstreamID, Model: rig.classifier.Name, CallStyle: store.ClassifierStyleCombined}); err != nil {
+		t.Fatal(err)
+	}
+	rig.h.server.InvalidateConfigCache()
+	rig.decider.reset()
+	rig.decider.mu.Lock()
+	rig.decider.states = nil
+	rig.decider.mu.Unlock()
+	rec := rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test", "messages": []map[string]string{
+		{"role": "user", "content": "Review this contract clause"}, {"role": "assistant", "content": "Clause 4…"}, {"role": "user", "content": "and the next one?"}}})
+	if !strings.Contains(rec.Body.String(), "answer from onprem") {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	rig.decider.mu.Lock()
+	defer rig.decider.mu.Unlock()
+	var guard, route string
+	for i, b := range rig.decider.batches {
+		switch strings.Join(b, ",") {
+		case "prompt_injection":
+			guard = rig.decider.states[i]
+		case "routing_category,routing_difficulty":
+			route = rig.decider.states[i]
+		}
+	}
+	if guard != "and the next one?" {
+		t.Fatalf("the guard must judge the new turn alone, got %q (batches %v)", guard, rig.decider.batches)
+	}
+	if !strings.Contains(route, "User: Review this contract clause") {
+		t.Fatalf("routing must read the conversation, got %q", route)
+	}
+}
+
+// Stickiness keeps the conversation's MODEL (switching throws away its
+// cached context), but a route whose thinking scales with difficulty still
+// sets each turn's thinking from that turn: only the difficulty is asked.
+func TestRouterStickyTurnStillScalesThinking(t *testing.T) {
+	rig := newRoutingRig(t, store.RouterStatusLive)
+	cfg := rig.router.Config
+	cfg.Routes[1].Thinking = store.ThinkingScale
+	cfg.Routes[1].DifficultyMin = 0
+	if _, err := rig.h.store.UpdateRouter(context.Background(), rig.router.ID, store.RouterInput{Name: rig.router.Name, Status: store.RouterStatusLive, Config: cfg}); err != nil {
+		t.Fatal(err)
+	}
+	rig.h.server.InvalidateConfigCache()
+	first := []map[string]string{{"role": "user", "content": "Write a lock-free python queue"}}
+	rec := rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test", "messages": first})
+	if !strings.Contains(rec.Body.String(), "answer from opus") || rig.opus.last()["reasoning_effort"] != "high" {
+		t.Fatalf("first turn: %s %v", rec.Body.String(), rig.opus.last())
+	}
+	rig.decider.reset()
+	// An easy follow-up in the same conversation: same model, low thinking.
+	second := append(first, map[string]string{"role": "assistant", "content": "done"}, map[string]string{"role": "user", "content": "now rename the variable"})
+	rec = rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test", "messages": second})
+	if !strings.Contains(rec.Body.String(), "answer from opus") || rec.Header().Get(headerRouteReason) != store.RouteReasonSticky {
+		t.Fatalf("the sticky turn must keep its model: %s %v", rec.Body.String(), rec.Header())
+	}
+	if got := rig.opus.last()["reasoning_effort"]; got != "low" {
+		t.Fatalf("thinking must follow this turn's difficulty, got %v", got)
+	}
+	got := rig.decider.seen()
+	if len(got) != 1 || strings.Join(got[0], ",") != "routing_difficulty" {
+		t.Fatalf("a sticky turn asks difficulty only, got %v", got)
+	}
+	// Classifier down: the level remembered from the last judged turn
+	// serves, on the same model.
+	rig.decider.mu.Lock()
+	rig.decider.fail = true
+	rig.decider.mu.Unlock()
+	rec = rig.h.do(http.MethodPost, "/v1/chat/completions", map[string]any{"model": "auto/test", "messages": second})
+	if !strings.Contains(rec.Body.String(), "answer from opus") || rig.opus.last()["reasoning_effort"] != "low" || rec.Header().Get(headerRouteReason) != store.RouteReasonSticky {
+		t.Fatalf("classifier down: keep the route at its remembered level: %s %v %v", rec.Body.String(), rig.opus.last()["reasoning_effort"], rec.Header())
 	}
 }
 

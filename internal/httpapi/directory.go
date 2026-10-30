@@ -19,7 +19,7 @@ import (
 // completeSignInWith so the directory's admin groups apply.
 
 func (s *Server) directoryConfig(r *http.Request) (*store.Directory, auth.LDAPConfig, bool) {
-	if s.requireFeature("ldap") != nil {
+	if !s.featureRuns("ldap") {
 		return nil, auth.LDAPConfig{}, false
 	}
 	d, err := s.Store.Directory(r.Context())
@@ -169,6 +169,7 @@ func (s *Server) handleAdminPutDirectory(w http.ResponseWriter, r *http.Request)
 	if prev != nil {
 		before = map[string]any{"url": prev.URL, "enabled": prev.Enabled}
 	}
+	s.reevaluateGroupAdmins(r.Context())
 	s.audit(r, "directory.update", "directory", "ldap", before, map[string]any{"url": saved.URL, "enabled": saved.Enabled})
 	WriteJSON(w, http.StatusOK, directoryView(saved))
 }
@@ -182,6 +183,7 @@ func (s *Server) handleAdminDeleteDirectory(w http.ResponseWriter, r *http.Reque
 		WriteError(w, r, ErrInternal())
 		return
 	}
+	s.reevaluateGroupAdmins(r.Context())
 	s.audit(r, "directory.delete", "directory", "ldap", nil, nil)
 	w.WriteHeader(http.StatusNoContent)
 }

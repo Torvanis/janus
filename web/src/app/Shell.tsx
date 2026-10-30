@@ -21,44 +21,132 @@ interface NavItem {
   admin?: boolean;
 }
 
+interface NavSection {
+  id: string;
+  /** Heading; omitted for the top block (Chat, Dashboard). */
+  label?: () => string;
+  items: NavItem[];
+}
+
 // Labels are resolved lazily through t() so nav copy stays in the i18n layer.
-const PRIMARY_NAV: NavItem[] = [
-  { to: '/dashboard', label: () => t('shell.navDashboard'), glyph: '◈' },
-  { to: '/models', label: () => t('shell.navModels'), glyph: '◇' },
-  { to: '/tokens', label: () => t('shell.navTokens'), glyph: '⚿' },
-  { to: '/subscriptions', label: () => t('shell.navSubscriptions'), glyph: '⚯' },
-  { to: '/requests', label: () => t('shell.navRequests'), glyph: '≡' },
-  { to: '/reports', label: () => 'Reports', glyph: '▥' },
-  { to: '/quota', label: () => t('shell.navQuotas'), glyph: '◐' },
-  { to: '/teams', label: () => t('shell.navTeam'), glyph: '⧉' },
-  { to: '/explore', label: () => t('shell.navOrgPulse'), glyph: '✦' },
-  { to: '/help', label: () => t('shell.navHelp'), glyph: '?' },
+// Grouped by what the person is doing, so a long list reads as a few short
+// ones: the everyday pages, then usage, then access.
+const PRIMARY_SECTIONS: NavSection[] = [
+  {
+    id: 'main',
+    items: [
+      { to: '/chat', label: () => 'Chat', glyph: '✎' },
+      { to: '/dashboard', label: () => t('shell.navDashboard'), glyph: '◈' },
+    ],
+  },
+  {
+    id: 'usage',
+    label: () => 'Usage',
+    items: [
+      { to: '/requests', label: () => t('shell.navRequests'), glyph: '≡' },
+      { to: '/reports', label: () => 'Reports', glyph: '▥' },
+      { to: '/quota', label: () => t('shell.navQuotas'), glyph: '◐' },
+      { to: '/explore', label: () => t('shell.navOrgPulse'), glyph: '✦' },
+    ],
+  },
+  {
+    id: 'access',
+    label: () => 'Access',
+    items: [
+      { to: '/models', label: () => t('shell.navModels'), glyph: '◇' },
+      { to: '/tokens', label: () => t('shell.navTokens'), glyph: '⚿' },
+      { to: '/subscriptions', label: () => t('shell.navSubscriptions'), glyph: '⚯' },
+      { to: '/teams', label: () => t('shell.navTeam'), glyph: '⧉' },
+      { to: '/help', label: () => t('shell.navHelp'), glyph: '?' },
+    ],
+  },
 ];
 
-const ADMIN_NAV: NavItem[] = [
-  { to: '/admin', label: () => t('shell.navOverview'), glyph: '▤', admin: true },
-  { to: '/admin/upstreams', label: () => t('shell.navUpstreams'), glyph: '⇅', admin: true },
-  { to: '/admin/models', label: () => t('shell.navModels'), glyph: '◈', admin: true },
-  { to: '/admin/managed-models', label: () => t('shell.navManagedModels'), glyph: '⧫', admin: true },
-  { to: '/admin/routing', label: () => t('shell.navRouting'), glyph: '⇶', admin: true },
-  { to: '/admin/grants', label: () => t('shell.navGrants'), glyph: '⚑', admin: true },
-  { to: '/admin/service-tokens', label: () => t('shell.navServiceTokens'), glyph: '⚙', admin: true },
-  { to: '/admin/users', label: () => t('shell.navPeople'), glyph: '⚭', admin: true },
-  { to: '/admin/quotas', label: () => t('shell.navQuotas'), glyph: '◑', admin: true },
-  { to: '/admin/rules', label: () => t('shell.navPolicyRules'), glyph: '⛨', admin: true },
-  { to: '/admin/security', label: () => t('shell.navSecurity'), glyph: '⛉', admin: true },
-  { to: '/admin/alerts', label: () => t('shell.navAlerts'), glyph: '◉', admin: true },
-  { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
-  { to: '/admin/insights', label: () => t('shell.navInsights'), glyph: '◭', admin: true },
-  { to: '/admin/audit', label: () => t('shell.navAuditLog'), glyph: '❑', admin: true },
-  { to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true },
+// Administration folds into sections; the one holding the current page
+// opens itself, and the rest remember what the admin last chose.
+const ADMIN_SECTIONS: NavSection[] = [
+  {
+    id: 'admin-overview',
+    items: [{ to: '/admin', label: () => t('shell.navOverview'), glyph: '▤', admin: true }],
+  },
+  {
+    // Chat stands on its own: who gets it, its models and its tools.
+    id: 'admin-chat',
+    items: [{ to: '/admin/chat', label: () => 'Chat', glyph: '✎', admin: true }],
+  },
+  {
+    id: 'admin-gateway',
+    label: () => 'Gateway',
+    items: [
+      { to: '/admin/upstreams', label: () => t('shell.navUpstreams'), glyph: '⇅', admin: true },
+      { to: '/admin/models', label: () => t('shell.navModels'), glyph: '◈', admin: true },
+      { to: '/admin/managed-models', label: () => t('shell.navManagedModels'), glyph: '⧫', admin: true },
+      { to: '/admin/routing', label: () => t('shell.navRouting'), glyph: '⇶', admin: true },
+      { to: '/admin/grants', label: () => t('shell.navGrants'), glyph: '⚑', admin: true },
+      { to: '/admin/service-tokens', label: () => t('shell.navServiceTokens'), glyph: '⚙', admin: true },
+    ],
+  },
+  {
+    id: 'admin-people',
+    label: () => 'People & Usage',
+    items: [
+      { to: '/admin/users', label: () => t('shell.navPeople'), glyph: '⚭', admin: true },
+      { to: '/admin/quotas', label: () => t('shell.navQuotas'), glyph: '◑', admin: true },
+      { to: '/admin/insights', label: () => t('shell.navInsights'), glyph: '◭', admin: true },
+    ],
+  },
+  {
+    id: 'admin-security',
+    label: () => 'Safety & Security',
+    items: [
+      { to: '/admin/security', label: () => t('shell.navSecurity'), glyph: '⛉', admin: true },
+      { to: '/admin/child-safety', label: () => 'Child Safety', glyph: '☂', admin: true },
+      { to: '/admin/rules', label: () => t('shell.navPolicyRules'), glyph: '⛨', admin: true },
+      { to: '/admin/alerts', label: () => t('shell.navAlerts'), glyph: '◉', admin: true },
+    ],
+  },
+  {
+    id: 'admin-activity',
+    label: () => 'Activity',
+    items: [
+      { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
+      { to: '/admin/audit', label: () => t('shell.navAuditLog'), glyph: '❑', admin: true },
+    ],
+  },
+  {
+    id: 'admin-settings',
+    items: [{ to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true }],
+  },
 ];
+
+const NAV_OPEN_KEY = 'janus.nav.open';
+
+/** Whether pathname is (under) item.to, the way NavLink decides "active". */
+function navMatches(item: NavItem, pathname: string): boolean {
+  if (item.to === '/admin') return pathname === '/admin';
+  if (item.to === '/admin/users' && pathname.startsWith('/admin/teams')) return true;
+  return pathname === item.to || pathname.startsWith(item.to + '/');
+}
+
+function readOpenSections(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(NAV_OPEN_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
 
 export function Shell({ children }: { children: ReactNode }): ReactNode {
   const { me, config, refresh } = useSession();
   // The Subscriptions page exists only while the administrator has the
   // feature on (and never on an offline install).
-  const primaryNav = PRIMARY_NAV.filter((item) => item.to !== '/subscriptions' || me?.personal_subscriptions === true);
+  const navVisible = (item: NavItem) =>
+    (item.to !== '/subscriptions' || me?.personal_subscriptions === true) && (item.to !== '/chat' || me?.chat_preview === true);
+  const primarySections = PRIMARY_SECTIONS.map((section) => ({ ...section, items: section.items.filter(navVisible) })).filter(
+    (section) => section.items.length > 0,
+  );
+  const primaryNav = primarySections.flatMap((section) => section.items);
   const appearance = useAppearance();
   const location = useLocation();
   const navigate = useNavigate();
@@ -132,21 +220,17 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
       {!isMobile ? (
         <nav className="sidebar" aria-label={t('shell.primaryNav')}>
           <Brand collapsed={isRail} />
-          <div className="nav-group">
-            {primaryNav.map((item) => (
-              <NavItemLink key={item.to} item={item} collapsed={isRail} />
-            ))}
+          {/* Only the middle scrolls: the brand and the live readout stay put
+              however long the menu grows. */}
+          <div className="sidebar-scroll">
+            <NavSections sections={primarySections} collapsed={isRail} />
+            {showAdmin ? (
+              <>
+                <div className="nav-heading nav-heading-admin">{isRail ? '···' : t('shell.administration')}</div>
+                <NavSections sections={ADMIN_SECTIONS} collapsed={isRail} foldable />
+              </>
+            ) : null}
           </div>
-          {showAdmin ? (
-            <>
-              <div className="nav-heading">{isRail ? '···' : t('shell.administration')}</div>
-              <div className="nav-group">
-                {ADMIN_NAV.map((item) => (
-                  <NavItemLink key={item.to} item={item} collapsed={isRail} end={item.to === '/admin'} />
-                ))}
-              </div>
-            </>
-          ) : null}
           <div className="sidebar-footer">
             <ThroughputReadout signal={signal} collapsed={isRail} />
           </div>
@@ -282,10 +366,8 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
                 ✕
               </button>
             </div>
+            <NavSections sections={primarySections} collapsed={false} />
             <div className="nav-group">
-              {primaryNav.map((item) => (
-                <NavItemLink key={item.to} item={item} collapsed={false} />
-              ))}
               <NavItemLink
                 item={{ to: '/settings', label: () => t('shell.navPersonalSettings'), glyph: '⚙' }}
                 collapsed={false}
@@ -294,12 +376,8 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
             </div>
             {showAdmin ? (
               <>
-                <div className="nav-heading">{t('shell.administration')}</div>
-                <div className="nav-group">
-                  {ADMIN_NAV.map((item) => (
-                    <NavItemLink key={item.to} item={item} collapsed={false} end={item.to === '/admin'} />
-                  ))}
-                </div>
+                <div className="nav-heading nav-heading-admin">{t('shell.administration')}</div>
+                <NavSections sections={ADMIN_SECTIONS} collapsed={false} foldable />
               </>
             ) : null}
             <div className="sidebar-footer">
@@ -310,6 +388,88 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
           </nav>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Renders nav sections. Foldable sections get a heading button; the section
+ * holding the current page is always open. In the icon rail every section is
+ * open and headings become thin dividers.
+ */
+function NavSections({
+  sections,
+  collapsed,
+  foldable,
+}: {
+  sections: NavSection[];
+  collapsed: boolean;
+  foldable?: boolean;
+}): ReactNode {
+  const { pathname } = useLocation();
+  const [open, setOpen] = useState<Record<string, boolean>>(readOpenSections);
+  const ref = useRef<HTMLDivElement>(null);
+  // Bring the current page's row into view in a menu taller than the screen
+  // (only scrolls the menu, never the page).
+  useEffect(() => {
+    const active = ref.current?.querySelector<HTMLElement>('.nav-item-active');
+    const scroller = active?.closest<HTMLElement>('.sidebar-scroll');
+    if (!active || !scroller) return;
+    const a = active.getBoundingClientRect();
+    const sc = scroller.getBoundingClientRect();
+    if (a.top < sc.top || a.bottom > sc.bottom) {
+      scroller.scrollTop += a.top - sc.top - sc.height / 3;
+    }
+  }, [pathname]);
+  const toggle = (id: string, next: boolean) => {
+    setOpen((prev) => {
+      const updated = { ...prev, [id]: next };
+      try {
+        localStorage.setItem(NAV_OPEN_KEY, JSON.stringify(updated));
+      } catch {
+        // Private mode: the choice just isn't remembered.
+      }
+      return updated;
+    });
+  };
+  return (
+    <div ref={ref} className="nav-sections">
+      {sections.map((section) => {
+        const current = section.items.some((item) => navMatches(item, pathname));
+        const canFold = foldable && !collapsed && !!section.label;
+        const isOpen = !canFold || current || open[section.id] === true;
+        const label = section.label?.();
+        return (
+          <div key={section.id} className="nav-section" data-section={section.id}>
+            {label && collapsed ? <div className="nav-divider" aria-hidden="true" /> : null}
+            {label && !collapsed && !canFold ? <div className="nav-heading">{label}</div> : null}
+            {canFold && label ? (
+              <button
+                type="button"
+                className="nav-heading nav-fold"
+                aria-expanded={isOpen}
+                aria-controls={`nav-${section.id}`}
+                disabled={current}
+                title={current ? 'Holds the current page' : undefined}
+                onClick={() => toggle(section.id, !isOpen)}
+              >
+                <span className="nav-fold-caret" aria-hidden="true">
+                  ▸
+                </span>
+                {label}
+                <span className="nav-fold-count" aria-hidden="true">
+                  {section.items.length}
+                </span>
+              </button>
+            ) : null}
+            <div className="nav-group" id={`nav-${section.id}`} hidden={!isOpen}>
+              {section.items.map((item) => (
+                <NavItemLink key={item.to} item={item} collapsed={collapsed} end={item.to === '/admin'} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

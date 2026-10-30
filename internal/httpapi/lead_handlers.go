@@ -39,6 +39,11 @@ func (s *Server) leadTeamForEdit(r *http.Request, teamID string) (*store.Team, *
 	if !team.LeadCanEditQuotas {
 		return nil, ErrForbidden("Quota management has not been delegated to this team's lead. An administrator can enable it on the team.")
 	}
+	if !team.ArchivedAt.IsZero() && r.Method != http.MethodDelete {
+		// The roster row survives archive, so check the team itself: a
+		// deleted team gets no new or changed quotas (removing one is fine).
+		return nil, ErrForbidden("This team has been deleted, so its quotas can no longer be created or changed.")
+	}
 	return team, nil
 }
 
@@ -118,6 +123,7 @@ func (s *Server) handleLeadSetTeamMembers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var members []string
+	covered := s.childCoveredNow(r.Context())
 	err := s.Store.WithTeamAction(r.Context(), id, actor.ID, func(tx *store.Store) error {
 		role, err := tx.TeamActorRole(r.Context(), id, actor.ID)
 		if err != nil {
@@ -153,6 +159,7 @@ func (s *Server) handleLeadSetTeamMembers(w http.ResponseWriter, r *http.Request
 		teamHTTPError(w, r, err)
 		return
 	}
+	s.childCoverageLost(r.Context(), covered, "a team lead changed their team's members")
 	WriteJSON(w, http.StatusOK, map[string]any{"member_ids": members})
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,6 +146,19 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 	if err != nil {
 		return s.fail(ctx, up, res, err, started)
 	}
+	// An upstream that is restarting (vLLM, llama.cpp) can answer an empty
+	// list. Taken at face value that would mark every enabled model stale,
+	// so an empty listing from an upstream with enabled models counts as a
+	// failed run and leaves the rows as they are.
+	if len(models) == 0 {
+		enabled, err := s.store.ListModels(ctx, store.ModelFilter{UpstreamID: up.ID, Status: store.ModelEnabled})
+		if err != nil {
+			return s.fail(ctx, up, res, err, started)
+		}
+		if len(enabled) > 0 {
+			return s.fail(ctx, up, res, fmt.Errorf("the upstream listed no models although %d of its models are enabled; keeping them as they are", len(enabled)), started)
+		}
+	}
 
 	seen := make([]string, 0, len(models))
 	for _, m := range models {
@@ -183,7 +197,7 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 		keepRoles = append(keepRoles, role)
 		s.logger.WarnContext(ctx, "model discovery could not list some models; keeping them as they are", "upstream", up.Name, "classifier_role", role, "error", why)
 	}
-	stale, err := s.store.MarkStaleModelsKeeping(ctx, up.ID, seen, keepRoles)
+	stale, staleEnabled, err := s.store.MarkStaleModelsReport(ctx, up.ID, seen, keepRoles)
 	if err != nil {
 		return s.fail(ctx, up, res, err, started)
 	}
@@ -191,10 +205,24 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 	res.Stale = stale
 	res.DurationMs = time.Since(started).Milliseconds()
 
-	s.failures.Delete(up.ID)
+	if _, failing := s.failures.LoadAndDelete(up.ID); failing {
+		// The upstream answers again: free its "unreachable" claim so the
+		// next outage is announced.
+		if _, err := s.store.ReleaseAlert(ctx, upstreamDownKey(up.ID)); err != nil {
+			s.logger.WarnContext(ctx, "release upstream alert", "error", err.Error())
+		}
+	}
 	s.metrics.DiscoveryRuns.WithLabelValues(up.Name, "ok").Inc()
 	if err := s.store.RecordUpstreamCheck(ctx, up.ID, time.Since(started), ""); err != nil {
 		s.logger.WarnContext(ctx, "record upstream check", "error", err.Error())
+	}
+	if len(staleEnabled) > 0 {
+		s.alerts.Dispatch(ctx, alerting.Event{
+			Trigger: alerting.TriggerSystem, Severity: "warning", NotifyAdmins: true,
+			Title: fmt.Sprintf("%d enabled model(s) on %s are no longer listed", len(staleEnabled), up.Name),
+			Body: "These models stopped being listed and are marked stale, so requests to them, and to aliases, pools and routers that use them, fail until they are listed again: " +
+				strings.Join(staleEnabled, ", ") + ". When a model is listed again it returns to the state it had. Review them from Admin → Models.",
+		})
 	}
 	if res.New > 0 {
 		s.alerts.Dispatch(ctx, alerting.Event{
@@ -221,7 +249,10 @@ func (s *Service) fail(ctx context.Context, up *store.Upstream, res Result, caus
 	}
 	s.failures.Store(up.ID, count)
 	// Alert only once the failure looks persistent, so a single blip stays quiet.
-	if count == 3 {
+	// Every replica runs discovery, so the alert is claimed cluster-wide:
+	// the first replica to see the third failure sends it, once per outage
+	// (re-announced after upstreamDownWindow if it is still down).
+	if count == 3 && s.claimUpstreamDown(ctx, up.ID) {
 		s.alerts.Dispatch(ctx, alerting.Event{
 			Trigger: alerting.TriggerUpstreamDown, Severity: "critical", NotifyAdmins: true,
 			Title: "Upstream " + up.Name + " is unreachable",
@@ -230,6 +261,22 @@ func (s *Service) fail(ctx context.Context, up *store.Upstream, res Result, caus
 	}
 	s.logger.WarnContext(ctx, "model discovery failed", "upstream", up.Name, "error", cause.Error(), "consecutive_failures", count)
 	return res
+}
+
+// upstreamDownWindow bounds one "upstream unreachable" claim.
+const upstreamDownWindow = 24 * time.Hour
+
+func upstreamDownKey(id string) string { return "upstream_down:" + id }
+
+// claimUpstreamDown reports whether this replica sends the alert. A
+// database error sends it anyway: an outage must never be silent.
+func (s *Service) claimUpstreamDown(ctx context.Context, id string) bool {
+	ok, err := s.store.ClaimAlert(ctx, upstreamDownKey(id), upstreamDownWindow)
+	if err != nil {
+		s.logger.WarnContext(ctx, "claim upstream alert", "error", err.Error())
+		return true
+	}
+	return ok
 }
 
 // Start runs discovery immediately and then on the configured interval until

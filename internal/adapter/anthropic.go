@@ -267,6 +267,14 @@ func chatToMessages(body []byte) ([]byte, error) {
 		out["max_tokens"] = *in.MaxTokens
 	default:
 		out["max_tokens"] = anthropicDefaultMaxTokens
+		if major, _, ok := claudeVersion(in.Model); ok && major >= 4 && in.Stream {
+			// No cap asked for: a streamed reply from a current Claude may
+			// use the model's whole output limit (a long answer, or a whole
+			// file written into a tool call, would otherwise be cut off at
+			// 4,096). Non-streamed requests keep the short default —
+			// Anthropic refuses long non-streamed calls.
+			out["max_tokens"] = claudeMaxOutput(in.Model)
+		}
 	}
 	if in.Temperature != nil {
 		out["temperature"] = *in.Temperature
@@ -640,6 +648,11 @@ func anthropicTool(raw json.RawMessage) (map[string]any, error) {
 	if err := json.Unmarshal(raw, &tool); err != nil {
 		return nil, fmt.Errorf("parse tool: %w", err)
 	}
+	if def, ok := anthropicGenericTool(raw, tool.Type); ok {
+		// Generic hosted tool ({"type":"web_search"}): Anthropic's server
+		// tool definition.
+		return def, nil
+	}
 	if tool.Type != "function" && tool.Type != "" {
 		if tool.Name == "" {
 			return nil, fmt.Errorf("tool type %q is not supported", tool.Type)
@@ -765,6 +778,9 @@ type anthropicContentBlock struct {
 	Name     string          `json:"name"`
 	Input    json.RawMessage `json:"input"`
 	Thinking string          `json:"thinking"`
+	// Server tool results and text citations (server tools).
+	Content   json.RawMessage     `json:"content"`
+	Citations []anthropicCitation `json:"citations"`
 }
 
 // anthropicMessage is a non-streaming Messages response.
@@ -826,10 +842,25 @@ func (a *Anthropic) TransformResponse(req *Request, body []byte) ([]byte, error)
 	message := map[string]any{"role": "assistant"}
 	var text, reasoning strings.Builder
 	var toolCalls []map[string]any
+	var activity, annotations []any
 	for _, block := range msg.Content {
+		switch block.Type {
+		case "server_tool_use":
+			if a := serverToolActivity(block.Name, block.Input, "searching"); a != nil {
+				activity = append(activity, a["janus_activity"])
+			}
+			continue
+		case "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result",
+			"bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+			if a, _ := serverResultActivity(anthropicServerBlock{Type: block.Type, Content: block.Content}); a != nil {
+				activity = append(activity, a["janus_activity"])
+			}
+			continue
+		}
 		switch block.Type {
 		case "text":
 			text.WriteString(block.Text)
+			annotations = append(annotations, citationAnnotations(block.Citations)...)
 		case "thinking":
 			reasoning.WriteString(block.Thinking)
 		case "tool_use":
@@ -849,6 +880,13 @@ func (a *Anthropic) TransformResponse(req *Request, body []byte) ([]byte, error)
 	}
 	if len(toolCalls) > 0 {
 		message["tool_calls"] = toolCalls
+	}
+	if len(annotations) > 0 {
+		message["annotations"] = annotations
+	}
+	if len(activity) > 0 {
+		// Janus extension: the server tools Claude ran (search, fetch, code).
+		message["janus_activities"] = activity
 	}
 	finish := openAIFinishReason(msg.StopReason)
 	if finish == "" {
@@ -917,7 +955,10 @@ type anthropicStreamTransformer struct {
 	// toolIndex maps Anthropic content-block indexes to sequential OpenAI
 	// tool_call indexes: a text block at 0 and a tool block at 1 must
 	// surface as tool_calls[0], not tool_calls[1].
-	toolIndex    map[int]int
+	toolIndex map[int]int
+	// server holds server_tool_use blocks (by content index) while their
+	// input streams in; their activity is emitted when the block stops.
+	server       map[int]*anthropicServerPending
 	inputTokens  int64
 	cachedTokens int64
 	outputTokens int64
@@ -931,11 +972,12 @@ type anthropicStreamEvent struct {
 	Message      *anthropicMessage      `json:"message"`
 	ContentBlock *anthropicContentBlock `json:"content_block"`
 	Delta        *struct {
-		Type        string `json:"type"`
-		Text        string `json:"text"`
-		PartialJSON string `json:"partial_json"`
-		Thinking    string `json:"thinking"`
-		StopReason  string `json:"stop_reason"`
+		Type        string             `json:"type"`
+		Text        string             `json:"text"`
+		PartialJSON string             `json:"partial_json"`
+		Thinking    string             `json:"thinking"`
+		StopReason  string             `json:"stop_reason"`
+		Citation    *anthropicCitation `json:"citation"`
 	} `json:"delta"`
 	Usage *anthropicUsageBlock `json:"usage"`
 	Error json.RawMessage      `json:"error"`
@@ -981,6 +1023,25 @@ func (t *anthropicStreamTransformer) TransformStreamLine(line []byte) ([]byte, e
 		t.created = t.adapter.created()
 		return t.chunk(map[string]any{"role": "assistant", "content": ""}, nil, nil)
 	case "content_block_start":
+		if b := ev.ContentBlock; b != nil {
+			switch b.Type {
+			case "server_tool_use":
+				if t.server == nil {
+					t.server = map[int]*anthropicServerPending{}
+				}
+				t.server[ev.Index] = &anthropicServerPending{name: b.Name}
+				if a := serverToolActivity(b.Name, nil, "searching"); a != nil {
+					return t.chunk(a, nil, nil)
+				}
+				return nil, nil
+			case "web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result",
+				"bash_code_execution_tool_result", "text_editor_code_execution_tool_result":
+				if a, _ := serverResultActivity(anthropicServerBlock{Type: b.Type, Content: b.Content}); a != nil {
+					return t.chunk(a, nil, nil)
+				}
+				return nil, nil
+			}
+		}
 		if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
 			k := len(t.toolIndex)
 			t.toolIndex[ev.Index] = k
@@ -994,7 +1055,19 @@ func (t *anthropicStreamTransformer) TransformStreamLine(line []byte) ([]byte, e
 		if ev.Delta == nil {
 			return nil, nil
 		}
+		if p, ok := t.server[ev.Index]; ok {
+			// A server tool's input (the query): kept for its activity.
+			if ev.Delta.Type == "input_json_delta" {
+				p.input.WriteString(ev.Delta.PartialJSON)
+			}
+			return nil, nil
+		}
 		switch {
+		case ev.Delta.Type == "citations_delta":
+			if c := ev.Delta.Citation; c != nil && c.URL != "" {
+				return t.chunk(map[string]any{"annotations": citationAnnotations([]anthropicCitation{*c})}, nil, nil)
+			}
+			return nil, nil
 		case ev.Delta.Type == "input_json_delta":
 			k, ok := t.toolIndex[ev.Index]
 			if !ok {
@@ -1030,6 +1103,15 @@ func (t *anthropicStreamTransformer) TransformStreamLine(line []byte) ([]byte, e
 			}
 		}
 		return t.chunk(map[string]any{}, &finish, nil)
+	case "content_block_stop":
+		if p, ok := t.server[ev.Index]; ok {
+			delete(t.server, ev.Index)
+			// The query is known now: update the activity with it.
+			if a := serverToolActivity(p.name, json.RawMessage(p.input.String()), "searching"); a != nil {
+				return t.chunk(a, nil, nil)
+			}
+		}
+		return nil, nil
 	case "message_stop":
 		return t.finish(), nil
 	case "error":
@@ -1102,9 +1184,12 @@ type anthropicCacheCreation struct {
 // the top level of a Messages response / message_delta frame, or nested under
 // message on a message_start frame.
 type anthropicUsageBlock struct {
-	InputTokens          int64 `json:"input_tokens"`
-	OutputTokens         int64 `json:"output_tokens"`
-	CacheReadInputTokens int64 `json:"cache_read_input_tokens"`
+	// ServerToolUse counts server tool calls (web searches are billed per
+	// call).
+	ServerToolUse        *anthropicServerUsage `json:"server_tool_use"`
+	InputTokens          int64                 `json:"input_tokens"`
+	OutputTokens         int64                 `json:"output_tokens"`
+	CacheReadInputTokens int64                 `json:"cache_read_input_tokens"`
 	// CacheCreation is the modern per-TTL breakdown. A pointer so its
 	// presence is distinguishable from an all-zero breakdown: when the
 	// object is present it is authoritative and the legacy total below is
@@ -1164,6 +1249,7 @@ func (a *Anthropic) ExtractUsage(body []byte) (Usage, bool) {
 		u.FinishReason = env.Delta.StopReason
 	}
 	u.Reported = u.TokensIn > 0 || u.TokensOut > 0
+	env.Usage.ServerToolUse.apply(&u)
 	// Anthropic reports cache reads and cache writes DISJOINT from
 	// input_tokens; the cost function must add them rather than subtract.
 	u.CachedDisjoint = true
@@ -1212,6 +1298,7 @@ func (c *anthropicStreamCollector) Feed(line []byte) {
 	if env.Delta != nil && env.Delta.StopReason != "" {
 		frame.FinishReason = env.Delta.StopReason
 	}
+	env.Usage.ServerToolUse.apply(&frame)
 	// Shared merge: every dimension takes the largest observed value (the
 	// final frame is authoritative), flags are sticky — the same rule the
 	// OpenAI, Bedrock and Vertex collectors apply, so no adapter can drift in
@@ -1224,4 +1311,11 @@ func (c *anthropicStreamCollector) Usage() Usage {
 	// Same disjoint cache convention as the buffered path (see ExtractUsage).
 	c.usage.CachedDisjoint = true
 	return c.usage
+}
+
+// anthropicServerPending is a server_tool_use block whose input is still
+// streaming.
+type anthropicServerPending struct {
+	name  string
+	input strings.Builder
 }

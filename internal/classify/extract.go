@@ -11,6 +11,10 @@ const (
 	ScopeLastUser = "last_user"
 	ScopeAllUser  = "all_user"
 	ScopeAll      = "conversation"
+	// ScopeContext is the new turn with the earlier conversation as marked
+	// context (WithContext): the default, so a follow-up such as "What
+	// about Ohio?" is labelled by what the conversation is about.
+	ScopeContext = "context"
 )
 
 // ExtractText pulls the classifiable text out of an OpenAI-shaped request
@@ -81,6 +85,27 @@ func ExtractText(body []byte, scope string, includeSystem bool) string {
 		}
 	}
 	switch scope {
+	case ScopeContext:
+		// The new turn: the user messages after the last assistant reply.
+		start := 0
+		for i, t := range turns {
+			if t.role == "assistant" {
+				start = i + 1
+			}
+		}
+		var latest []string
+		var earlier []Turn
+		for i, t := range turns {
+			switch {
+			case i < start:
+				earlier = append(earlier, Turn{Role: t.role, Content: t.text})
+			case t.role == "user":
+				latest = append(latest, t.text)
+			}
+		}
+		if c := WithContext(earlier, strings.Join(latest, "\n\n"), 0); c != "" {
+			out = append(out, c)
+		}
 	case ScopeAll:
 		for _, t := range turns {
 			if t.role == "system" || t.role == "developer" {

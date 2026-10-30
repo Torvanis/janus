@@ -3,12 +3,13 @@ import {
   bandOf,
   categorySlug,
   difficultyLabel,
-  FAMILY_CATEGORIES,
   instructionsLine,
   reasonLabel,
   ROUTER_TEMPLATES,
   routingHealth,
   splitRouteReason,
+  childSafetyLine,
+  childSafetySlugs,
   type Router,
   type RoutingDocument,
 } from './routing';
@@ -159,43 +160,26 @@ describe('router instructions in the request log', () => {
     expect(instructionsLine('no_match;instructions=not_applied')).toMatch(/not applied/);
     expect(instructionsLine('matched:legal')).toBe('');
   });
+
+  it('keeps the Child Safety note apart from the routing reason', () => {
+    const r = 'matched:coding;instructions=route;child=homework_learning,personal_info';
+    expect(reasonLabel(r)).toBe('Matched a route');
+    expect(instructionsLine(r)).toBe('Router instructions added: route');
+    expect(childSafetySlugs(r)).toEqual(['homework_learning', 'personal_info']);
+    expect(childSafetyLine(r)).toBe('Answered appropriately: Homework learning, Sharing personal information');
+    // Not auto-routed: the note alone.
+    expect(childSafetyLine('child=not_for_children')).toBe('Answered appropriately: Not suitable for children');
+    expect(childSafetyLine('matched:legal')).toBe('');
+  });
 });
 
-describe('Family template', () => {
+describe('templates', () => {
   it('uses slugs the server will give its categories', () => {
-    for (const c of FAMILY_CATEGORIES) expect(categorySlug(c.name)).toBe(c.slug);
     expect(categorySlug('C++ & C#')).toBe('cplusplus_csharp');
   });
 
-  it('routes the five Family categories, then homework learning, with sticky off', () => {
-    const t = ROUTER_TEMPLATES.find((x) => x.id === 'family')!;
-    expect(t.sticky).toBe(false);
-    expect(t.instructions).toMatch(/child/);
-    // Backstop for homework the classifier files elsewhere (dev test C01a).
-    expect(t.instructions).toMatch(/do not hand over finished homework, final answers to copy/);
-    expect(t.instructions).toMatch(/Practice questions, explanations and everyday facts are fine/);
-    expect(t.routes.find((r) => r.name === 'Sharing personal information')!.instructions).toMatch(
-      /Never quote the information back/,
-    );
-    expect(t.routes.find((r) => r.name === 'Sharing personal information')!.instructions).toMatch(
-      /do not call them by a name taken from/,
-    );
-    expect(t.instructions).toMatch(/tell them the correct word or answer and why/);
-    // Router-wide: personal details are often not routed to the privacy coach.
-    expect(t.instructions).toMatch(/never call them by a name taken from an email address, username/);
-    expect(t.instructions!.length).toBeLessThanOrEqual(8000);
-    expect(t.routes.map((r) => r.name)).toEqual([
-      'Feeling low',
-      'Not suitable for children',
-      'Getting around parental controls',
-      'Sharing personal information',
-      'Homework done for them',
-      'Homework learning',
-    ]);
-    const known = new Set([...FAMILY_CATEGORIES.map((c) => c.slug), 'homework_learning']);
-    for (const r of t.routes) for (const c of r.categories ?? []) expect(known.has(c)).toBe(true);
-    for (const r of t.routes) expect((r.instructions ?? '').length).toBeLessThanOrEqual(8000);
-    expect(FAMILY_CATEGORIES.find((c) => c.slug === 'feeling_low_or_unsafe')!.min_confidence).toBe(0.35);
-    expect(FAMILY_CATEGORIES.find((c) => c.slug === 'homework_done_for_them')!.min_confidence).toBe(0.6);
+  it('no longer offers a Family router: Child Safety covers children on every model', () => {
+    expect(ROUTER_TEMPLATES.find((x) => x.id === 'family')).toBeUndefined();
+    expect(ROUTER_TEMPLATES.some((x) => x.modelName === 'auto/family')).toBe(false);
   });
 });

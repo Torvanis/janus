@@ -197,7 +197,7 @@ func TestTeamUsageCatalog(t *testing.T) {
 
 func TestCatalogTemplatesAreUsable(t *testing.T) {
 	c := GetCatalog()
-	if c.Version != 1 || len(c.Templates) != 11 || len(c.Dimensions) != 20 || len(c.Metrics) < 17 {
+	if c.Version != 1 || len(c.Templates) != 11 || len(c.Dimensions) != 21 || len(c.Metrics) < 17 {
 		t.Fatalf("incomplete catalog: %+v", c)
 	}
 	for _, d := range c.Templates {

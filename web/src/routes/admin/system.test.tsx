@@ -33,6 +33,7 @@ it('separates system status from editable configuration and retains a timeout dr
   mocked.get.mockImplementation((path) => {
     if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
     if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
+    if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
     return Promise.reject(new Error(`unexpected GET ${path}`));
   });
   renderPage('/admin/settings/general?scope=keep');
@@ -158,6 +159,24 @@ function renderPage(workspace?: string) {
 }
 
 /** Troubleshooting mode never enabled: the System page's card renders its off state. */
+const fileStorageDatabase = {
+  mode: 'database',
+  s3: {
+    endpoint: '',
+    bucket: '',
+    region: 'us-east-1',
+    path_style: false,
+    prefix: '',
+    access_key_id: '',
+    secret_set: false,
+    ca_bundle: '',
+  },
+  env_managed: [],
+  max_object_bytes: 26214400,
+  usage: { database: { objects: 0, bytes: 0 } },
+  backends: ['database', 's3'],
+};
+
 const troubleshootingOff = {
   active: false,
   session: null,
@@ -204,6 +223,7 @@ describe('A14 Database tile — sqlite backend', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   });
@@ -238,6 +258,7 @@ describe('A14 Database tile — postgres backend', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(postgresStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   });
@@ -274,6 +295,7 @@ describe('A14 Database tile — no credentials in the DOM', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(smuggled);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
 
@@ -297,6 +319,7 @@ describe('Spend-emphasis feature flag toggle', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(sqliteStatus);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   });
@@ -351,6 +374,7 @@ describe('Upstream timeouts panel', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   }
@@ -485,6 +509,7 @@ describe('A14 System page — loading and error states', () => {
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
       if (path === '/api/v1/admin/subscriptions')
         return Promise.resolve({ offline: false, enabled: false, providers: [], connections: [] });
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
     // Each card retries its own query.
@@ -502,6 +527,7 @@ describe('Model discovery interval panel', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   }
@@ -577,6 +603,7 @@ describe('Metering health tile', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   }
@@ -643,6 +670,7 @@ describe('Performance mode tile', () => {
       if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
       if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
       if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
       return Promise.reject(new Error(`unexpected GET ${path}`));
     });
   }

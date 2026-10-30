@@ -8,7 +8,7 @@ import (
 // Migration 0052 and the stale bookkeeping work on both databases (run with
 // JANUS_ROLLUP_TEST_DATABASE_URL for Postgres): a decision model kept out of
 // a stale sweep stays as it is, one that goes stale and comes back resumes
-// its state, and a chat model back from stale waits for approval.
+// its state, and so does a chat model back from stale.
 func TestDecisionModelStaleRoundTrip(t *testing.T) {
 	s := newRollupStore(t)
 	ctx := context.Background()
@@ -55,7 +55,7 @@ func TestDecisionModelStaleRoundTrip(t *testing.T) {
 	if got := status(jev.ID); got != ModelEnabled {
 		t.Errorf("decision model back from stale is %q, want enabled", got)
 	}
-	if got := status(chat.ID); got != ModelPending {
-		t.Errorf("chat model back from stale is %q, want pending_approval", got)
+	if got := status(chat.ID); got != ModelEnabled {
+		t.Errorf("chat model back from stale is %q, want its previous state enabled", got)
 	}
 }

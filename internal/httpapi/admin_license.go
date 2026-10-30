@@ -64,6 +64,18 @@ func (s *Server) checkSeatAvailable(ctx context.Context) error {
 	return nil
 }
 
+// checkSeatAvailableFor is checkSeatAvailable for an existing account: a user
+// that already holds a seat never needs a free one.
+func (s *Server) checkSeatAvailableFor(ctx context.Context, userID string) error {
+	if s.licenseState().Seats <= 0 {
+		return nil
+	}
+	if held, err := s.Store.UserHoldsSeat(ctx, userID, time.Now().Add(-seatWindow)); err == nil && held {
+		return nil
+	}
+	return s.checkSeatAvailable(ctx)
+}
+
 // handleGetLicense returns the full license state plus seat and node usage.
 func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 	if s.License != nil {

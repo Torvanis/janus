@@ -149,6 +149,14 @@ func TestGuessModalities(t *testing.T) {
 		"grok-imagine":  ModalityImage,
 		"grok-2-image":  ModalityImage,
 		"verbose-llama": ModalityChat,
+		// Live catalog: these were listed as chat models.
+		"gpt-4o-mini-transcribe":    ModalitySTT,
+		"gpt-4o-transcribe-diarize": ModalitySTT,
+		"gpt-transcribe":            ModalitySTT,
+		"gpt-realtime-mini":         ModalityAudio,
+		"gpt-realtime-2.1":          ModalityAudio,
+		"gpt-4o-realtime-preview":   ModalityAudio,
+		"gpt-audio-mini":            ModalityChat, // chat completions with audio parts
 	}
 	for name, want := range cases {
 		got := guessModalities(name)

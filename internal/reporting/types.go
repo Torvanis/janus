@@ -79,7 +79,7 @@ type Catalog struct {
 	Templates  []Definition  `json:"templates"`
 }
 
-const dimensionIDs = "user team group model upstream requested_model modality model_family provider hosting client_app project cost_center service_token status error endpoint day week month"
+const dimensionIDs = "user team group model upstream requested_model modality model_family provider hosting client_app billing_source project cost_center service_token status error endpoint day week month"
 const metricIDs = "requests tokens_in tokens_out tokens_cached cost_usd errors success_rate latency_p50_ms latency_p95_ms ttfb_p95_ms cache_hit_rate active_users quota_denials security_blocks fallbacks estimated_requests unpriced_requests"
 const familyIDs = "executive usage adoption portfolio quotas reliability efficiency integrations governance data_quality"
 const templateIDs = familyIDs + " team_usage"
@@ -96,7 +96,7 @@ func label(id string) string {
 	labels := map[string]string{
 		"team_usage": "Team usage",
 		"executive":  "Executive overview", "usage": "Usage and cost allocation", "adoption": "Adoption and engagement", "portfolio": "Model portfolio", "quotas": "Quotas and budgets", "reliability": "Reliability and performance", "efficiency": "Efficiency and optimization", "integrations": "Applications and integrations", "governance": "Governance and security", "data_quality": "Data quality and reconciliation",
-		"tokens_in": "Input tokens", "tokens_out": "Output tokens", "tokens_cached": "Cached input tokens", "cost_usd": "Recorded cost (USD)", "latency_p50_ms": "Median latency", "latency_p95_ms": "95th-percentile latency", "ttfb_p95_ms": "95th-percentile time to first byte", "requested_model": "Requested model or alias", "client_app": "Application", "service_token": "Service credential", "modality": "Request modality", "unpriced_requests": "Requests with incomplete pricing", "estimated_requests": "Requests with estimated usage",
+		"tokens_in": "Input tokens", "tokens_out": "Output tokens", "tokens_cached": "Cached input tokens", "cost_usd": "Recorded cost (USD)", "latency_p50_ms": "Median latency", "latency_p95_ms": "95th-percentile latency", "ttfb_p95_ms": "95th-percentile time to first byte", "requested_model": "Requested model or alias", "client_app": "Application", "billing_source": "Paid by (organization or personal plan)", "service_token": "Service credential", "modality": "Request modality", "unpriced_requests": "Requests with incomplete pricing", "estimated_requests": "Requests with estimated usage",
 	}
 	if text, ok := labels[id]; ok {
 		return text

@@ -17,7 +17,8 @@ const usageColumns = `id, created_at, user_id, service_token_id, token_id, team_
 	upstream_latency_ms, client_user_agent, client_ip, x_forwarded_for, referer, client_app, error_code, quota_violated,
 	blocking_rule_id, request_id, tokens_in_per_second, tokens_out_per_second, throughput_source, fallback_reason,
 	secgw_action, secgw_violations, subscription_id, reasoning_adjustment, pool_reason, pool_attempts,
-	classifier_ms, classifier_calls, classification, managed_model_id, route_reason, served_managed_model_id`
+	classifier_ms, classifier_calls, classification, managed_model_id, route_reason, served_managed_model_id,
+	chat_message_id, chat_subcall`
 
 // InsertUsageEvent appends a metering record with the team context admitted
 // for the request (empty = Personal). The current roster is never consulted,
@@ -42,7 +43,8 @@ func usageArgs(e *UsageEvent) []any {
 		e.ClientApp, e.ErrorCode, boolInt(e.QuotaViolated), e.BlockingRuleID, e.RequestID,
 		e.TokensInPerSecond, e.TokensOutPerSecond, e.ThroughputSource, e.FallbackReason,
 		e.SecgwAction, e.SecgwViolations, e.SubscriptionID, e.ReasoningAdjustment, e.PoolReason, e.PoolAttempts,
-		e.ClassifierMs, e.ClassifierCalls, e.Classification, e.ManagedModelID, e.RouteReason, e.ServedManagedModelID}
+		e.ClassifierMs, e.ClassifierCalls, e.Classification, e.ManagedModelID, e.RouteReason, e.ServedManagedModelID,
+		e.ChatMessageID, boolInt(e.ChatSubcall)}
 }
 
 func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
@@ -111,7 +113,7 @@ func (s *Store) InsertUsageEvents(ctx context.Context, events []*UsageEvent, asy
 func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 	var e UsageEvent
 	var created string
-	var streaming, violated int
+	var streaming, violated, subcall int
 	if err := scan(&e.ID, &created, &e.UserID, &e.ServiceTokenID, &e.TokenID, &e.TeamIDs, &e.UpstreamID, &e.ModelID, &e.ModelName,
 		&e.RequestedModelName, &e.EndpointPath, &e.HTTPMethod, &e.Modality, &streaming, &e.RequestBytes, &e.ResponseBytes,
 		&e.AttachmentCount, &e.TokensIn, &e.TokensOut, &e.TokensCached, &e.TokensCacheWrite5m, &e.TokensCacheWrite1h,
@@ -120,12 +122,14 @@ func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 		&e.XForwardedFor, &e.Referer, &e.ClientApp, &e.ErrorCode, &violated, &e.BlockingRuleID, &e.RequestID,
 		&e.TokensInPerSecond, &e.TokensOutPerSecond, &e.ThroughputSource, &e.FallbackReason,
 		&e.SecgwAction, &e.SecgwViolations, &e.SubscriptionID, &e.ReasoningAdjustment, &e.PoolReason, &e.PoolAttempts,
-		&e.ClassifierMs, &e.ClassifierCalls, &e.Classification, &e.ManagedModelID, &e.RouteReason, &e.ServedManagedModelID); err != nil {
+		&e.ClassifierMs, &e.ClassifierCalls, &e.Classification, &e.ManagedModelID, &e.RouteReason, &e.ServedManagedModelID,
+		&e.ChatMessageID, &subcall); err != nil {
 		return nil, err
 	}
 	e.CreatedAt = ParseTime(created)
 	e.Streaming = streaming == 1
 	e.QuotaViolated = violated == 1
+	e.ChatSubcall = subcall == 1
 	return &e, nil
 }
 
@@ -177,6 +181,11 @@ type RequestFilter struct {
 	Sort       string
 	Limit      int
 	Offset     int
+	// SkipTotal leaves out the total count (ListRequests returns -1 for
+	// it). "Recent requests" panels show a few newest rows and never the
+	// total; counting every matching event to show five was the slow part
+	// of the dashboards on a cold database cache.
+	SkipTotal bool
 	// ServiceTokenID narrows to one integration credential's traffic.
 	ServiceTokenID string
 	// Principal restricts the log to one kind of principal. The default
@@ -403,12 +412,15 @@ func (f RequestFilter) clause() (string, []any) {
 	return strings.Join(where, " AND "), args
 }
 
-// ListRequests returns a filtered page of usage events plus the total count.
+// ListRequests returns a filtered page of usage events plus the total count
+// (-1 when f.SkipTotal).
 func (s *Store) ListRequests(ctx context.Context, f RequestFilter) ([]*UsageEvent, int, error) {
 	clause, args := f.clause()
-	var total int
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM usage_event WHERE `+clause, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count requests: %w", err)
+	total := -1
+	if !f.SkipTotal {
+		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM usage_event WHERE `+clause, args...).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("count requests: %w", err)
+		}
 	}
 	order := requestSortOrder(f.Sort)
 	limit := f.Limit
@@ -936,7 +948,7 @@ func (s *Store) SumMetricSince(ctx context.Context, subjectType, subjectID, mode
 		MetricTokensIn:  "COALESCE(SUM(tokens_in),0)",
 		MetricTokensOut: "COALESCE(SUM(tokens_out),0)",
 		MetricCostUSD:   "COALESCE(SUM(cost_nanousd),0)",
-		MetricRequests:  "COUNT(*)",
+		MetricRequests:  requestCountExpr,
 	}[metric]
 	if expr == "" {
 		return 0, fmt.Errorf("unsupported quota metric %q", metric)

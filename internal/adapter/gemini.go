@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -153,6 +154,26 @@ func geminiModalities(name string, methods []string) []string {
 // Prepare targets the OpenAI-compatible endpoint (bare host completed) and
 // authenticates with the API key as a bearer token, as Google documents.
 func (a *Gemini) Prepare(up Upstream, req *Request) (*Prepared, error) {
+	if geminiNativeRequest(req) {
+		// Built-in tools exist only on the native API (gemini_native.go).
+		body, err := chatToGeminiNative(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if geminiMusicModel(req.Model) {
+			// Lyria takes a prompt, not thinking settings.
+			var m map[string]any
+			if json.Unmarshal(body, &m) == nil {
+				delete(m, "generationConfig")
+				body, _ = json.Marshal(m)
+			}
+		}
+		target := geminiNativeURL(up.BaseURL, req.Model, req.Streaming)
+		if target == "" {
+			return nil, fmt.Errorf("gemini: no native endpoint for base URL %q", up.BaseURL)
+		}
+		return &Prepared{URL: target, Header: geminiNativeHeaders(req.Header, up.APIKey), Body: body}, nil
+	}
 	up.BaseURL = geminiBase(up.BaseURL)
 	if isChatCompletions(req) {
 		// Clients drop the thought signature from tool calls they replay;
@@ -161,11 +182,29 @@ func (a *Gemini) Prepare(up Upstream, req *Request) (*Prepared, error) {
 		r.Body = restoreGeminiSignatures(req.Body)
 		req = &r
 	}
-	return a.openai.Prepare(up, req)
+	prepared, err := a.openai.Prepare(up, req)
+	if err == nil && up.APIKey != "" {
+		// A finished Veo video's /videos/<id>/content redirects to
+		// /v1beta/files/<id>:download, which refuses the OpenAI-style
+		// bearer (401 "API keys are not supported by this API") and takes
+		// only Google's own key header. The first hop needs the bearer.
+		key := up.APIKey
+		prepared.OnRedirect = func(h http.Header) {
+			h.Del("Authorization")
+			h.Set("x-goog-api-key", key)
+		}
+	}
+	return prepared, err
 }
 
 // ExtractUsage reads OpenAI-style usage and adds thinking tokens to output.
 func (a *Gemini) ExtractUsage(body []byte) (Usage, bool) {
+	if bytes.Contains(body, []byte(`"usageMetadata"`)) {
+		var r geminiNativeResponse
+		if json.Unmarshal(body, &r) == nil {
+			return geminiNativeUsage(&r)
+		}
+	}
 	u, ok := parseOpenAIUsage(body)
 	return withGeminiThinking(u, body), ok
 }
@@ -176,6 +215,9 @@ func (a *Gemini) NewStreamCollector() StreamCollector { return &geminiStreamColl
 // TransformResponse passes OpenAI-shaped bodies through unchanged, noting
 // the thought signatures on tool calls.
 func (a *Gemini) TransformResponse(req *Request, body []byte) ([]byte, error) {
+	if geminiNativeRequest(req) {
+		return geminiNativeCompletion(body, req.Model)
+	}
 	if isChatCompletions(req) {
 		rememberGeminiSignatures(body)
 	}
@@ -185,6 +227,9 @@ func (a *Gemini) TransformResponse(req *Request, body []byte) ([]byte, error) {
 // NewStreamTransformer passes OpenAI-shaped SSE through unchanged, noting
 // the thought signatures on tool calls.
 func (a *Gemini) NewStreamTransformer(req *Request, h http.Header) StreamTransformer {
+	if geminiNativeRequest(req) {
+		return &geminiNativeStream{model: req.Model}
+	}
 	return geminiStreamWithSignatures(a.openai.NewStreamTransformer(req, h), req, h)
 }
 
@@ -211,11 +256,20 @@ func withGeminiThinking(u Usage, body []byte) Usage {
 	return u
 }
 
-type geminiStreamCollector struct{ usage Usage }
+type geminiStreamCollector struct {
+	usage  Usage
+	native geminiNativeCollector
+}
 
 func (c *geminiStreamCollector) Feed(line []byte) {
 	payload, ok := sseData(line)
 	if !ok {
+		return
+	}
+	if bytes.Contains(payload, []byte(`"candidates"`)) || bytes.Contains(payload, []byte(`"usageMetadata"`)) {
+		// A native stream (built-in tools).
+		c.native.Feed(line)
+		c.usage = c.native.Usage()
 		return
 	}
 	frame, _ := parseOpenAIUsage(payload)

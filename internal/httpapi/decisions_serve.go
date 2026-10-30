@@ -147,7 +147,7 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request, inbound 
 	// /v1/systemone: rules written for /v1/* (or for /v1/systemone) apply
 	// to it too.
 	for _, path := range decisionRulePaths(r.URL.Path) {
-		sig := authz.SignalsFromRequest(r, event.ClientIP, tokenPrefix, req.Model)
+		sig := authz.SignalsFromRequest(r, event.ClientIP, s.trustedForwardedFor(r), tokenPrefix, req.Model)
 		sig.Path = path
 		if rule, clause := authz.Match(rules, sig); rule != nil {
 			event.BlockingRuleID = rule.ID
@@ -240,6 +240,13 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request, inbound 
 		s.rejectProxyEvent(w, r, ErrSecurityBlocked("", true), event, started)
 		return
 	}
+	if secgwEng.FamilyCovers(event.UserID) {
+		// Family safety cannot judge decision answers, so a covered user
+		// cannot use this surface at all (fail closed, kind notice).
+		event.SecgwAction = store.SecgwActionBlocked
+		s.rejectProxyEvent(w, r, errFamily(familyEndpointNotice), event, started)
+		return
+	}
 	secgwEff := secgwEng.Resolve(secgwSubject(event, groupIDs, resolved))
 	var violations []secgw.Violation
 	// redacted: the evidence was rewritten, so the request is re-encoded;
@@ -272,7 +279,10 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request, inbound 
 		event.SecgwAction, event.SecgwViolations = dec.Action, secgw.Recorded(dec.Violations)
 		if dec.Action == store.SecgwActionBlocked {
 			s.attachSecgwViolations(event, secgwEff.Policy, violations)
-			s.writeSecgwBlock(w, r, event, secgwEff.Policy, dec, started)
+			// Always the 403 error object: a policy's synthetic refusal is a
+			// chat completion, which no decisions client can read (and a 200
+			// would pass for a decision with no answers).
+			s.rejectProxyEvent(w, r, ErrSecurityBlocked(dec.BlockKind, dec.ClassifierFailed), event, started)
 			return
 		}
 		if dec.Action == store.SecgwActionRedacted {
