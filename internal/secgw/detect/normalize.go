@@ -41,7 +41,7 @@ func Normalize(s string) (string, []int) {
 	}
 
 	// Pass 2: leetspeak, only when adjacent to a letter (looking at the
-	// already-folded neighbours).
+	// already-folded neighbors).
 	isLetterAt := func(i int) bool {
 		return i >= 0 && i < len(toks) && unicode.IsLetter(toks[i].r)
 	}

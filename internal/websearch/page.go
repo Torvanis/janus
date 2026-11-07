@@ -2,6 +2,8 @@ package websearch
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"html"
@@ -13,9 +15,12 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // Page is one web page read for a model (deep research).
@@ -34,11 +39,6 @@ const (
 	pageUserAgent  = "Mozilla/5.0 (compatible; JanusChat/1.0; +https://janus-gateway.dev/bot)"
 	pageAcceptHTML = "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1"
 )
-
-// ErrBlockedAddress is returned for pages on private, loopback, link-local
-// or otherwise non-public addresses: the model may only read the public
-// web, never the network Janus runs in.
-var ErrBlockedAddress = errors.New("that address is not on the public internet")
 
 // publicAddr reports an address a model may make Janus connect to.
 func publicAddr(a netip.Addr) bool {
@@ -67,77 +67,105 @@ var blockedPrefixes = func() []netip.Prefix {
 	return out
 }()
 
-// pageClient connects only to public addresses: the check runs on the
-// address actually dialled (after DNS), so a hostname that resolves to an
-// internal address, or a redirect to one, is refused.
-func pageClient() *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: func(network, address string, _ syscall.RawConn) error {
-		host, _, err := net.SplitHostPort(address)
-		if err != nil {
-			return err
-		}
-		a, err := netip.ParseAddr(host)
-		if err != nil || !publicAddr(a) {
-			return ErrBlockedAddress
-		}
-		return nil
-	}}
+// pageClientFor connects only where the policy allows: the check runs on
+// the address actually dialled (after DNS), so a name that resolves to a
+// blocked address, or a redirect to one, is refused. With JANUS_WEB_PROXY
+// every read goes through the proxy (no direct fallback); the proxy then
+// resolves names and is the gatekeeper for where they lead.
+func pageClientFor(p *PagePolicy) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	tr := &http.Transport{
-		Proxy:                 nil, // a proxy would dial for us and bypass the check
 		DialContext:           dialer.DialContext,
+		TLSClientConfig:       p.tlsConfig(), // with the revocation check
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
 		MaxIdleConns:          8,
 		IdleConnTimeout:       30 * time.Second,
 	}
+	if p.Proxy != nil {
+		tr.Proxy = http.ProxyURL(p.Proxy)
+	} else {
+		tr.Proxy = nil // HTTPS_PROXY would dial for us and bypass the check
+		dialer.Control = func(network, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			a, err := netip.ParseAddr(host)
+			if err != nil {
+				return ErrBlockedAddress
+			}
+			if !p.addrAllowed(a) {
+				return p.addrError(a)
+			}
+			return nil
+		}
+	}
 	return &http.Client{Transport: tr, Timeout: pageTimeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= pageMaxHops {
 			return errors.New("too many redirects")
 		}
-		return checkPageURL(req.URL)
+		return p.checkURL(req.URL)
 	}}
 }
 
-var sharedPageClient = pageClient()
+// pageClient is the client for the installed policy (tests).
+func pageClient() *http.Client { return pageClientFor(CurrentPagePolicy()) }
 
-func checkPageURL(u *url.URL) error {
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("only http and https pages can be read")
-	}
-	if u.User != nil {
-		return errors.New("addresses with credentials cannot be read")
-	}
-	host := u.Hostname()
-	if host == "" {
-		return errors.New("the address has no host")
-	}
-	if a, err := netip.ParseAddr(host); err == nil && !publicAddr(a) {
-		return ErrBlockedAddress
-	}
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	if h == "localhost" || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".internal") ||
-		strings.HasSuffix(h, ".svc") || strings.Contains(h, ".svc.") || strings.HasSuffix(h, ".cluster.local") || !strings.Contains(h, ".") {
-		return ErrBlockedAddress
-	}
-	if p := u.Port(); p != "" && p != "80" && p != "443" && p != "8080" && p != "8443" {
-		return errors.New("only standard web ports can be read")
-	}
-	return nil
+// pageReader is a policy and the client built from it, installed together
+// so the link check and the dial check can never disagree.
+type pageReader struct {
+	policy *PagePolicy
+	client *http.Client
+	// gen is the trust store generation the client was built on: custom
+	// and custom-only trust follow certificate uploads and mounts.
+	gen uint64
 }
+
+func newPageReader(p *PagePolicy) *pageReader {
+	return &pageReader{policy: p, client: pageClientFor(p), gen: truststore.Generation()}
+}
+
+// currentReader returns the installed reader, rebuilt when the trust store
+// has changed since it was built.
+func currentReader() *pageReader {
+	r := sharedPage.Load()
+	if r.policy.TLSTrust == "" || r.policy.TLSTrust == "system" || r.gen == truststore.Generation() {
+		return r
+	}
+	nr := newPageReader(r.policy)
+	if sharedPage.CompareAndSwap(r, nr) {
+		r.client.CloseIdleConnections()
+		return nr
+	}
+	return sharedPage.Load()
+}
+
+var sharedPage = func() *atomic.Pointer[pageReader] {
+	var p atomic.Pointer[pageReader]
+	p.Store(newPageReader(&PagePolicy{}))
+	return &p
+}()
+
+func checkPageURL(u *url.URL) error { return CurrentPagePolicy().checkURL(u) }
 
 // FetchPage reads one public web page as text for a model.
 func FetchPage(ctx context.Context, raw string) (*Page, error) {
-	return fetchPage(ctx, sharedPageClient, raw)
+	return currentReader().fetch(ctx, raw)
 }
 
-func fetchPage(ctx context.Context, client *http.Client, raw string) (*Page, error) {
+func (r *pageReader) fetch(ctx context.Context, raw string) (*Page, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, errors.New("that is not a web address")
 	}
-	if err := checkPageURL(u); err != nil {
+	if err := r.policy.checkURL(u); err != nil {
 		return nil, err
 	}
+	return fetchPageURL(ctx, r.policy, r.client, u)
+}
+
+func fetchPageURL(ctx context.Context, policy *PagePolicy, client *http.Client, u *url.URL) (*Page, error) {
 	ctx, cancel := context.WithTimeout(ctx, pageTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -148,8 +176,18 @@ func fetchPage(ctx context.Context, client *http.Client, raw string) (*Page, err
 	req.Header.Set("Accept", pageAcceptHTML)
 	resp, err := client.Do(req)
 	if err != nil {
-		if errors.Is(err, ErrBlockedAddress) || strings.Contains(err.Error(), ErrBlockedAddress.Error()) {
-			return nil, ErrBlockedAddress
+		for _, pe := range policyErrors {
+			if errors.Is(err, pe) || strings.Contains(err.Error(), pe.Error()) {
+				return nil, pe
+			}
+		}
+		if policy.Proxy != nil && strings.Contains(err.Error(), "proxyconnect") {
+			return nil, errors.New("the page did not load (the web proxy refused or could not be reached)")
+		}
+		var cve *tls.CertificateVerificationError
+		var ua x509.UnknownAuthorityError
+		if errors.As(err, &cve) || errors.As(err, &ua) {
+			return nil, errors.New("the page did not load (its certificate is not trusted by this deployment)")
 		}
 		return nil, fmt.Errorf("the page did not load (%s)", shortNetErr(err))
 	}

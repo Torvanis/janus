@@ -171,7 +171,7 @@ function rgba(color: Rgb, alpha: number): string {
   return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
 }
 
-/** Resolves every colour the canvas paints from the --janus-* token ramp. */
+/** Resolves every color the canvas paints from the --janus-* token ramp. */
 function resolvePalette() {
   const styles = getComputedStyle(document.documentElement);
   const token = (name: string, fallback: Rgb) => parseColor(styles.getPropertyValue(name), fallback);

@@ -70,7 +70,7 @@ func TestChatExport(t *testing.T) {
 // encrypted bodies, update, delete; another user cannot see them.
 func TestChatPrompts(t *testing.T) {
 	h, sess := chatHarness(t)
-	rec := h.doAsSession(sess, http.MethodPost, "/api/v1/chat/prompts", map[string]any{"name": "/Summarise", "title": "Summarise", "body": "Summarise this for {{audience}}:\n\n{{text}}"})
+	rec := h.doAsSession(sess, http.MethodPost, "/api/v1/chat/prompts", map[string]any{"name": "/Summarise", "title": "Summarize", "body": "Summarize this for {{audience}}:\n\n{{text}}"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -91,7 +91,7 @@ func TestChatPrompts(t *testing.T) {
 		t.Errorf("empty body accepted: %d", rec.Code)
 	}
 	stored, err := h.store.ChatPrompt(context.Background(), h.user.ID, p.ID)
-	if err != nil || strings.Contains(stored.BodyEnc, "Summarise this") {
+	if err != nil || strings.Contains(stored.BodyEnc, "Summarize this") {
 		t.Fatalf("body stored as %q (err %v)", stored.BodyEnc, err)
 	}
 

@@ -89,6 +89,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		// License banner state for the shell (edition/status only; the full
 		// claims are admin-only under /admin/system/license).
 		"license": s.licenseSummary(),
+		// Session limits in force, so the app can warn before an idle
+		// sign-out and send the person to the sign-in page when it happens.
+		"session": s.sessionInfo(r),
+		// The password rules local accounts must meet (forms show them).
+		"password_policy": s.Store.SecurityPolicy(r.Context()).Passwords,
 	})
 }
 
@@ -200,7 +205,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Description = strings.TrimSpace(body.Description)
 	if body.Description == "" {
-		WriteError(w, r, ErrInvalidRequest("Give the token a description so you can recognise it later.").WithParam("description"))
+		WriteError(w, r, ErrInvalidRequest("Give the token a description so you can recognize it later.").WithParam("description"))
 		return
 	}
 	if len(body.Description) > 100 {
@@ -264,7 +269,7 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	}
 	// Revocation must be immediate, so the credential cache is dropped at once.
 	s.InvalidateTokenCache()
-	if err := s.Store.AppendAudit(r.Context(), &store.AuditEntry{
+	if err := s.appendAudit(r.Context(), &store.AuditEntry{
 		ActorUserID: user.ID, ActorLabel: user.Email, Action: "token_revoked",
 		ResourceType: "token", ResourceID: id, OldValue: `{"revoked":false}`, NewValue: `{"revoked":true}`,
 	}); err != nil {
@@ -382,7 +387,7 @@ func (s *Server) attachModelActivity(ctx context.Context, catalog GrantedCatalog
 }
 
 // GrantedCatalog is everything a principal may address: real models and
-// managed aliases, each already labelled with how access was obtained.
+// managed aliases, each already labeled with how access was obtained.
 type GrantedCatalog struct {
 	Models  []*store.Model
 	Managed []*store.ManagedModel

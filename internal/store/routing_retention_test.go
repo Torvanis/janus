@@ -45,7 +45,7 @@ func TestPruneRoutingRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n.Sticky != 1 || n.Decisions != 1 || n.Evals != 1 || n.Anonymised != 2 {
-		t.Fatalf("pruned %+v, want 1 sticky, 1 decision, 1 evaluation, 2 anonymised", n)
+		t.Fatalf("pruned %+v, want 1 sticky, 1 decision, 1 evaluation, 2 anonymized", n)
 	}
 
 	byRequest := map[string]RoutingDecision{}

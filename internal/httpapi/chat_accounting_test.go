@@ -238,17 +238,20 @@ func TestChatTitleIsNotClassified(t *testing.T) {
 	h.enableClassification(t, f, store.ClassificationModeAsync, nil)
 	h.server.Config.ChatAutoTitle = true
 	conv := chatConversationFor(t, h, sess, "test-model")
-	chatEvents(t, h, sess, chatSend(t, h, sess, conv, map[string]any{"content": "why does the borrow checker reject this"})["run_id"].(string), "")
+	// Chats are named after chatNamingAfterReplies replies.
+	for _, q := range []string{"why does the borrow checker reject this", "and with a reference?", "and with Rc?"} {
+		chatEvents(t, h, sess, chatSend(t, h, sess, conv, map[string]any{"content": q})["run_id"].(string), "")
+	}
 	// Wait for the title call to be metered, then for classification.
-	chatUsageRows(t, h, 2)
-	h.waitForClassifications(t, 1)
+	chatUsageRows(t, h, chatNamingAfterReplies+1)
+	h.waitForClassifications(t, chatNamingAfterReplies)
 	time.Sleep(300 * time.Millisecond)
 	for _, seen := range f.seen() {
 		if strings.Contains(seen, "Title for the conversation above") {
 			t.Fatalf("the auto-title was classified as a request: %q", seen)
 		}
 	}
-	rows := chatUsageRows(t, h, 2)
+	rows := chatUsageRows(t, h, chatNamingAfterReplies+1)
 	var title *store.UsageEvent
 	for _, e := range rows {
 		if e.ClientApp == chatTitleClientApp {

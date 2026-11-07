@@ -1,6 +1,9 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError, api } from '../lib/api';
 import { t } from '../lib/i18n';
+import { useQuery } from '@tanstack/react-query';
+import type { PasswordPolicy } from '../lib/types';
+import { describePolicy, passwordProblem } from '../lib/passwordPolicy';
 
 /**
  * Local sign-in: email + password, then a TOTP code when the account has
@@ -163,7 +166,13 @@ export function FirstRunSetup(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mismatch = confirm.length > 0 && confirm !== password;
-  const tooShort = password.length > 0 && password.length < 12;
+  const status = useQuery({
+    queryKey: ['auth-local-status'],
+    queryFn: () => api.get<{ password_policy?: PasswordPolicy }>('/auth/local/status'),
+  });
+  const policy = status.data?.password_policy;
+  const problem = password.length > 0 ? passwordProblem(password, policy) : null;
+  const tooShort = problem !== null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -223,7 +232,13 @@ export function FirstRunSetup(): ReactNode {
           onChange={(e) => setPassword(e.target.value)}
           aria-invalid={tooShort}
         />
-        <span className="small muted">{t('login.passwordHint')}</span>
+        {problem ? (
+          <span className="field-error" role="alert">
+            {problem}
+          </span>
+        ) : (
+          <span className="small muted">{describePolicy(policy)}</span>
+        )}
       </label>
       <label className="field">
         <span className="field-label">{t('login.confirmPassword')}</span>

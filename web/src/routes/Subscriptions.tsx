@@ -294,7 +294,7 @@ function ProviderDot({ provider: p }: { provider: SubscriptionProvider }): React
         height: 8,
         borderRadius: '50%',
         flex: 'none',
-        background: ok ? 'var(--janus-color-success-fg)' : 'var(--janus-color-warning-text)',
+        background: ok ? 'var(--janus-color-success-fg)' : 'var(--janus-color-warning-fg)',
       }}
     />
   );
@@ -343,7 +343,7 @@ function ProviderCard({
       <div className="row-between" style={{ alignItems: 'flex-start', gap: 'var(--janus-space-4)', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: '1 1 260px' }}>
           <div className="row" style={{ gap: 'var(--janus-space-3)', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0, fontSize: 'var(--janus-font-size-lg)' }}>{provider.name}</h2>
+            <h2 style={{ margin: 0, fontSize: 'var(--janus-text-lg)' }}>{provider.name}</h2>
             {status}
           </div>
           {!c ? (
@@ -363,7 +363,7 @@ function ProviderCard({
           )}
           {c?.status === 'active' ? <SignInStatus connection={c} auth={provider.auth} /> : null}
           {c?.status === 'reauth_required' && c.last_error ? (
-            <p className="small" style={{ margin: 'var(--janus-space-2) 0 0', color: 'var(--janus-color-warning-text)' }}>
+            <p className="small" style={{ margin: 'var(--janus-space-2) 0 0', color: 'var(--janus-color-warning-fg)' }}>
               {c.last_error}
             </p>
           ) : null}
@@ -436,7 +436,7 @@ function SignInStatus({ connection: c, auth }: { connection: SubscriptionConnect
         {parts.join(' · ')}
       </p>
       {c.check_error ? (
-        <p className="small" style={{ margin: 'var(--janus-space-1) 0 0', color: 'var(--janus-color-warning-text)' }}>
+        <p className="small" style={{ margin: 'var(--janus-space-1) 0 0', color: 'var(--janus-color-warning-fg)' }}>
           {c.check_error}
         </p>
       ) : null}
@@ -499,8 +499,13 @@ function UsagePanel({ connection: c }: { connection: SubscriptionConnection }): 
 
 function UsageMeter({ label, window: w }: { label: string; window: SubscriptionPlanUsage['windows'][number] }): ReactNode {
   const pct = Math.max(0, Math.min(100, w.used_percent));
+  // Solid fills: the -fg tokens are text colors and too faint for a bar.
   const tone =
-    pct >= 90 ? 'var(--janus-color-danger-fg)' : pct >= 70 ? 'var(--janus-color-warning-text)' : 'var(--janus-color-primary-bg)';
+    pct >= 90
+      ? 'var(--janus-color-danger-solid)'
+      : pct >= 70
+        ? 'var(--janus-color-warning-solid)'
+        : 'var(--janus-color-primary-bg)';
   const amount = w.unlimited
     ? t('subscriptions.unlimited')
     : w.limit !== undefined && w.used !== undefined
@@ -526,7 +531,7 @@ function UsageMeter({ label, window: w }: { label: string; window: SubscriptionP
             margin: '4px 0',
           }}
         >
-          <div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: tone }} />
+          <div className="usage-meter-fill" style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: tone }} />
         </div>
       ) : null}
       {w.resets_at ? (
@@ -609,7 +614,7 @@ export function SelectedModels({
         </button>
       </div>
       {selected.length === 0 ? (
-        <p className="small" style={{ margin: 'var(--janus-space-3) 0 0', color: 'var(--janus-color-warning-text)' }}>
+        <p className="small" style={{ margin: 'var(--janus-space-3) 0 0', color: 'var(--janus-color-warning-fg)' }}>
           {t('subscriptions.noneSelected')}
         </p>
       ) : (

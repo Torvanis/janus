@@ -7,7 +7,7 @@
 }
 .team-dashboard-context {
   margin-top: 12px;
-  color: var(--janus-text-secondary);
+  color: var(--janus-color-text-secondary);
   font-size: 13px;
 }
 .team-dashboard-actions {
@@ -21,7 +21,7 @@
   border: 1px solid var(--janus-warning, #b7791f);
   border-radius: 8px;
   background: var(--janus-bg-secondary, #f8f7fc);
-  color: var(--janus-text-primary);
+  color: var(--janus-color-text-primary);
   font-weight: 650;
   text-decoration: none;
 }

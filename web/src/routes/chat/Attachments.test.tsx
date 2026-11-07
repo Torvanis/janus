@@ -93,7 +93,7 @@ describe('ChatPage attachments', () => {
     const files = screen.getByLabelText('Attached files');
     expect(files.textContent).toContain('permit.pdf');
     expect(files.textContent).toContain('uploading');
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Summarise' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Summarize' } });
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => pending.resolve(docAttachment));

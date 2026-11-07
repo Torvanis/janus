@@ -4,6 +4,8 @@ import { api } from '../../lib/api';
 import type { AdminUserRow } from '../../lib/types';
 import { Field, Modal, useToast } from '../../components/ui';
 import { t } from '../../lib/i18n';
+import { describePolicy, passwordProblem } from '../../lib/passwordPolicy';
+import { useSession } from '../../app/session';
 
 /**
  * Admin → People: create a Janus account (email + temporary password) and
@@ -16,6 +18,7 @@ export function CreateLocalUserModal({ open, onClose }: { open: boolean; onClose
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const policy = useSession().me?.password_policy;
   const [admin, setAdmin] = useState(false);
 
   const create = useMutation({
@@ -34,7 +37,7 @@ export function CreateLocalUserModal({ open, onClose }: { open: boolean; onClose
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (email && password.length >= 12) create.mutate();
+    if (email && !passwordProblem(password, policy)) create.mutate();
   }
 
   return (
@@ -53,7 +56,10 @@ export function CreateLocalUserModal({ open, onClose }: { open: boolean; onClose
         <Field label={t('login.name')}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         </Field>
-        <Field label={t('adminPeople.tempPassword')} hint={t('adminPeople.tempPasswordHint')}>
+        <Field
+          label={t('adminPeople.tempPassword')}
+          hint={`${describePolicy(policy)} Shown in clear so you can copy it; it only works once.`}
+        >
           <input
             className="input"
             type="text"
@@ -71,7 +77,11 @@ export function CreateLocalUserModal({ open, onClose }: { open: boolean; onClose
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             {t('common.cancel')}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={!email || password.length < 12 || create.isPending}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={!email || !!passwordProblem(password, policy) || create.isPending}
+          >
             {t('adminPeople.localCreate')}
           </button>
         </div>
@@ -83,6 +93,7 @@ export function CreateLocalUserModal({ open, onClose }: { open: boolean; onClose
 export function ResetPasswordModal({ user, onClose }: { user: AdminUserRow | null; onClose: () => void }): ReactNode {
   const toast = useToast();
   const [password, setPassword] = useState('');
+  const policy = useSession().me?.password_policy;
   const reset = useMutation({
     mutationFn: () => api.post<{ reset: boolean }>(`/api/v1/admin/users/${user?.id}/password`, { password }),
     onSuccess: () => {
@@ -103,10 +114,13 @@ export function ResetPasswordModal({ user, onClose }: { user: AdminUserRow | nul
         className="stack"
         onSubmit={(e) => {
           e.preventDefault();
-          if (password.length >= 12) reset.mutate();
+          if (!passwordProblem(password, policy)) reset.mutate();
         }}
       >
-        <Field label={t('adminPeople.tempPassword')} hint={t('adminPeople.tempPasswordHint')}>
+        <Field
+          label={t('adminPeople.tempPassword')}
+          hint={`${describePolicy(policy)} Shown in clear so you can copy it; it only works once.`}
+        >
           <input
             className="input"
             type="text"
@@ -121,7 +135,7 @@ export function ResetPasswordModal({ user, onClose }: { user: AdminUserRow | nul
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             {t('common.cancel')}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={password.length < 12 || reset.isPending}>
+          <button type="submit" className="btn btn-primary" disabled={!!passwordProblem(password, policy) || reset.isPending}>
             {t('adminPeople.resetPassword')}
           </button>
         </div>

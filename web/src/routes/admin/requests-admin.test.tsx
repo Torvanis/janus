@@ -341,7 +341,7 @@ describe('drill-down drawer', () => {
     expect(within(drawer).getByText('curl/8.0')).toBeTruthy();
     expect(within(drawer).getByText('req-b')).toBeTruthy();
     expect(within(drawer).getByText('10.0.0.1')).toBeTruthy();
-    // Throughput, labelled by origin so a gateway-clock estimate is never
+    // Throughput, labeled by origin so a gateway-clock estimate is never
     // mistaken for a provider measurement.
     expect(within(drawer).getByText('Input tokens / s: 833')).toBeTruthy();
     expect(within(drawer).getByText('Output tokens / s: 58')).toBeTruthy();

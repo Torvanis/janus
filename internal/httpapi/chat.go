@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"slices"
@@ -158,6 +157,8 @@ func (s *Server) startChatReaper() {
 				ctx, cancel = context.WithTimeout(context.Background(), time.Minute)
 				s.chatSweepTemporary(ctx, time.Now())
 				cancel()
+				// Chats that went quiet get their name.
+				s.chatSweepNaming(time.Now())
 			}
 		}()
 	})
@@ -197,6 +198,8 @@ type chatMessageView struct {
 	// cited (replies that used a search tool).
 	Activity []chatActivity `json:"activity,omitempty"`
 	Sources  []chatSource   `json:"sources,omitempty"`
+	// Question: the model asked the person this (ask_user).
+	Question *chatQuestion `json:"question,omitempty"`
 	// CompareGroup is shared by replies made side by side (Compare).
 	CompareGroup string `json:"compare_group,omitempty"`
 }
@@ -260,7 +263,7 @@ func (s *Server) chatView(m *store.ChatMessage) chatMessageView {
 		LatencyMs: m.LatencyMs, TTFBMs: m.TTFBMs, CreatedAt: store.FormatTime(m.CreatedAt),
 	}
 	if e := s.chatDecodeExtras(m.ExtrasEnc); e != nil {
-		v.Activity, v.Sources = e.Activity, e.Sources
+		v.Activity, v.Sources, v.Question = e.Activity, e.Sources, e.Question
 	}
 	return v
 }
@@ -383,6 +386,9 @@ func (s *Server) handleChatCreate(w http.ResponseWriter, r *http.Request) {
 		c.Title = strings.TrimSpace(*body.Title)
 	}
 	c.Temporary = body.Temporary != nil && *body.Temporary
+	if c.Title != "" {
+		c.TitleNamedAt = store.FormatTime(time.Now().UTC())
+	}
 	if apiErr := s.applyChatConversationBody(c, body); apiErr != nil {
 		WriteError(w, r, apiErr)
 		return
@@ -497,6 +503,8 @@ func (s *Server) handleChatUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.Title != oldTitle {
 		s.chatIndexTitle(r.Context(), c)
+		// A person named it: automatic naming leaves it alone.
+		_ = s.Store.MarkChatNamed(r.Context(), user.ID, c.ID)
 	}
 	WriteJSON(w, http.StatusOK, s.chatConvView(c))
 }
@@ -764,6 +772,9 @@ func (s *Server) chatStartReply(r *http.Request, user *store.User, token *store.
 			}
 		}
 		assist = s.chatAssistFor(ctx, user, c, model, research)
+		if group != "" {
+			assist.Ask = false // Compare: several models would each stop to ask
+		}
 	}
 	sys := s.chatSystemPrompt(r, c)
 	if assist.Memory {
@@ -786,6 +797,9 @@ func (s *Server) chatStartReply(r *http.Request, user *store.User, token *store.
 	}
 	history, dropped := trimChatHistory(wire, s.chatContextWindow(ctx, model))
 	build.inlineImages(ctx, history)
+	if !imageRun {
+		assist.Files = chatReadableFiles(build.files)
+	}
 
 	requestID := store.NewID()
 	am := &store.ChatMessage{ConversationID: c.ID, ParentID: userMsgID, Role: store.ChatRoleAssistant,
@@ -807,6 +821,10 @@ func (s *Server) chatStartReply(r *http.Request, user *store.User, token *store.
 	// message (the footer sums them; only the first counts as a request).
 	runCtx, cancel := context.WithCancel(withChatOrigin(context.WithoutCancel(ctx), s.chatOriginFor(r, c.ID, am.ID, requestID)))
 	live := &chatLiveRun{status: store.ChatStatusStreaming, cancel: cancel, msg: am}
+	// The reply view is taken before the run goroutine starts: the run
+	// writes am's error fields when it fails, and a fast failure would race
+	// a view taken afterwards.
+	view := s.chatView(am)
 	rt := s.chatRT()
 	rt.mu.Lock()
 	rt.runs[run.ID] = live
@@ -819,7 +837,6 @@ func (s *Server) chatStartReply(r *http.Request, user *store.User, token *store.
 		go s.runChat(runCtx, run, live, user, token, chatRunPlan{Model: model, Effort: c.ReasoningEffort, Tools: tools,
 			ImageModel: imageModel, Assist: assist, Research: research, History: history, RequestID: requestID, Question: question})
 	}
-	view := s.chatView(am)
 	view.CompareGroup = group
 	warnings := build.warnings
 	if warnings == nil {
@@ -863,15 +880,23 @@ func (s *Server) chatHistory(ctx context.Context, build *chatHistoryBuild, byID 
 			continue
 		}
 		text := s.chatDecrypt(m.ContentEnc)
-		if m.Role == store.ChatRoleAssistant && m.Status == store.ChatStatusComplete && len(atts[m.ID]) > 0 {
-			// A generated image: chat models get a note that it exists
-			// (and its description), not the pixels.
-			note := fmt.Sprintf("[%s generated %d image(s) for the message above", firstNonEmpty(m.ServedModel, m.ModelName), len(atts[m.ID]))
-			if text != "" {
-				note += ": " + text
-			}
-			out = append(out, chatWireMessage{Role: m.Role, Content: note + "]"})
+		build.files = append(build.files, atts[m.ID]...)
+		if m.Role == store.ChatRoleAssistant && (m.Status == store.ChatStatusComplete || m.Status == store.ChatStatusStopped) && len(atts[m.ID]) > 0 {
+			// What an earlier reply made: its text, then each file by
+			// its real kind. Text files it handed over come back in full
+			// (up to a budget) so the model can review or change them;
+			// larger ones, and images and media, are named, and
+			// read_file opens them.
+			out = append(out, build.generated(ctx, m, text, atts[m.ID]))
 			continue
+		}
+		if m.Role == store.ChatRoleAssistant && m.Status == store.ChatStatusComplete {
+			if e := s.chatDecodeExtras(m.ExtrasEnc); e != nil && e.Question != nil {
+				// The model asked the user something: keep the question
+				// (and its choices) so the next message reads as the answer.
+				out = append(out, chatWireMessage{Role: m.Role, Content: strings.TrimSpace(text + "\n\n" + chatQuestionNote(e.Question))})
+				continue
+			}
 		}
 		if m.Role == store.ChatRoleAssistant && (m.Status != store.ChatStatusComplete && m.Status != store.ChatStatusStopped || text == "") {
 			continue // failed/empty replies are not context
@@ -1171,6 +1196,11 @@ func (s *Server) runChat(ctx context.Context, run *store.ChatRun, live *chatLive
 		}
 		live.mu.Unlock()
 		convo = append(append(convo, turn), results...)
+		if box.asked {
+			// The model asked the user something: the reply ends with
+			// the question card; their answer is the next message.
+			break
+		}
 		toolRound = true
 		more, ok2 := request(convo, store.NewID())
 		if !ok2 {
@@ -1194,7 +1224,7 @@ func (s *Server) runChat(ctx context.Context, run *store.ChatRun, live *chatLive
 		// A "successful" reply with no text at all is a failure the user
 		// would otherwise only see as silence: name it. (A reply that only
 		// made images has its pictures; that is an answer.)
-		if c, r, _ := live.snapshot(); strings.TrimSpace(c) == "" && strings.TrimSpace(r) == "" && !live.madeSomething() {
+		if c, r, _ := live.snapshot(); strings.TrimSpace(c) == "" && strings.TrimSpace(r) == "" && !live.madeSomething() && !box.asked {
 			status = store.ChatStatusError
 			sink.errCd = "upstream.empty_reply"
 			sink.errMsg = "The model finished without sending any text. Try again, or pick another model."
@@ -1234,7 +1264,7 @@ func (s *Server) runChat(ctx context.Context, run *store.ChatRun, live *chatLive
 		s.chatSaveResearchReport(bg, user, run, live, plan.Question, content)
 	}
 	if status == store.ChatStatusComplete {
-		s.chatMaybeAutoTitle(chatOriginFrom(ctx), run, user, token, model)
+		s.chatMaybeAutoTitle(chatOriginFrom(ctx), run, user)
 	}
 }
 

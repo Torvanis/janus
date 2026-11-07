@@ -327,10 +327,10 @@ describe('Spend-emphasis feature flag toggle', () => {
   it('renders the toggle with its translated label and description, unchecked by default', async () => {
     renderPage();
 
-    expect(await screen.findByText('Emphasise spend')).toBeTruthy();
+    expect(await screen.findByText('Emphasize spend')).toBeTruthy();
     expect(screen.getByText(/Dashboard graphs open on the Spend metric instead of Tokens/)).toBeTruthy();
 
-    const toggle = screen.getByRole('checkbox', { name: 'Emphasise spend' }) as HTMLInputElement;
+    const toggle = screen.getByRole('checkbox', { name: 'Emphasize spend' }) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
   });
 
@@ -339,11 +339,11 @@ describe('Spend-emphasis feature flag toggle', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole('checkbox', { name: 'Emphasise spend' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Emphasize spend' }));
 
     // The existing confirm-before-apply dialog names the flag and its consequence.
     const dialog = await screen.findByRole('dialog');
-    expect(dialog.textContent).toContain('Turn on Emphasise spend?');
+    expect(dialog.textContent).toContain('Turn on Emphasize spend?');
     expect(dialog.textContent).toContain('will open showing cost instead of token usage');
 
     await user.click(within(dialog).getByRole('button', { name: 'Turn on' }));
@@ -354,11 +354,11 @@ describe('Spend-emphasis feature flag toggle', () => {
     expect(await screen.findByText(/Feature flag updated/)).toBeTruthy();
   });
 
-  it('cancelling the confirm dialog leaves the flag untouched', async () => {
+  it('canceling the confirm dialog leaves the flag untouched', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole('checkbox', { name: 'Emphasise spend' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Emphasize spend' }));
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
@@ -689,12 +689,97 @@ describe('Performance mode tile', () => {
     expect(within(tile).getByText(/0\.5 s of usage records/)).toBeTruthy();
   });
 
-  it('names why a request was not honoured', async () => {
+  it('names why a request was not honored', async () => {
     const reason = 'Performance mode requires a Business license; running in normal mode.';
     mockWith({ ...postgresStatus, performance_mode: { requested: true, active: false, reason } });
     renderPage();
     const tile = (await screen.findByText('Performance mode')).closest('article') as HTMLElement;
     expect(within(tile).getByText(reason)).toBeTruthy();
     expect(within(tile).getByText('Attention')).toBeTruthy();
+  });
+});
+
+describe('Cryptography card', () => {
+  function mockStatus(status: SystemStatus) {
+    mocked.get.mockImplementation((path: string) => {
+      if (path === '/api/v1/admin/system/license/sync')
+        return Promise.resolve({ license_sync: { enabled: false, has_token: false, mode: 'manual', health: 'disabled' } });
+      if (path === '/api/v1/admin/system/license') return Promise.resolve(communityLicense);
+      if (path === '/api/v1/admin/system/status') return Promise.resolve(status);
+      if (path === '/api/v1/admin/troubleshooting') return Promise.resolve(troubleshootingOff);
+      if (path === '/api/v1/admin/storage') return Promise.resolve(fileStorageDatabase);
+      return Promise.reject(new Error(`unexpected GET ${path}`));
+    });
+  }
+
+  it('names the default edition and lists nothing as restricted', async () => {
+    mockStatus({
+      ...postgresStatus,
+      cryptography: {
+        edition: 'default',
+        fips140_enabled: false,
+        fips140_enforced: false,
+        module_version: 'latest',
+        validated_module: false,
+        restricted_features: [],
+      },
+    });
+    renderPage();
+    const card = (await screen.findByRole('heading', { name: 'Cryptography' })).closest('section')!;
+    expect(within(card).getByText('Janus (default edition)')).toBeTruthy();
+    expect(within(card).queryByText(/CMVP/)).toBeNull();
+    expect(within(card).queryByText('Not available in this edition')).toBeNull();
+  });
+
+  it('FIPS edition: names the validated module, its certificate, restrictions and accounts to fix', async () => {
+    mockStatus({
+      ...postgresStatus,
+      cryptography: {
+        edition: 'fips',
+        fips140_enabled: true,
+        fips140_enforced: false,
+        module_version: 'v1.0.0',
+        validated_module: true,
+        cmvp_certificate: '#5247',
+        restricted_features: [
+          {
+            feature: 'pdf_report_export',
+            description: 'Report export as PDF.',
+            alternative: 'Export reports as Excel, CSV or JSON.',
+          },
+        ],
+        legacy_credentials: { bcrypt_passwords: 2, bcrypt_recovery_codes: 1, sha1_totp: 3 },
+      },
+    });
+    renderPage();
+    const card = (await screen.findByRole('heading', { name: 'Cryptography' })).closest('section')!;
+    expect(within(card).getByText('Janus FIPS edition')).toBeTruthy();
+    expect(within(card).getByText(/CMVP certificate #5247/)).toBeTruthy();
+    expect(within(card).getByText('On (approved mode)')).toBeTruthy();
+    expect(within(card).getByText('Report export as PDF.')).toBeTruthy();
+    expect(within(card).getByRole('alert').textContent).toMatch(/2 local account\(s\).*3 use an HMAC-SHA-1/);
+  });
+
+  it('STIG profile: says so and shows the Business license that met the startup requirement', async () => {
+    mockStatus({
+      ...postgresStatus,
+      cryptography: {
+        edition: 'default',
+        fips140_enabled: false,
+        fips140_enforced: false,
+        module_version: 'latest',
+        validated_module: false,
+        restricted_features: [],
+        stig_profile: true,
+        tls_revocation: { mode: 'hard', good: 12, revoked: 1, unavailable: 0, no_source: 2, cache_hits: 40 },
+        edition_license: { required: 'business', ok: true, edition: 'business', status: 'expired' },
+      },
+    });
+    renderPage();
+    const card = (await screen.findByRole('heading', { name: 'Cryptography' })).closest('section')!;
+    expect(within(card).getByText('On (JANUS_STIG_PROFILE)')).toBeTruthy();
+    expect(within(card).getByText(/Hard: revoked or unknown status fails/)).toBeTruthy();
+    expect(within(card).getByText(/12 good, 1 revoked, 0 unavailable/)).toBeTruthy();
+    expect(within(card).getByText('Business requirement met (business, expired)')).toBeTruthy();
   });
 });

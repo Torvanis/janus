@@ -138,6 +138,9 @@ describe('i18n catalog', () => {
         prefix: 'x',
         account: 'x',
         user: 'x',
+        cert: 'x',
+        passwords: 1,
+        totp: 1,
       });
       expect(message, `${key} has an unresolved placeholder`).not.toMatch(/\{[a-zA-Z]+\}/);
     }

@@ -3,12 +3,17 @@ import { RetainedPanel, RouteTopNav } from '../../components/RouteTopNav';
 import { SystemPage } from './System';
 import { ProvisioningPage } from './Provisioning';
 import { LicenseCard } from './LicenseCard';
+import { CertificatesCard } from './CertificatesCard';
+import { ListenerTLSCard } from './ListenerTLSCard';
+import { SecuritySettingsPage } from './SecuritySettings';
 import { NotFoundPage } from '../Errors';
 
 export const adminSettingsTabs = [
   { id: 'general', label: 'General' },
   { id: 'sign-in', label: 'Sign-in & provisioning' },
+  { id: 'security', label: 'Security' },
   { id: 'license', label: 'License & updates' },
+  { id: 'certificates', label: 'Certificates' },
   { id: 'troubleshooting', label: 'Troubleshooting' },
   { id: 'status', label: 'System status' },
 ] as const;
@@ -44,6 +49,15 @@ export function AdminSettingsPage() {
       </RetainedPanel>
       <RetainedPanel active={tab === 'sign-in'}>
         <ProvisioningPage embedded />
+      </RetainedPanel>
+      <RetainedPanel active={tab === 'security'}>
+        <SecuritySettingsPage />
+      </RetainedPanel>
+      <RetainedPanel active={tab === 'certificates'}>
+        <div className="stack">
+          <ListenerTLSCard />
+          <CertificatesCard />
+        </div>
       </RetainedPanel>
       <RetainedPanel active={tab === 'license'}>
         <div id="license">

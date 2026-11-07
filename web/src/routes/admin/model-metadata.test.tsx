@@ -105,7 +105,7 @@ it('resets each rate independently and saves explicit free overrides without con
     }),
   );
 });
-it('validates integer context and rates, preserves failed edits, and discards cancelled drafts on reopen', async () => {
+it('validates integer context and rates, preserves failed edits, and discards canceled drafts on reopen', async () => {
   renderPage();
   let dialog = await open();
   fireEvent.change(within(dialog).getByLabelText('Context window — tokens'), { target: { value: '1.5' } });

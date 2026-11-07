@@ -59,12 +59,39 @@
   display: flex;
   align-items: center;
   gap: var(--janus-space-3);
-  color: var(--janus-color-fg-muted);
+  color: var(--janus-color-text-muted);
   font-size: 0.8rem;
 }
 .auth-divider::before,
 .auth-divider::after {
   content: '';
   flex: 1;
-  border-top: 1px solid var(--janus-color-border);
+  border-top: 1px solid var(--janus-color-border-default);
+}
+
+/* The notice and consent banner before sign-in: long text scrolls inside
+   the card so the button stays reachable on a phone. */
+.consent-banner {
+  text-align: left;
+}
+.consent-text {
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  padding: var(--janus-space-3);
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-bg-sunken);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.consent-text p {
+  margin: 0 0 0.75em;
+}
+.consent-text p:last-child {
+  margin-bottom: 0;
+}
+.consent-text:focus-visible {
+  outline: 2px solid var(--janus-color-border-focus);
+  outline-offset: 2px;
 }

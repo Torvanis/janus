@@ -635,7 +635,7 @@ func (e *Engine) classifyInjection(ctx context.Context, c ResolvedCheck, msgs []
 // --- egress (buffered) --------------------------------------------------------
 
 // judgeContentSafety hands the conversation to a generative guard with
-// the last message as the turn under judgement, and maps the verdict onto
+// the last message as the turn under judgment, and maps the verdict onto
 // the policy's selected categories.
 //
 // Direction decides the action. On ingress the check may block. On egress
@@ -721,7 +721,7 @@ func (e *Engine) EgressContentSafety(ctx context.Context, eff *Effective, reqBod
 	}
 	msgs, _ := parseMessages(reqBody)
 	// Append the first choice's content as the assistant turn under
-	// judgement. Reasoning and tool-call paths are not moderated here:
+	// judgment. Reasoning and tool-call paths are not moderated here:
 	// the taxonomy is about what a user is shown.
 	for _, t := range texts {
 		if t.Path == "content" && strings.TrimSpace(t.Text) != "" {

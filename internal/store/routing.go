@@ -165,7 +165,7 @@ const (
 // RoutingCategory is one answer the routing classifier can give.
 //
 // Includes and Excludes are what the classifier reads: what belongs, and the
-// near neighbours that do not (measured: full in/NOT-in criteria beat
+// near neighbors that do not (measured: full in/NOT-in criteria beat
 // names alone by several points of accuracy). A category with LinkedSlug
 // follows a Usage-insights category instead: its name and description come
 // from there at plan-build time, and Includes/Excludes are ignored.
@@ -210,27 +210,27 @@ const DefaultRoutingMinConfidence = 0.5
 var BuiltinRoutingCategories = []RoutingCategory{
 	{Slug: "quick_facts", Name: "Quick facts and everyday questions",
 		Includes: "Short questions with a well-known or easily checked answer: definitions, facts, conversions, simple how-to, recommendations and everyday practical questions, answered in a few sentences.",
-		Excludes: "Questions that need sources weighed or a report (Research and analysis); school or course work (Homework and learning); a decision needing expert judgement (Specialist or Legal).",
+		Excludes: "Questions that need sources weighed or a report (Research and analysis); school or course work (Homework and learning); a decision needing expert judgment (Specialist or Legal).",
 		Examples: []string{"convert 100 kilometers to miles", "what is the capital of australia?", "how long should I boil an egg for a runny yolk?", "what's the difference between a latte and a flat white?"}},
 	{Slug: "writing", Name: "Writing and editing",
 		Includes: "Writing, rewriting, proofreading or changing the tone of non-fiction prose: emails, letters, messages, reports, articles, posts, speeches, cover letters. The output is prose for a reader.",
-		Excludes: "Fill-in templates, forms, minutes or policies (Admin documents); stories, poems or fiction (Creative writing); condensing a supplied text (Summarising).",
+		Excludes: "Fill-in templates, forms, minutes or policies (Admin documents); stories, poems or fiction (Creative writing); condensing a supplied text (Summarizing).",
 		Examples: []string{"Rewrite this email so it sounds less passive-aggressive: 'As per my last email, I'm still waiting.'", "Draft a LinkedIn post announcing our new office in Denver.", "Proofread my cover letter and tighten the second paragraph."}},
 	{Slug: "admin_docs", Name: "Admin documents and forms",
 		Includes: "Producing or completing standard paperwork with a known structure: forms, templates, meeting minutes and agendas, invoices, checklists, job descriptions, policies, standard operating procedures, rotas.",
 		Excludes: "Free-form prose like emails or articles (Writing and editing); drafting or interpreting legal terms (Legal).",
 		Examples: []string{"Create an agenda for a 30-minute weekly team sync.", "Write a job description for a junior bookkeeper.", "Make a checklist for onboarding a new employee in their first week."}},
-	{Slug: "summarising", Name: "Summarising and extracting",
+	{Slug: "summarising", Name: "Summarizing and extracting",
 		Includes: "Condensing, restructuring or pulling information out of text the user supplies: summaries, key points, action items, tables of names or dates from a document, turning notes into bullets. The answer comes from the supplied material.",
-		Excludes: "Finding new information or comparing sources (Research and analysis); analysing numbers or datasets (Data analysis); converting between languages (Translation).",
-		Examples: []string{"Summarise this meeting transcript into five bullet points and list the action items.", "Pull every date and person's name out of the text below into a table."}},
+		Excludes: "Finding new information or comparing sources (Research and analysis); analyzing numbers or datasets (Data analysis); converting between languages (Translation).",
+		Examples: []string{"Summarize this meeting transcript into five bullet points and list the action items.", "Pull every date and person's name out of the text below into a table."}},
 	{Slug: "translation", Name: "Translation",
 		Includes: "Converting text between human languages, or explaining what a phrase in another language means, including localising tone or wording for a region.",
 		Excludes: "Converting between programming languages (Coding).",
 		Examples: []string{"Translate this paragraph into formal German.", "What does 'ça me fait une belle jambe' mean?"}},
 	{Slug: "coding", Name: "Coding",
 		Includes: "Writing, reviewing, explaining, refactoring or debugging source code, scripts, queries, regular expressions or configuration as code, and questions about software design, libraries and tooling.",
-		Excludes: "Spreadsheet formulas or analysing a dataset (Data analysis); a student's programming assignment where the aim is to learn (Homework and learning).",
+		Excludes: "Spreadsheet formulas or analyzing a dataset (Data analysis); a student's programming assignment where the aim is to learn (Homework and learning).",
 		Examples: []string{"Write a Python function that deduplicates a list while keeping order.", "Why does this Go code deadlock when the channel is unbuffered?", "Refactor this React component to use a custom hook for the fetch logic."}},
 	{Slug: "data_analysis", Name: "Data analysis and spreadsheets",
 		Includes: "Working with numbers and data: statistics, spreadsheet formulas, pivot tables, charts, interpreting metrics, survey results or experiments, cleaning or comparing datasets.",
@@ -238,14 +238,14 @@ var BuiltinRoutingCategories = []RoutingCategory{
 		Examples: []string{"Write an Excel formula that sums column C when column A says 'paid'.", "Our A/B test had 4.1% vs 4.6% conversion on 12k visitors each — is that significant?"}},
 	{Slug: "maths_science", Name: "Maths and science problem solving",
 		Includes: "Solving or explaining maths, physics, chemistry, biology, engineering or other science problems: calculations, proofs, derivations, mechanisms, estimates, technical explanations.",
-		Excludes: "School or course work where the user is a student learning the topic (Homework and learning); analysing a real dataset (Data analysis); clinical medical advice (Specialist).",
+		Excludes: "School or course work where the user is a student learning the topic (Homework and learning); analyzing a real dataset (Data analysis); clinical medical advice (Specialist).",
 		Examples: []string{"Derive the terminal velocity of a sphere falling through a viscous fluid.", "Estimate the heat load of a 40-person meeting room."}},
 	{Slug: "research", Name: "Research and in-depth analysis",
 		Includes: "Investigating a topic in depth: comparing options or sources, literature or market research, explaining a complex subject thoroughly, building an argument, multi-part analysis or a report that needs many facts pulled together and weighed.",
-		Excludes: "A single fact (Quick facts); condensing one supplied document (Summarising); a personal or business decision (Planning, strategy and advice).",
+		Excludes: "A single fact (Quick facts); condensing one supplied document (Summarizing); a personal or business decision (Planning, strategy and advice).",
 		Examples: []string{"Compare the main approaches to grid-scale energy storage and their trade-offs.", "Give me an overview of the research on remote work and productivity."}},
 	{Slug: "planning_advice", Name: "Planning, strategy and advice",
-		Includes: "Helping the user decide or plan: business or product strategy, project plans, prioritising, schedules and itineraries, career moves, negotiating, weighing pros and cons of their own situation.",
+		Includes: "Helping the user decide or plan: business or product strategy, project plans, prioritizing, schedules and itineraries, career moves, negotiating, weighing pros and cons of their own situation.",
 		Excludes: "Advice that needs a lawyer (Legal) or a doctor, accountant or financial adviser (Specialist); emotional support (Personal and well-being); a general investigation of a topic (Research and analysis); a coding or technical question phrased as 'what should I do' (Coding).",
 		Examples: []string{"Plan a 5-day itinerary for Lisbon on a mid-range budget.", "Should we launch the beta in March or wait for the payments feature?"}},
 	{Slug: "homework_learning", Name: "Homework and learning help",
@@ -266,7 +266,7 @@ var BuiltinRoutingCategories = []RoutingCategory{
 		Examples: []string{"I've had a dull headache behind one eye for three days, should I worry?", "Can I deduct my home office if I'm a W-2 employee who works remotely?"}},
 	{Slug: "legal", Name: "Legal",
 		Includes: "Legal questions and legal work: rights and obligations, contracts and their clauses, disputes, employment law, privacy and data-protection law, regulatory compliance, drafting or reviewing legal documents.",
-		Excludes: "Standard business paperwork with no legal judgement (Admin documents); a student studying law (Homework and learning); medical or financial questions (Specialist).",
+		Excludes: "Standard business paperwork with no legal judgment (Admin documents); a student studying law (Homework and learning); medical or financial questions (Specialist).",
 		Examples: []string{"Is a non-compete clause enforceable in California for a remote employee?", "Review this indemnification clause and tell me what risk it puts on us.", "Our supplier missed the delivery date in the contract — what are our options?"}},
 }
 
@@ -606,7 +606,7 @@ func DefaultRoutingSettings() RoutingSettings {
 		EvalMaxConcurrent: 2, EvalPauseAboveInFlight: 50, EvalMaxOutputTokens: 2048, RetentionDays: 90}
 }
 
-// Validate normalises and checks the settings.
+// Validate normalizes and checks the settings.
 func (r *RoutingSettings) Validate() error {
 	r.ClassifierModelID = strings.TrimSpace(r.ClassifierModelID)
 	if r.MaxConcurrentDecisions < 1 || r.MaxConcurrentDecisions > 1024 {
@@ -839,7 +839,7 @@ type RouterDefault struct {
 	BrokenReason  string `json:"broken_reason,omitempty"`
 }
 
-// RouterConfig is a router's whole behaviour.
+// RouterConfig is a router's whole behavior.
 type RouterConfig struct {
 	Routes  []RouterRoute `json:"routes"`
 	Default RouterDefault `json:"default"`
@@ -1528,7 +1528,7 @@ type ReasonRow struct {
 	Requests int64  `json:"requests"`
 }
 
-// RouterStats summarises one router's decisions in a window.
+// RouterStats summarizes one router's decisions in a window.
 type RouterStats struct {
 	RouterID   string        `json:"router_id"`
 	Requests   int64         `json:"requests"`
@@ -1544,7 +1544,7 @@ type RouterStats struct {
 	Categories []ReasonRow   `json:"categories"`
 }
 
-// RoutingStats summarises every router's decisions in [from, to).
+// RoutingStats summarizes every router's decisions in [from, to).
 func (s *Store) RoutingStats(ctx context.Context, from, to time.Time) (map[string]*RouterStats, error) {
 	out := map[string]*RouterStats{}
 	get := func(id string) *RouterStats {
@@ -1718,7 +1718,7 @@ func (s *Store) PruneRouting(ctx context.Context, now, historyBefore, identities
 	if !identitiesBefore.IsZero() {
 		if out.Anonymised, err = s.execCount(ctx, `UPDATE routing_decision SET user_id = '', service_token_id = ''
 			WHERE created_at < ? AND (user_id <> '' OR service_token_id <> '')`, FormatTime(identitiesBefore)); err != nil {
-			return out, fmt.Errorf("anonymise routing decisions: %w", err)
+			return out, fmt.Errorf("anonymize routing decisions: %w", err)
 		}
 	}
 	return out, nil
@@ -1726,7 +1726,7 @@ func (s *Store) PruneRouting(ctx context.Context, now, historyBefore, identities
 
 // execCount runs a statement and reports the rows it affected.
 func (s *Store) execCount(ctx context.Context, query string, args ...any) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(query), args...)
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(query), args...)
 	if err != nil {
 		return 0, err
 	}
@@ -1803,8 +1803,8 @@ const (
 	EvalStatusSkipped = "skipped"
 )
 
-// evalReserveMu serialises reservations on this replica; Postgres also takes
-// a transaction-scoped advisory lock so replicas serialise with each other.
+// evalReserveMu serializes reservations on this replica; Postgres also takes
+// a transaction-scoped advisory lock so replicas serialize with each other.
 var evalReserveMu sync.Mutex
 
 // ReserveRouteEval admits one evaluation against a route's daily limits

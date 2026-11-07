@@ -212,7 +212,7 @@ func (s *Store) UpdateServiceToken(ctx context.Context, id, name, description st
 	if len(description) > 500 {
 		return &ValidationError{Field: "description", Message: "descriptions are limited to 500 characters"}
 	}
-	res, execErr := s.db.ExecContext(ctx, s.rebind(
+	res, execErr := s.runner(ctx).ExecContext(ctx, s.rebind(
 		`UPDATE service_token SET name = ?, description = ?, expires_at = ? WHERE id = ?`),
 		name, strings.TrimSpace(description), formatOptionalTime(expiresAt), id)
 	if execErr != nil {
@@ -231,7 +231,7 @@ func (s *Store) UpdateServiceToken(ctx context.Context, id, name, description st
 // kept (never deleted) because usage history references it and the name must
 // keep resolving on historical reports.
 func (s *Store) RevokeServiceToken(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, s.rebind(
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(
 		`UPDATE service_token SET revoked_at = ? WHERE id = ? AND revoked_at = ''`), FormatTime(nowUTC()), id)
 	if err != nil {
 		return fmt.Errorf("revoke service token: %w", err)
@@ -251,7 +251,7 @@ func (s *Store) TouchServiceToken(ctx context.Context, id string) error {
 	return s.exec(ctx, `UPDATE service_token SET last_used_at = ? WHERE id = ?`, FormatTime(nowUTC()), id)
 }
 
-// ServiceTokenNames maps ids to display names for report labelling. Ids that
+// ServiceTokenNames maps ids to display names for report labeling. Ids that
 // no longer resolve are simply absent, and callers fall back to a placeholder.
 func (s *Store) ServiceTokenNames(ctx context.Context) (map[string]string, error) {
 	rows, err := s.query(ctx, `SELECT id, name FROM service_token`)

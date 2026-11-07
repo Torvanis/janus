@@ -13,7 +13,7 @@ const (
 	ScopeAll      = "conversation"
 	// ScopeContext is the new turn with the earlier conversation as marked
 	// context (WithContext): the default, so a follow-up such as "What
-	// about Ohio?" is labelled by what the conversation is about.
+	// about Ohio?" is labeled by what the conversation is about.
 	ScopeContext = "context"
 )
 

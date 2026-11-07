@@ -98,10 +98,7 @@ func (s *Store) IndexChatMessage(ctx context.Context, userID, conversationID, me
 // still oldTitle (so an automatic title never overwrites a user's rename),
 // and reports whether it did.
 func (s *Store) SetChatConversationTitleIf(ctx context.Context, userID, id, oldTitle, newTitle string) (bool, error) {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`UPDATE chat_conversation SET title = ? WHERE id = ? AND user_id = ? AND title = ? AND deleted_at = ''`),
 		newTitle, id, userID, oldTitle)
 	if err != nil {
@@ -249,10 +246,7 @@ func (s *Store) ChatConversationsForReindex(ctx context.Context, afterID string,
 // PruneChatSearchIndex removes index rows that belong to deleted (or
 // missing) conversations and returns how many it removed.
 func (s *Store) PruneChatSearchIndex(ctx context.Context) (int64, error) {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`DELETE FROM chat_search_term WHERE conversation_id NOT IN
 		(SELECT id FROM chat_conversation WHERE deleted_at = '')`))
 	if err != nil {

@@ -59,7 +59,7 @@ func (c ChatSearchSettings) Ready() bool {
 	return c.KeySet(c.Provider)
 }
 
-// Check normalises and validates the search settings alone.
+// Check normalizes and validates the search settings alone.
 func (c *ChatSearchSettings) Check() error { return c.normalize() }
 
 func (c *ChatSearchSettings) normalize() error {

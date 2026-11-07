@@ -27,7 +27,8 @@ interface TeamDashboard {
 export function TeamPage({
   teamId: selectedTeamId,
   workspace = 'personal',
-}: { teamId?: string; workspace?: 'personal' | 'administration' } = {}): ReactNode {
+  embedded = false,
+}: { teamId?: string; workspace?: 'personal' | 'administration'; embedded?: boolean } = {}): ReactNode {
   const administration = workspace === 'administration';
   const basePath = administration ? '/admin/teams' : '/teams';
   const { teamId: routeTeamId } = useParams();
@@ -53,6 +54,9 @@ export function TeamPage({
   });
   const manageHref = `${basePath}/${resolvedTeamId}?view=manage`;
   const membership = detail.data?.membership_role;
+  // In your own teams, managing follows your role in the team; an
+  // organization administrator manages from Administration.
+  const manages = administration ? Boolean(detail.data?.can_manage) : membership === 'leader' || membership === 'moderator';
   const team = dashboard.data?.team;
 
   return (
@@ -75,12 +79,16 @@ export function TeamPage({
         </div>
         <div className="team-dashboard-actions">
           <RangePicker value={range} onChange={setRange} />
-          {administration && detail.data?.can_manage ? (
+          {!embedded && manages ? (
             <Link className="btn btn-secondary btn-sm" to={manageHref}>
               Manage team
             </Link>
+          ) : !embedded && !administration && membership ? (
+            <Link className="btn btn-secondary btn-sm" to={`${manageHref}&section=members`}>
+              Membership
+            </Link>
           ) : null}
-          {administration && detail.data?.can_manage && (detail.data.pending_request_count ?? 0) > 0 ? (
+          {!embedded && manages && detail.data && (detail.data.pending_request_count ?? 0) > 0 ? (
             <Link
               className="team-dashboard-pending"
               aria-label={`${detail.data.pending_request_count} ${detail.data.pending_request_count === 1 ? 'request' : 'requests'} waiting`}

@@ -693,7 +693,7 @@ func TestHealthyUsesCallerDeadline(t *testing.T) {
 			t.Fatal("a single failed round must still be tolerated")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Healthy must honour the caller's context instead of sleeping through the retry delay")
+		t.Fatal("Healthy must honor the caller's context instead of sleeping through the retry delay")
 	}
 	if !strings.Contains(logs.String(), "identity provider health probe failed") {
 		t.Fatalf("the failed attempt must be logged, got: %s", logs.String())

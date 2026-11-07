@@ -350,7 +350,7 @@ func (s *Store) UpsertSubscription(ctx context.Context, in SubscriptionUpsert) (
 // overwrite the winner's (now only valid) token. ok is false when another
 // writer got there first; the caller re-reads and uses theirs.
 func (s *Store) RotateSubscriptionTokens(ctx context.Context, id, previousRefresh, encryptedAccess, encryptedRefresh string, expires time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE subscription_connection
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`UPDATE subscription_connection
 		SET access_token_encrypted = ?, refresh_token_encrypted = ?, access_expires_at = ?, status = ?, last_error = '', updated_at = ?
 		WHERE id = ? AND refresh_token_encrypted = ?`),
 		encryptedAccess, encryptedRefresh, formatExpiry(expires), SubscriptionActive, FormatTime(nowUTC()), id, previousRefresh)
@@ -379,7 +379,7 @@ func (s *Store) MarkSubscriptionReauth(ctx context.Context, id, reason string) e
 // one conditional UPDATE, so of several replicas noticing the same expired
 // sign-in exactly one sees true (and tells the owner).
 func (s *Store) MarkSubscriptionReauthOnce(ctx context.Context, id, reason string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE subscription_connection SET status = ?, last_error = ?, updated_at = ? WHERE id = ? AND status <> ?`),
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`UPDATE subscription_connection SET status = ?, last_error = ?, updated_at = ? WHERE id = ? AND status <> ?`),
 		SubscriptionReauthRequired, reason, FormatTime(nowUTC()), id, SubscriptionReauthRequired)
 	if err != nil {
 		return false, err
@@ -433,7 +433,7 @@ func (s *Store) ClaimSubscriptionCheck(ctx context.Context, id string, previous 
 	if !previous.IsZero() {
 		prev = FormatTime(previous)
 	}
-	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE subscription_connection SET checked_at = ? WHERE id = ? AND checked_at = ?`),
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`UPDATE subscription_connection SET checked_at = ? WHERE id = ? AND checked_at = ?`),
 		FormatTime(nowUTC()), id, prev)
 	if err != nil {
 		return false, fmt.Errorf("claim subscription check: %w", err)
@@ -536,7 +536,7 @@ func (s *Store) SubscriptionPendingByID(ctx context.Context, id, userID string) 
 // both hit the token endpoint inside one interval (which earns slow_down).
 func (s *Store) ClaimSubscriptionPoll(ctx context.Context, id string, interval time.Duration) (bool, error) {
 	now := nowUTC()
-	res, err := s.db.ExecContext(ctx, s.rebind(`UPDATE subscription_pending SET next_poll_at = ?, interval_seconds = ?
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`UPDATE subscription_pending SET next_poll_at = ?, interval_seconds = ?
 		WHERE id = ? AND next_poll_at <= ?`), FormatTime(now.Add(interval)), int(interval/time.Second), id, FormatTime(now))
 	if err != nil {
 		return false, fmt.Errorf("claim subscription poll: %w", err)

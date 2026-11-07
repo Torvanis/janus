@@ -54,7 +54,7 @@ func scanUser(scan func(dest ...any) error) (*User, error) {
 // Both signals land atomically in the single sign-in write; the role promotion
 // reads the currently stored role inside the statement so a concurrent
 // explicit role change can never be clobbered by a stale read. Group
-// membership synchronisation is handled separately.
+// membership synchronization is handled separately.
 func (s *Store) UpsertUserFromIdentity(ctx context.Context, authID, email, name string, bootstrapAdmin, adminGroup bool) (*User, bool, error) {
 	existing, err := s.UserByAuthID(ctx, authID)
 	switch {

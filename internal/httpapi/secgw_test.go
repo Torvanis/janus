@@ -183,7 +183,7 @@ func TestSecgwIngressRedactRewritesAndAnnounces(t *testing.T) {
 		{Kind: store.SecgwCheckPII, Enabled: true, Mode: store.SecgwModeRedact},
 		{Kind: store.SecgwCheckSecrets, Enabled: true, Mode: store.SecgwModeRedact},
 	}})
-	prompt := "Summarise: card 4111 1111 1111 1111, contact bob@example.com, key " + testAWSKey + " end."
+	prompt := "Summarize: card 4111 1111 1111 1111, contact bob@example.com, key " + testAWSKey + " end."
 	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody(prompt, false))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("redact must pass: %d %s", rec.Code, rec.Body.String())
@@ -197,7 +197,7 @@ func TestSecgwIngressRedactRewritesAndAnnounces(t *testing.T) {
 			t.Fatalf("upstream received unredacted %q in %s", leak, sent)
 		}
 	}
-	for _, marker := range []string{"[REDACTED:pan]", "[REDACTED:email]", "[REDACTED:aws-access-key-id]", "Summarise:", " end."} {
+	for _, marker := range []string{"[REDACTED:pan]", "[REDACTED:email]", "[REDACTED:aws-access-key-id]", "Summarize:", " end."} {
 		if !strings.Contains(sent, marker) {
 			t.Fatalf("upstream body missing %q: %s", marker, sent)
 		}
@@ -763,7 +763,7 @@ func TestSecgwContentSafetyEndToEnd(t *testing.T) {
 		t.Fatalf("egress S9 must be recorded as observed: %+v", vs)
 	}
 	if len(lastTurns) != 2 || lastTurns[0]["role"] != "user" || lastTurns[1]["role"] != "assistant" {
-		t.Fatalf("egress judgement must carry the prompt and the answer: %+v", lastTurns)
+		t.Fatalf("egress judgment must carry the prompt and the answer: %+v", lastTurns)
 	}
 }
 

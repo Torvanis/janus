@@ -150,7 +150,7 @@ func (c TroubleshootingCriteria) IsEmpty() bool {
 		c.TokensInGT == nil && c.TokensInLT == nil && c.TokensOutGT == nil && c.TokensOutLT == nil
 }
 
-// Validate normalises the combinator, rejects unknown vocabulary in every
+// Validate normalizes the combinator, rejects unknown vocabulary in every
 // gate, and drops empty optional gates so stored configs stay minimal.
 func (f *TroubleshootingFilter) Validate() error {
 	switch f.Match {
@@ -410,7 +410,7 @@ type TroubleshootingConfig struct {
 	MaxBodyBytes int64 `json:"max_body_bytes"`
 }
 
-// Validate normalises defaults and rejects impossible configurations. It
+// Validate normalizes defaults and rejects impossible configurations. It
 // is ValidateBackends with object storage unavailable.
 func (c *TroubleshootingConfig) Validate(diskAvailable bool) error {
 	return c.ValidateBackends(diskAvailable, false)
@@ -813,7 +813,7 @@ func (s *Store) TroubleshootingCapturedEventIDs(ctx context.Context, eventIDs []
 	return out, rows.Err()
 }
 
-// TroubleshootingCaptureStats summarises storage use for the admin panel.
+// TroubleshootingCaptureStats summarizes storage use for the admin panel.
 type TroubleshootingCaptureStats struct {
 	Count      int       `json:"count"`
 	TotalBytes int64     `json:"total_bytes"`

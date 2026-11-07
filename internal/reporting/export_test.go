@@ -165,6 +165,7 @@ func TestSummaryUsesDeclaredMonetaryUnits(t *testing.T) {
 }
 
 func TestPDFMainDataChartPreservesCompleteDetail(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Rows = nil
 	r.Columns = []Column{{"user", "User", ""}, {"missing", "Missing", "count"}, {"requests", "Requests", "count"}}
@@ -208,6 +209,7 @@ func TestPDFMainDataChartPreservesCompleteDetail(t *testing.T) {
 }
 
 func TestPDFMainChartUnavailableAndZeroValues(t *testing.T) {
+	requirePDF(t)
 	for _, tc := range []struct {
 		name string
 		rows []Row
@@ -232,6 +234,7 @@ func TestPDFMainChartUnavailableAndZeroValues(t *testing.T) {
 }
 
 func TestPDFTableHeadersAlignWithData(t *testing.T) {
+	requirePDF(t)
 	var b bytes.Buffer
 	if err := Export(&b, fixture(), "pdf"); err != nil {
 		t.Fatal(err)
@@ -256,6 +259,7 @@ func TestPDFTableHeadersAlignWithData(t *testing.T) {
 }
 
 func TestPDFPaginatedValidXrefAndComplete(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	for i := 0; i < 160; i++ {
 		r.Rows = append(r.Rows, Row{Dimensions: map[string]string{"user": fmt.Sprintf("person-%03d (test) \\ end", i)}, Values: map[string]*float64{"requests": ptr(float64(i))}})
@@ -310,6 +314,9 @@ func TestPDFPaginatedValidXrefAndComplete(t *testing.T) {
 func TestExportRejectsLossyInputs(t *testing.T) {
 	for _, format := range []string{"csv", "xlsx", "pdf", "json"} {
 		t.Run(format, func(t *testing.T) {
+			if format == "pdf" {
+				requirePDF(t)
+			}
 			r := fixture()
 			r.Totals["requests"] = ptr(math.NaN())
 			var b bytes.Buffer
@@ -329,7 +336,10 @@ func TestExportRejectsLossyInputs(t *testing.T) {
 	r := fixture()
 	r.Rows[0].Dimensions["requests"] = "conflicting"
 	var b bytes.Buffer
-	for _, format := range []string{"csv", "xlsx", "pdf"} {
+	for _, format := range Formats() {
+		if format == "json" {
+			continue
+		}
 		if Export(&b, r, format) == nil {
 			t.Fatal("ambiguous row silently loses values", format)
 		}
@@ -400,6 +410,7 @@ func TestIndependentOfficeAndPDFReaders(t *testing.T) {
 			var b bytes.Buffer
 			r := fixture()
 			if format == "pdf" {
+				requirePDF(t)
 				for i := 0; i < 160; i++ {
 					r.Rows = append(r.Rows, Row{Dimensions: map[string]string{"user": fmt.Sprintf("person-%03d", i)}, Values: map[string]*float64{"requests": ptr(float64(i))}})
 				}
@@ -450,8 +461,20 @@ else:
 
 // exportText inspects actual CSV records, XLSX XML text and PDF visible streams
 // (not the attached JSON, which could conceal missing PDF methodology fields).
+// requirePDF skips a PDF assertion in a build without PDF export (the FIPS
+// edition), where TestPDFExportUnavailable covers the refusal instead.
+func requirePDF(t *testing.T) {
+	t.Helper()
+	if !PDFAvailable {
+		t.Skip("PDF export is not compiled into the Janus FIPS edition")
+	}
+}
+
 func exportText(t *testing.T, r Result, format string) string {
 	t.Helper()
+	if format == "pdf" {
+		requirePDF(t)
+	}
 	var b bytes.Buffer
 	if err := Export(&b, r, format); err != nil {
 		t.Fatal(err)

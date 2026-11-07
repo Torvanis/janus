@@ -146,6 +146,23 @@ describe('chat tools', () => {
     expect(screen.getByText('Withheld')).toBeTruthy();
   });
 
+  it('names the file a reply read, live and afterwards', () => {
+    const { rerender } = render(
+      <SearchActivity streaming activity={[{ type: 'read_file', status: 'searching', query: 'wg-setup.sh' }]} />,
+    );
+    expect(screen.getByRole('status').textContent).toContain('Reading a file wg-setup.sh');
+    rerender(
+      <SearchActivity
+        streaming={false}
+        activity={[
+          { type: 'read_file', status: 'searching', query: 'wg-setup.sh' },
+          { type: 'read_file', status: 'done', query: 'wg-setup.sh' },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Read a file')).toBeTruthy();
+  });
+
   it('says what it is searching while the reply is still coming', () => {
     render(<SearchActivity streaming activity={[{ type: 'web_search', status: 'searching' }]} />);
     expect(screen.getByRole('status').textContent).toContain('Searching the web');

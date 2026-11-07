@@ -55,6 +55,13 @@ func (p *Purger) RunOnce(ctx context.Context) {
 		p.metrics.PurgeDeletedRows.WithLabelValues("usage_event").Add(float64(n))
 		deleted += n
 	}
+	// Header records follow their request's retention.
+	if n, err := p.store.PurgeRequestHeaderLogs(ctx, now.AddDate(0, 0, -p.usageDays)); err != nil {
+		p.logger.ErrorContext(ctx, "purge request header log", "error", err.Error())
+	} else if n > 0 {
+		p.metrics.PurgeDeletedRows.WithLabelValues("request_header_log").Add(float64(n))
+		deleted += n
+	}
 	if n, err := p.store.PurgeAudit(ctx, now.AddDate(0, 0, -p.auditDays)); err != nil {
 		p.logger.ErrorContext(ctx, "purge audit log", "error", err.Error())
 	} else if n > 0 {

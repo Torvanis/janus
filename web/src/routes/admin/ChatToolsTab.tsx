@@ -13,6 +13,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Badge, Field } from '../../components/ui';
+import { WebPagePolicyCard } from './WebPagePolicyCard';
 import {
   SaveBar,
   ToggleRow,
@@ -103,6 +104,7 @@ export function ToolsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
   const search = { ...DEFAULT_SEARCH, ...(draft.search ?? {}) };
   const setSearch = (patch: Partial<ChatSearchSettings>) => setDraft((d) => ({ ...d, search: { ...search, ...patch } }));
   const off = draft.tools_off ?? [];
+  const namingMode = draft.naming || 'same_model';
   const setOff = (id: string, on: boolean) => setDraft((d) => ({ ...d, tools_off: toggleOff(d.tools_off, id, on) }));
   const service = SERVICES.find((s) => s.id === search.provider);
   const keySet = !!(search.provider && doc.search_keys_set?.[search.provider]);
@@ -336,6 +338,66 @@ export function ToolsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
         ) : null}
       </section>
 
+      <section className="card stack" aria-labelledby="chat-naming-title">
+        <div>
+          <h2 id="chat-naming-title" style={{ margin: 0 }}>
+            Chat names
+          </h2>
+          <p className="small secondary" style={{ margin: '4px 0 0', maxWidth: '62ch' }}>
+            After a few replies, or once a chat goes quiet, Janus asks a model for a short name in the background, once per chat.
+            Chats people renamed and temporary chats are left alone. Each naming call is metered like the chat.
+          </p>
+        </div>
+        <Field label="Name chats with">
+          <select
+            className="select"
+            aria-label="Name chats with"
+            value={namingMode}
+            onChange={(e) => {
+              const v = e.target.value as 'same_model' | 'model' | 'off';
+              setDraft((d) => ({ ...d, naming: v, naming_model: v === 'model' ? d.naming_model : '' }));
+            }}
+          >
+            <option value="same_model">Each chat&apos;s own model</option>
+            <option value="model">One model for every chat</option>
+            <option value="off">Don&apos;t name chats (keep the first message)</option>
+          </select>
+        </Field>
+        {namingMode === 'same_model' ? (
+          <p className="small secondary" style={{ margin: 0, maxWidth: '62ch' }}>
+            The model that wrote the chat&apos;s last reply names it. It has already seen the conversation, so nothing goes
+            anywhere new.
+          </p>
+        ) : null}
+        {namingMode === 'model' ? (
+          <>
+            <Field label="Naming model">
+              <select
+                className="select"
+                aria-label="Naming model"
+                value={draft.naming_model ?? ''}
+                onChange={(e) => setDraft((d) => ({ ...d, naming_model: e.target.value }))}
+              >
+                <option value="">Choose a model</option>
+                {rows
+                  .filter((m) => m.chat)
+                  .map((m) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name}
+                      {m.upstream ? ` · ${m.upstream}` : ''}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <p className="small secondary" style={{ margin: 0, maxWidth: '62ch' }}>
+              This model gets only what the person typed (the first and latest messages, trimmed), never replies, files or
+              instructions. Chats the Security Gateway had any finding on are not sent to it. Naming is a system task, so people
+              don&apos;t need access to this model; each naming call is still billed to the chat.
+            </p>
+          </>
+        ) : null}
+      </section>
+
       <section className="card stack" aria-labelledby="chat-search-title">
         <div className="row-between" style={{ alignItems: 'flex-start', gap: 'var(--janus-space-3)' }}>
           <div>
@@ -526,6 +588,8 @@ export function ToolsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
           </p>
         )}
       </section>
+
+      <WebPagePolicyCard policy={doc.web_page_policy} />
 
       <SaveBar
         doc={doc}

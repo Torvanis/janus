@@ -98,7 +98,7 @@ describe('create and reveal-once', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Create token' }));
 
     expect(await within(dialog).findByRole('alert')).toBeTruthy();
-    expect(within(dialog).getByText('Give the token a description so you can recognise it later.')).toBeTruthy();
+    expect(within(dialog).getByText('Give the token a description so you can recognize it later.')).toBeTruthy();
     expect(mocked.post).not.toHaveBeenCalled();
   });
 });

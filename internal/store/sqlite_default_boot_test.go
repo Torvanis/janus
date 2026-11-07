@@ -69,7 +69,9 @@ func TestSQLiteDefaultBootPath(t *testing.T) {
 	os.Unsetenv("JANUS_DATABASE_URL")
 	t.Setenv("JANUS_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("JANUS_ENV", "development")
-	t.Setenv("JANUS_DEV_AUTH", "true")
+	if config.DevAuthCompiled {
+		t.Setenv("JANUS_DEV_AUTH", "true")
+	}
 	t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 
 	// 1. Config loads with the sqlite default and flags it as defaulted (the
@@ -196,8 +198,14 @@ func TestSQLiteDefaultBootPath(t *testing.T) {
 	if c, ok := ready.Checks["database"]; !ok || !c.OK {
 		t.Fatalf("/readyz database check = %+v, want ok=true", c)
 	}
-	if c, ok := ready.Checks["identity_provider"]; !ok || !c.OK || c.Detail != "local evaluation sign-in" {
-		t.Fatalf("/readyz identity_provider check = %+v, want ok=true detail=%q (dev-auth short-circuit)", c, "local evaluation sign-in")
+	// The FIPS edition has no dev auth: the same boot path signs people in
+	// with local accounts instead.
+	wantIdP := "local evaluation sign-in"
+	if !config.DevAuthCompiled {
+		wantIdP = "local accounts"
+	}
+	if c, ok := ready.Checks["identity_provider"]; !ok || !c.OK || c.Detail != wantIdP {
+		t.Fatalf("/readyz identity_provider check = %+v, want ok=true detail=%q", c, wantIdP)
 	}
 
 	// 6. Write/read round-trip against the sqlite file: first-login user

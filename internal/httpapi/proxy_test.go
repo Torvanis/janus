@@ -94,7 +94,7 @@ func newHarness(t *testing.T) *harness {
 				payload = []byte(h.upstreamReply)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			// Behave like a real engine: honour gzip content negotiation. The
+			// Behave like a real engine: honor gzip content negotiation. The
 			// gateway must still deliver a decodable body and meter real token
 			// counts (regression: the client's Accept-Encoding was forwarded
 			// verbatim, which disabled Go's transparent decompression).
@@ -1776,8 +1776,8 @@ func TestProxyNoRenamePassthroughByteIdentical(t *testing.T) {
 	h := newHarness(t)
 
 	// Deliberately odd formatting: extra whitespace, unusual key order, a tab,
-	// and a unicode escape — any re-encoding would normalise at least one.
-	raw := []byte("{\n  \"messages\": [ {\"role\":\"user\",\"content\":\"caf\\u00e9\"} ] ,	\"model\":\"test-model\"  }")
+	// and a unicode escape — any re-encoding would normalize at least one.
+	raw := []byte("{\n  \"messages\": [ {\"role\":\"user\",\"content\":\"caf\\u00e9\"} ] ,\t\"model\":\"test-model\"  }")
 	rec := h.doRaw(http.MethodPost, "/v1/chat/completions", "application/json", raw)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("proxy returned %d: %s", rec.Code, rec.Body.String())
@@ -1872,7 +1872,7 @@ func TestProxyNativeNameStillRoutesAfterRename(t *testing.T) {
 // the caller uses a display name but the gateway cannot rewrite the body (it
 // overflowed the in-memory buffer, or is not a JSON object), the request is
 // refused with a 400 invalid_request_error that names the native model name —
-// never forwarded with a model the upstream would not recognise.
+// never forwarded with a model the upstream would not recognize.
 func TestProxyAliasWithUnrewritableBodyIsRefused(t *testing.T) {
 	restore := maxInMemoryBody
 	maxInMemoryBody = 64 << 10

@@ -24,7 +24,9 @@ func chatHarness(t *testing.T) (*harness, *auth.Session) {
 // chatEvents reads a run's SSE stream to its done frame.
 func chatEvents(t *testing.T, h *harness, sess *auth.Session, runID, query string) (deltas []map[string]any, done map[string]any) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Generous: a deep-research run is several model rounds, and the race
+	// detector on a shared CI runner is slow. A finished run returns at once.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/runs/"+runID+"/events"+query, nil).WithContext(ctx)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: sess.ID})

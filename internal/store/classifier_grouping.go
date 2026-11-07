@@ -330,10 +330,7 @@ func (s *Store) StartClassifierBenchmark(ctx context.Context, b *ClassifierBench
 	if cfg == "" {
 		cfg = "{}"
 	}
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`INSERT INTO classifier_benchmark (id, created_at, created_by, status, config, result)
 		SELECT ?,?,?,?,?,'{}' WHERE NOT EXISTS (SELECT 1 FROM classifier_benchmark WHERE status = ? AND created_at >= ?)`),
 		b.ID, FormatTime(b.CreatedAt), b.CreatedBy, BenchmarkRunning, cfg, BenchmarkRunning, FormatTime(staleBefore))
@@ -365,7 +362,7 @@ type ClassificationTag struct {
 	Category    string  `json:"category"`
 	Subcategory string  `json:"subcategory,omitempty"`
 	Confidence  float64 `json:"confidence"`
-	// Mode is inline (the request waited for the label) or async (labelled
+	// Mode is inline (the request waited for the label) or async (labeled
 	// in the background after it was forwarded).
 	Mode       string `json:"mode"`
 	Status     string `json:"status"`

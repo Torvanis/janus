@@ -131,7 +131,7 @@ func (s *Server) reevaluateGroupAdmins(ctx context.Context) []string {
 		s.Logger.WarnContext(ctx, "re-evaluate admin groups", "error", err.Error())
 	}
 	for _, id := range revoked {
-		if err := s.Store.AppendAudit(ctx, &store.AuditEntry{
+		if err := s.appendAudit(ctx, &store.AuditEntry{
 			ActorUserID: auditSystemActor, ActorLabel: auditSystemActor,
 			Action: "user_role_changed", ResourceType: "user", ResourceID: id,
 			OldValue: encodeAuditValue(map[string]any{"admin_via_group": true}),

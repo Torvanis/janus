@@ -74,7 +74,7 @@ func chatConversationFor(t *testing.T, h *harness, sess *auth.Session, model str
 }
 
 // addVisionModel registers an enabled, priced, granted model whose name the
-// vision heuristic recognises.
+// vision heuristic recognizes.
 func addVisionModel(t *testing.T, h *harness, name string) {
 	t.Helper()
 	ctx := context.Background()
@@ -339,7 +339,7 @@ func TestChatAttachmentSearchAndDelete(t *testing.T) {
 	h, sess := chatHarness(t)
 	conv := chatConversationFor(t, h, sess, "test-model")
 	doc := chatUploadOK(t, h, sess, "itinerary.txt", []byte("Day three: portage to Kawishiwi lake"))
-	sent := chatSend(t, h, sess, conv, map[string]any{"content": "Summarise", "attachment_ids": []string{doc["id"].(string)}})
+	sent := chatSend(t, h, sess, conv, map[string]any{"content": "Summarize", "attachment_ids": []string{doc["id"].(string)}})
 	chatEvents(t, h, sess, sent["run_id"].(string), "")
 
 	for _, q := range []string{"kawishiwi", "itinerary"} {
@@ -424,7 +424,7 @@ func TestChatModelAcceptsImages(t *testing.T) {
 		{"minicpm-v", nil, true},
 		{"o3", nil, true},
 		// Personal ChatGPT plan models (my/openai/…) see images; the
-		// live proof must show the colour of an unnamed image.
+		// live proof must show the color of an unnamed image.
 		{"my/openai/gpt-6.1-sol", nil, true},
 		{"gpt-6-astra", nil, true},
 		{"my-local-model", []string{"chat", "vision"}, true},

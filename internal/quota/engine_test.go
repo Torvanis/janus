@@ -289,7 +289,7 @@ func TestEngineCustomAlertThresholds(t *testing.T) {
 	if len(events) != 1 || events[0].Threshold != 50 {
 		t.Fatalf("after 50%%: events = %+v, want one event at threshold 50", events)
 	}
-	record(30) // 80% — the DEFAULT tier must NOT fire on a customised rule
+	record(30) // 80% — the DEFAULT tier must NOT fire on a customized rule
 	if len(events) != 1 {
 		t.Fatalf("after 80%%: events = %+v, want no new event (80 is not configured)", events)
 	}

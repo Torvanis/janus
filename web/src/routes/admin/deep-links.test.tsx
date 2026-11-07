@@ -181,7 +181,7 @@ describe('user detail drawer usage graph', () => {
     const drawer = await screen.findByRole('dialog');
     expect(await within(drawer).findByText('Usage over time')).toBeTruthy();
 
-    // Default metric is spend; the chart is an SVG figure labelled "<metric> trend".
+    // Default metric is spend; the chart is an SVG figure labeled "<metric> trend".
     expect(await within(drawer).findByRole('img', { name: 'Spend trend' })).toBeTruthy();
 
     // The toggle switches the same chart across requests, tokens, and spend.

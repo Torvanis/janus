@@ -41,7 +41,7 @@ func (s *Server) applyChatPromptBody(p *store.ChatPrompt, body chatPromptBody) *
 	if body.Name != nil {
 		n := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(*body.Name), "/")))
 		if !chatPromptName.MatchString(n) {
-			return ErrInvalidRequest("A command name is 1–40 lowercase letters, digits or dashes, like summarise or email-reply").WithParam("name")
+			return ErrInvalidRequest("A command name is 1–40 lowercase letters, digits or dashes, like summarize or email-reply").WithParam("name")
 		}
 		p.Name = n
 	}

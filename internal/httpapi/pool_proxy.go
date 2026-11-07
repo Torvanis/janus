@@ -13,12 +13,13 @@ import (
 
 	"github.com/torvanis/janus/internal/balancer"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // Load-balanced model pools on the proxy path.
 //
 // A managed alias with more than one enabled member is a pool. The proxy
-// resolves and authorises the ALIAS exactly as before (grants, quotas and
+// resolves and authorizes the ALIAS exactly as before (grants, quotas and
 // the stable name live there); only the choice of which real model serves
 // changes. The balancer orders the members for this request; the proxy tries
 // them in that order, moving to the next only when the previous one failed
@@ -54,9 +55,9 @@ type poolRoute struct {
 // test wiring needs nothing extra.
 func (s *Server) poolRegistry() *balancer.Registry {
 	s.poolOnce.Do(func() {
-		s.pools = balancer.NewRegistry(&http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
-			TLSClientConfig: s.Config.TLSClientConfig(), MaxIdleConnsPerHost: 4, IdleConnTimeout: 90 * time.Second,
-		}}, s.Logger)
+		s.pools = balancer.NewRegistry(&http.Client{Timeout: 3 * time.Second, Transport: &truststore.Transport{Fallback: s.Config.TLSClientConfig, Tune: func(t *http.Transport) {
+			t.MaxIdleConnsPerHost, t.IdleConnTimeout = 4, 90*time.Second
+		}}}, s.Logger)
 	})
 	return s.pools
 }

@@ -87,6 +87,45 @@ func (s *Server) runSubscriptionChecks(ctx context.Context) {
 	}
 }
 
+// recheckResult is the outcome of renewAndRecheck.
+type recheckResult struct {
+	models  []string
+	catalog map[string]subscription.Reasoning
+	// err is the definitive error after renewal (a ReauthError when the
+	// vendor refused the refresh token or the fresh credential). nil with
+	// ok=false means renewal hit an outage: keep the original verdict.
+	err error
+}
+
+// renewAndRecheck forces one refresh of the connection's access token
+// (through the same locked, replica-safe rotation the proxy uses) and reads
+// the model list with the new token. ok=true means the sign-in is healthy.
+func (s *Server) renewAndRecheck(ctx context.Context, route *personalRoute, client *http.Client) (recheckResult, bool) {
+	conn := route.conn
+	if err := s.Store.ExpireSubscriptionAccess(ctx, conn.ID); err != nil {
+		return recheckResult{}, false
+	}
+	fresh, err := s.Store.SubscriptionByID(ctx, conn.ID)
+	if err != nil {
+		return recheckResult{}, false
+	}
+	token, apiErr := s.subscriptionAccessToken(ctx, &personalRoute{provider: route.provider, conn: fresh})
+	if apiErr != nil {
+		if apiErr.Code == CodeSubscriptionReauth {
+			// The refresh token itself was refused (already marked).
+			return recheckResult{err: &subscription.ReauthError{Reason: apiErr.Message}}, false
+		}
+		return recheckResult{}, false
+	}
+	models, catalog, err := subscription.FetchModels(ctx, route.provider, client, token)
+	if err != nil {
+		return recheckResult{err: err}, false
+	}
+	s.Logger.InfoContext(ctx, "subscription check: renewed a refused access token",
+		"subscription_id", conn.ID, "provider", route.provider.ID())
+	return recheckResult{models: models, catalog: catalog}, true
+}
+
 // checkSubscription verifies one connection and records the outcome. It
 // returns the reason when the connection now needs reconnecting. renewAhead
 // renews an access token that would expire before the next scheduled check
@@ -117,6 +156,23 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 		return ""
 	}
 	models, catalog, err := subscription.FetchModels(ctx, provider, client, token)
+	if err != nil {
+		var reauth *subscription.ReauthError
+		// A refused credential is usually an access token the vendor
+		// invalidated before its advertised expiry (OpenAI does this). Janus
+		// holds a refresh token for exactly this case: renew once and prove
+		// the NEW credential before telling the user to reconnect. Marking a
+		// renewable sign-in dead on one 401 stranded every client of the
+		// connection until a human noticed (live: 2026-10-31, token valid
+		// another 2 days, chat worked 80 s earlier).
+		if errors.As(err, &reauth) && conn.AutoRenews {
+			if renewed, ok := s.renewAndRecheck(ctx, route, client); ok {
+				models, catalog, err = renewed.models, renewed.catalog, nil
+			} else if renewed.err != nil {
+				err = renewed.err
+			}
+		}
+	}
 	if err != nil {
 		var reauth *subscription.ReauthError
 		if errors.As(err, &reauth) {

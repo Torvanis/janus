@@ -80,7 +80,7 @@ function mockRequests(events: UsageEvent[]) {
   });
 }
 
-/** The value cell rendered next to a labelled DetailRow in the drawer. */
+/** The value cell rendered next to a labeled DetailRow in the drawer. */
 function detailValue(label: string): string {
   const labelEl = screen.getByText(label);
   const valueEl = labelEl.nextElementSibling;

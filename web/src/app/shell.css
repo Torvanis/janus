@@ -56,55 +56,71 @@
   padding-top: var(--janus-space-3);
   border-top: 1px solid var(--janus-color-border-subtle);
 }
+/* A section title reads as a heading, not as one of its pages: small caps,
+   brighter, a rule above it, and the open/closed chevron on the right. Its
+   pages sit indented beside a guide line. */
 .nav-heading.nav-fold {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 30px;
+  min-height: 32px;
+  margin-top: var(--janus-space-1);
   background: none;
   border: 0;
+  border-top: 1px solid var(--janus-color-border-subtle);
+  border-radius: 0;
   cursor: pointer;
   text-align: left;
-  border-radius: var(--janus-radius-md);
-  padding: 4px var(--janus-space-3);
-  /* A fold is a control, not a caption: sentence case, body color. */
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: var(--janus-text-xs);
-  font-weight: 600;
-  color: var(--janus-color-text-secondary);
+  padding: var(--janus-space-2) var(--janus-space-3) 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--janus-text-3xs);
+  font-weight: 700;
+  color: var(--janus-color-text-primary);
 }
 .nav-heading.nav-fold:hover:not(:disabled) {
+  color: var(--janus-color-primary-on-subtle);
+}
+.nav-heading.nav-fold:hover:not(:disabled) .nav-fold-chevron {
   color: var(--janus-color-text-primary);
-  background: var(--janus-state-hover);
 }
 .nav-fold:focus-visible {
   outline: 2px solid var(--janus-color-primary-bg);
   outline-offset: -2px;
+  border-radius: var(--janus-radius-md);
+}
+.nav-fold-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .nav-fold-count {
-  margin-left: auto;
   font-size: var(--janus-text-3xs);
-  font-weight: 500;
-  color: var(--janus-color-text-muted);
+  font-weight: 600;
+  letter-spacing: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  text-align: center;
+  color: var(--janus-color-text-secondary);
+  background: var(--janus-state-hover);
 }
 .nav-fold[aria-expanded='true'] .nav-fold-count {
-  visibility: hidden;
+  display: none;
 }
 .nav-fold:disabled {
   cursor: default;
 }
-.nav-fold-caret {
-  display: inline-block;
-  width: 20px;
-  text-align: center;
-  font-size: 10px;
-  color: var(--janus-color-text-muted);
-  transition: transform var(--janus-duration-fast) var(--janus-ease-standard);
+.nav-fold-chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
 }
-.nav-fold[aria-expanded='true'] .nav-fold-caret {
-  transform: rotate(90deg);
+.nav-group.nav-group-folded {
+  margin-left: calc(var(--janus-space-3) + 2px);
+  padding-left: var(--janus-space-1);
+  border-left: 1px solid var(--janus-color-border-subtle);
+  width: auto;
 }
 .nav-divider {
   height: 1px;
@@ -151,11 +167,12 @@
   width: 100%;
 }
 .nav-heading {
+  /* Same lettering as the folding section titles (.nav-fold). */
   font-size: var(--janus-text-3xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--janus-color-text-muted);
+  color: var(--janus-color-text-primary);
   padding: var(--janus-space-2) var(--janus-space-3) 0;
 }
 .nav-item {

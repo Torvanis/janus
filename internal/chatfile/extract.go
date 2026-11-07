@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
+	"github.com/torvanis/janus/internal/fipsmode"
 )
 
 // maxPDFPages bounds how many pages are read; a header can claim any count.
@@ -27,6 +28,11 @@ func processPDF(ctx context.Context, data []byte) (res Result, err error) {
 			res, err = Result{}, reject("That PDF could not be read.")
 		}
 	}()
+	if !fipsmode.Allowed(fipsmode.FeatureEncryptedPDFRead) && pdfLooksEncrypted(data) {
+		// Decrypting a PDF needs MD5 and RC4, which the Janus FIPS edition
+		// does not use. Refuse before the parser would reach for them.
+		return Result{}, reject("That PDF is password-protected (encrypted PDFs cannot be read in the Janus FIPS edition).")
+	}
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "encrypt") || strings.Contains(err.Error(), "password") {
@@ -62,6 +68,10 @@ func processPDF(ctx context.Context, data []byte) (res Result, err error) {
 	}
 	return document(mimePDF, text)
 }
+
+// pdfLooksEncrypted reports whether the file declares a standard security
+// handler (an /Encrypt entry in a trailer or cross-reference stream).
+func pdfLooksEncrypted(data []byte) bool { return bytes.Contains(data, []byte("/Encrypt")) }
 
 // processDOCX reads word/document.xml from the archive: paragraphs become
 // lines, tabs and breaks are kept. The archive is bounded in entry count and

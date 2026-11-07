@@ -39,7 +39,7 @@ type Upstream struct {
 	AdapterType string
 }
 
-// Request is a downstream call awaiting normalisation.
+// Request is a downstream call awaiting normalization.
 type Request struct {
 	Method    string
 	Path      string // gateway-relative, always starting /v1/
@@ -67,7 +67,7 @@ type Prepared struct {
 	Body   []byte
 	// OnRedirect, when set, adjusts the headers of a redirected request
 	// before it is sent (Gemini's video download redirects to an endpoint
-	// that takes only its own key header). nil = Go's default behaviour.
+	// that takes only its own key header). nil = Go's default behavior.
 	OnRedirect func(h http.Header)
 }
 
@@ -259,7 +259,7 @@ type StreamFinisher interface {
 	FinishStream() []byte
 }
 
-// Adapter normalises one provider's protocol.
+// Adapter normalizes one provider's protocol.
 type Adapter interface {
 	Type() string
 	Discover(ctx context.Context, up Upstream, client *http.Client) ([]DiscoveredModel, error)

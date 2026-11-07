@@ -23,7 +23,7 @@ func alertDedupValue(t time.Time) string { return fmt.Sprintf("%020d", t.UnixNan
 // for the same key never both win.
 func (s *Store) ClaimAlert(ctx context.Context, key string, window time.Duration) (bool, error) {
 	now := nowUTC()
-	res, err := s.db.ExecContext(ctx, s.rebind(`INSERT INTO system_setting (key, value, updated_at) VALUES (?,?,?)
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`INSERT INTO system_setting (key, value, updated_at) VALUES (?,?,?)
 		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
 		WHERE system_setting.value < ?`),
 		alertDedupPrefix+key, alertDedupValue(now.Add(window)), FormatTime(now), alertDedupValue(now))
@@ -38,7 +38,7 @@ func (s *Store) ClaimAlert(ctx context.Context, key string, window time.Duration
 // or expired). Exactly one concurrent caller sees true, which is how a
 // recovery notice is sent once for an outage that was announced once.
 func (s *Store) ReleaseAlert(ctx context.Context, key string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM system_setting WHERE key = ?`), alertDedupPrefix+key)
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM system_setting WHERE key = ?`), alertDedupPrefix+key)
 	if err != nil {
 		return false, fmt.Errorf("release alert %s: %w", key, err)
 	}
@@ -48,7 +48,7 @@ func (s *Store) ReleaseAlert(ctx context.Context, key string) (bool, error) {
 
 // PurgeAlertClaims deletes alert claims that expired before the cutoff.
 func (s *Store) PurgeAlertClaims(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM system_setting WHERE key LIKE ? AND value < ?`),
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM system_setting WHERE key LIKE ? AND value < ?`),
 		alertDedupPrefix+"%", alertDedupValue(before))
 	if err != nil {
 		return 0, fmt.Errorf("purge alert claims: %w", err)

@@ -127,7 +127,7 @@ func (s *Store) CreateGrant(ctx context.Context, modelID, modelKind, granteeType
 		}
 	}
 	// Collective grantee types address a whole population, so they carry no
-	// specific grantee id; normalising here keeps the unique index honest.
+	// specific grantee id; normalizing here keeps the unique index honest.
 	if granteeType == GranteeAllUsers || granteeType == GranteeAllServiceTokens || granteeType == GranteeAllTeams {
 		granteeID = ""
 	}

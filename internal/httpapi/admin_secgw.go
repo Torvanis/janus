@@ -474,7 +474,7 @@ func readTermLines(rd io.Reader) ([]string, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		// CSV: first column, honouring a simple quoted field.
+		// CSV: first column, honoring a simple quoted field.
 		if i := strings.IndexByte(line, ','); i >= 0 && !strings.HasPrefix(line, "\"") {
 			line = strings.TrimSpace(line[:i])
 		} else if strings.HasPrefix(line, "\"") {

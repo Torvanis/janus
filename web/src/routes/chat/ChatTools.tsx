@@ -16,9 +16,11 @@ const ACTIVITY_LABEL: Record<string, { doing: string; did: string }> = {
   x_search: { doing: 'Searching X', did: 'Searched X' },
   create_image: { doing: 'Making an image', did: 'Made an image' },
   create_file: { doing: 'Writing a file', did: 'Made a file' },
+  read_file: { doing: 'Reading a file', did: 'Read a file' },
   create_video: { doing: 'Making the video', did: 'Made a video' },
   create_music: { doing: 'Making the music', did: 'Made music' },
   remember: { doing: 'Saving to memory', did: 'Saved to memory' },
+  ask_user: { doing: 'Asking you', did: 'Asked you' },
   forget: { doing: 'Forgetting', did: 'Updated memory' },
   web_fetch: { doing: 'Reading the page', did: 'Read a page' },
   code_execution: { doing: 'Running code', did: 'Ran code' },
@@ -35,6 +37,7 @@ const KIND: Record<string, string> = {
   web_fetch: 'Page',
   code_execution: 'Code',
   create_file: 'File',
+  read_file: 'File',
   create_video: 'Video',
   create_music: 'Music',
   remember: 'Memory',
@@ -68,10 +71,12 @@ export function SearchActivity({ activity, streaming }: { activity?: ChatActivit
         <span className="chat-activity-spinner" aria-hidden="true" />
         <span>
           {label(a.type, false)}
-          {last?.query && !WAIT[a.type] && a.type !== 'create_file' ? (
+          {last?.query && !WAIT[a.type] && a.type !== 'create_file' && a.type !== 'read_file' ? (
             <span className="chat-activity-query"> for “{last.query}”</span>
           ) : null}
-          {a.type === 'create_file' && a.query ? <span className="chat-activity-query"> {a.query}</span> : null}
+          {(a.type === 'create_file' || a.type === 'read_file') && a.query ? (
+            <span className="chat-activity-query"> {a.query}</span>
+          ) : null}
           {WAIT[a.type] ? <span className="chat-activity-query">{WAIT[a.type]}</span> : null}…
         </span>
       </div>
@@ -91,7 +96,7 @@ export function SearchActivity({ activity, streaming }: { activity?: ChatActivit
           ? 'code'
           : types.every((t) => t === 'create_image' || t === 'create_video' || t === 'create_music')
             ? 'image'
-            : types.every((t) => t === 'create_file' || t === 'remember' || t === 'forget')
+            : types.every((t) => t === 'create_file' || t === 'read_file' || t === 'remember' || t === 'forget')
               ? 'file'
               : 'search'
       }

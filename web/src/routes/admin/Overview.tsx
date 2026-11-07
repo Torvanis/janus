@@ -279,7 +279,7 @@ function NearBreach({ rows }: { rows: QuotaStatus[] }): ReactNode {
 /**
  * Performance of the most-used models over the selected range: average
  * concurrency, generation speed and input context, one line per model on the
- * same buckets as the organisation trend above.
+ * same buckets as the organization trend above.
  */
 function ModelPerformanceCard({ perf }: { perf: ModelPerformanceSeries | undefined }): ReactNode {
   if (!perf) return null;

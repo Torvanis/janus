@@ -176,4 +176,32 @@ describe('SecurityCard', () => {
     await screen.findByText('Save your recovery codes');
     expect(screen.getByText(/aaaa1111/)).toBeTruthy();
   });
+
+  it('FIPS edition: a SHA-256 enrollment says which apps work', async () => {
+    mocked.get.mockResolvedValue({ has_password: true, totp_enabled: false, must_change: false, recovery_codes_left: 0 });
+    mocked.post.mockResolvedValueOnce({
+      secret: 'JBSWY3DPEHPK3PXP',
+      otpauth_url: 'otpauth://totp/x?algorithm=SHA256',
+      algorithm: 'SHA256',
+    });
+    wrap(<SecurityCard />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Set up' }));
+    expect(await screen.findByText(/codes use HMAC-SHA-256/)).toBeTruthy();
+  });
+
+  it('FIPS edition: a legacy SHA-1 enrollment asks the user to set two-factor up again', async () => {
+    mocked.get.mockResolvedValue({
+      has_password: true,
+      totp_enabled: true,
+      must_change: false,
+      recovery_codes_left: 9,
+      totp_algorithm: 'SHA1',
+      totp_reenroll: true,
+    });
+    wrap(<SecurityCard />);
+    expect(await screen.findByText(/does not accept/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Set up' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Disable' })).toBeNull();
+  });
 });

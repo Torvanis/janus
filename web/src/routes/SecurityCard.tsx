@@ -4,12 +4,18 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Badge, ConfirmDialog, Field, useToast } from '../components/ui';
 import { t } from '../lib/i18n';
+import { describePolicy, passwordProblem } from '../lib/passwordPolicy';
+import { useSession } from '../app/session';
 
 interface LocalStatus {
   has_password: boolean;
   totp_enabled: boolean;
   must_change: boolean;
   recovery_codes_left: number;
+  /** HMAC hash of the current enrollment: SHA1 (default edition) or SHA256 (FIPS edition). */
+  totp_algorithm?: string;
+  /** The enrollment's algorithm is not usable in this edition (SHA-1 on the FIPS edition). */
+  totp_reenroll?: boolean;
 }
 
 /**
@@ -49,11 +55,11 @@ export function SecurityCard(): ReactNode {
   });
 
   // TOTP enrollment
-  const [enroll, setEnroll] = useState<{ secret: string; otpauth_url: string } | null>(null);
+  const [enroll, setEnroll] = useState<{ secret: string; otpauth_url: string; algorithm?: string } | null>(null);
   const [code, setCode] = useState('');
   const [recovery, setRecovery] = useState<string[] | null>(null);
   const start = useMutation({
-    mutationFn: () => api.post<{ secret: string; otpauth_url: string }>('/api/v1/me/local/totp/start'),
+    mutationFn: () => api.post<{ secret: string; otpauth_url: string; algorithm?: string }>('/api/v1/me/local/totp/start'),
     onSuccess: (data) => setEnroll(data),
     onError: (error: Error) => toast(error.message, 'danger'),
   });
@@ -82,7 +88,9 @@ export function SecurityCard(): ReactNode {
 
   const s = status.data;
   const mismatch = confirm.length > 0 && confirm !== next;
-  const canSubmit = next.length >= 12 && !mismatch && (forced || !s?.has_password || current.length > 0);
+  const policy = useSession().me?.password_policy;
+  const problem = next ? passwordProblem(next, policy) : null;
+  const canSubmit = next.length > 0 && !problem && !mismatch && (forced || !s?.has_password || current.length > 0);
 
   function submitPassword(event: FormEvent) {
     event.preventDefault();
@@ -127,7 +135,7 @@ export function SecurityCard(): ReactNode {
                 />
               </Field>
             ) : null}
-            <Field label={t('security.newPassword')} hint={t('login.passwordHint')}>
+            <Field label={t('security.newPassword')} hint={describePolicy(policy)} error={problem ?? undefined}>
               <input
                 aria-label={t('security.newPassword')}
                 className="input"
@@ -170,7 +178,10 @@ export function SecurityCard(): ReactNode {
 
         {/* TOTP */}
         {s?.has_password ? (
-          <div className="stack" style={{ borderTop: '1px solid var(--janus-color-border)', paddingTop: 'var(--janus-space-4)' }}>
+          <div
+            className="stack"
+            style={{ borderTop: '1px solid var(--janus-color-border-default)', paddingTop: 'var(--janus-space-4)' }}
+          >
             <h3 style={{ margin: 0 }}>{t('security.totpTitle')}</h3>
             {recovery ? (
               <div className="banner banner-info">
@@ -193,6 +204,11 @@ export function SecurityCard(): ReactNode {
                 <p className="small" style={{ margin: 0 }}>
                   {t('security.enrollBody')}
                 </p>
+                {enroll.algorithm === 'SHA256' ? (
+                  <div className="banner banner-info" role="note">
+                    <span className="small">{t('security.sha256Note')}</span>
+                  </div>
+                ) : null}
                 <div className="row" style={{ gap: 'var(--janus-space-4)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   <img
                     alt={t('security.qrAlt')}
@@ -229,6 +245,17 @@ export function SecurityCard(): ReactNode {
                   <button type="button" className="btn btn-ghost" onClick={() => setEnroll(null)}>
                     {t('common.cancel')}
                   </button>
+                </div>
+              </div>
+            ) : s.totp_enabled && s.totp_reenroll ? (
+              <div className="banner banner-warning" role="alert">
+                <div className="stack" style={{ gap: 'var(--janus-space-2)' }}>
+                  <span className="small">{t('security.reenrollBody')}</span>
+                  <div>
+                    <button type="button" className="btn btn-sm" onClick={() => start.mutate()} disabled={start.isPending}>
+                      {t('security.setUp')}
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : s.totp_enabled ? (

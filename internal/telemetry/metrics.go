@@ -52,7 +52,7 @@ type Metrics struct {
 	// UnmeteredRequests counts successful media (audio/image/video)
 	// responses that carried no usage the adapter could read, so they were
 	// recorded with zero tokens and zero cost (usage.AccountingUnmetered).
-	// Every increment is a configuration gap on the labelled upstream/model
+	// Every increment is a configuration gap on the labeled upstream/model
 	// — the provider's native cost signal is not being extracted — and the
 	// counter is the operator's signal to fix it before the gap compounds.
 	UnmeteredRequests *prometheus.CounterVec
@@ -156,7 +156,7 @@ func New(version, sha string) *Metrics {
 
 // initZeroSeries creates the label combinations that are known ahead of time.
 //
-// Prometheus only exports a labelled series once it has been observed, so
+// Prometheus only exports a labeled series once it has been observed, so
 // without this a fresh gateway would report "no data" for quota breaches and
 // policy rejections rather than an honest zero — and the exported metric set
 // would change shape as traffic arrived.
@@ -174,7 +174,7 @@ func (m *Metrics) initZeroSeries() {
 			m.QuotaBreaches.WithLabelValues(metric, subject)
 		}
 	}
-	for _, table := range []string{"usage_event", "audit_log", "docs_feedback", "web_session", "quota_alert_state", "oidc_state", "classification_result"} {
+	for _, table := range []string{"usage_event", "request_header_log", "audit_log", "docs_feedback", "web_session", "quota_alert_state", "oidc_state", "classification_result"} {
 		m.PurgeDeletedRows.WithLabelValues(table)
 	}
 	for _, status := range []string{"ok", "error", "timeout", "dropped"} {

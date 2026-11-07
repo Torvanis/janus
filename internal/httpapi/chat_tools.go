@@ -44,6 +44,7 @@ var chatToolCatalog = []chatToolInfo{
 	{ID: store.ChatToolVideo, Label: "Create videos", Description: "Makes short videos when you ask for one, with the organization's video model."},
 	{ID: store.ChatToolMusic, Label: "Create music", Description: "Makes music clips when you ask for one, with the organization's music model."},
 	{ID: store.ChatToolMemory, Label: "Memory", Description: "Remembers what you ask it to keep across chats. See and delete memories in Settings → Memory."},
+	{ID: store.ChatToolAsk, Label: "Ask questions", Description: "Lets the model stop and ask you a question with choices when it needs a detail, instead of guessing."},
 }
 
 // chatModelTools is what a model's provider can run (nil = none), from the
@@ -134,6 +135,9 @@ type chatExtras struct {
 	mu       sync.Mutex
 	Activity []chatActivity `json:"activity,omitempty"`
 	Sources  []chatSource   `json:"sources,omitempty"`
+	// Question is what the model asked the person (ask_user); their next
+	// message is the answer.
+	Question *chatQuestion `json:"question,omitempty"`
 }
 
 type chatActivity struct {
@@ -220,10 +224,10 @@ func (e *chatExtras) snapshot() *chatExtras {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.Activity) == 0 && len(e.Sources) == 0 {
+	if len(e.Activity) == 0 && len(e.Sources) == 0 && e.Question == nil {
 		return nil
 	}
-	return &chatExtras{Activity: slices.Clone(e.Activity), Sources: slices.Clone(e.Sources)}
+	return &chatExtras{Activity: slices.Clone(e.Activity), Sources: slices.Clone(e.Sources), Question: e.Question}
 }
 
 // feed reads the Janus extensions off one chat chunk delta.
@@ -460,7 +464,7 @@ func (r *chatLiveRun) madeSomething() bool {
 	defer r.extras.mu.Unlock()
 	for _, a := range r.extras.Activity {
 		switch a.Type {
-		case store.ChatToolImage, store.ChatToolFile, store.ChatToolVideo, store.ChatToolMusic:
+		case store.ChatToolImage, store.ChatToolFile, store.ChatToolVideo, store.ChatToolMusic, store.ChatToolAsk:
 			return true
 		}
 	}

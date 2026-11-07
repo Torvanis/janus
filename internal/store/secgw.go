@@ -750,7 +750,7 @@ func (s *Store) SecgwViolationByID(ctx context.Context, id string, cipher SecgwC
 	return v, nil
 }
 
-// SecgwViolationCounts summarises violations by kind and action since a
+// SecgwViolationCounts summarizes violations by kind and action since a
 // time, for the admin overview.
 func (s *Store) SecgwViolationCounts(ctx context.Context, since time.Time) (map[string]map[string]int, error) {
 	rows, err := s.query(ctx, `SELECT kind, action, COUNT(*) FROM secgw_violation WHERE created_at >= ? GROUP BY kind, action`, FormatTime(since))
@@ -780,7 +780,7 @@ func (s *Store) PruneSecgwViolations(ctx context.Context, kind string, r SecgwRe
 	var total int64
 	if r.MaxAgeHours > 0 {
 		cutoff := nowUTC().Add(-time.Duration(r.MaxAgeHours) * time.Hour)
-		res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND created_at < ?`), kind, FormatTime(cutoff))
+		res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND created_at < ?`), kind, FormatTime(cutoff))
 		if err != nil {
 			return total, err
 		}
@@ -789,11 +789,11 @@ func (s *Store) PruneSecgwViolations(ctx context.Context, kind string, r SecgwRe
 		}
 	}
 	if r.MaxCount > 0 {
-		res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND id IN (
+		res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND id IN (
 			SELECT id FROM secgw_violation WHERE kind = ? ORDER BY created_at DESC LIMIT -1 OFFSET ?)`), kind, kind, r.MaxCount)
 		if err != nil && s.dialect == DialectPostgres {
 			// Postgres has no LIMIT -1; use ALL.
-			res, err = s.db.ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND id IN (
+			res, err = s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM secgw_violation WHERE kind = ? AND id IN (
 				SELECT id FROM secgw_violation WHERE kind = ? ORDER BY created_at DESC OFFSET ?)`), kind, kind, r.MaxCount)
 		}
 		if err != nil {

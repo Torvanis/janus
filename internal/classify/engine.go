@@ -258,7 +258,7 @@ type Job struct {
 }
 
 // jobContext is the context a job's calls run under: detached from the
-// request, labelled for traces.
+// request, labeled for traces.
 func jobContext(ctx context.Context, j *Job) context.Context {
 	return WithFeature(classtrace.With(ctx, j.Trace), "usage_insights", j.Plan.Mode)
 }

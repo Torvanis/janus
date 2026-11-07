@@ -22,7 +22,9 @@ type IconName =
   | 'send'
   | 'more'
   | 'copy'
-  | 'check';
+  | 'check'
+  | 'up'
+  | 'down';
 
 const PATHS: Record<IconName, ReactNode> = {
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" />,
@@ -86,6 +88,8 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="18" cy="12" r="1.2" />
     </>
   ),
+  up: <path d="M12 19V5M6 11l6-6 6 6" />,
+  down: <path d="M12 5v14M6 13l6 6 6-6" />,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }): ReactNode {

@@ -307,7 +307,7 @@ export function DirectoryCard(): ReactNode {
             <span>{t('adminDir.enabledLabel')}</span>
           </label>
 
-          <div className="card stack" style={{ background: 'var(--janus-surface-2)' }}>
+          <div className="card stack" style={{ background: 'var(--janus-color-bg-surface-raised)' }}>
             <strong>{t('adminDir.testTitle')}</strong>
             <p className="small muted">{t('adminDir.testBody')}</p>
             <div className="row" style={{ gap: 'var(--janus-space-2)' }}>

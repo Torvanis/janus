@@ -6,7 +6,7 @@ import (
 )
 
 // PIIClass names one category of personally identifiable information the
-// PII detector recognises. The class name doubles as Match.RuleID.
+// PII detector recognizes. The class name doubles as Match.RuleID.
 type PIIClass string
 
 const (

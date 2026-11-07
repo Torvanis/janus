@@ -6,7 +6,7 @@ import (
 	"github.com/torvanis/janus/internal/adapter"
 )
 
-// Rates modelled on a Sonnet-class Anthropic card: input $3.00/Mtok,
+// Rates modeled on a Sonnet-class Anthropic card: input $3.00/Mtok,
 // cache-read $0.30/Mtok (0.1x input, per Anthropic's published multiplier),
 // output $15.00/Mtok.
 var anthropicRates = Rates{
@@ -40,7 +40,7 @@ func TestDisjointCacheIsBilledOnTop(t *testing.T) {
 
 // TestSubsetCacheIsUnchanged pins the OpenAI convention: cached tokens are
 // already inside the input count and must be subtracted, not added. This is the
-// pre-existing behaviour and must not regress.
+// pre-existing behavior and must not regress.
 func TestSubsetCacheIsUnchanged(t *testing.T) {
 	counts := TokenCounts{In: 1000, Cached: 800, Out: 200}
 
@@ -130,7 +130,7 @@ func TestByteEstimatableAllowsTextModalities(t *testing.T) {
 }
 
 // TestByteEstimatableFailsSafeOnUnknownModality documents the allowlist
-// posture: anything unrecognised is unmetered rather than billed on a guess.
+// posture: anything unrecognized is unmetered rather than billed on a guess.
 func TestByteEstimatableFailsSafeOnUnknownModality(t *testing.T) {
 	if ByteEstimatable("hologram") {
 		t.Fatal("unknown modality must default to not-estimatable")

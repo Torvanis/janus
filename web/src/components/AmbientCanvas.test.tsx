@@ -1,7 +1,7 @@
 /**
  * Ambient canvas + request attribution contracts.
  *
- * These lock the behaviours a screenshot would catch: that a density change
+ * These lock the behaviors a screenshot would catch: that a density change
  * never sweeps a band of stars across the sky, and that shooting-star size
  * actually tracks a job's output tokens.
  */

@@ -246,7 +246,7 @@ describe('security — overview', () => {
 });
 
 describe('security — policies', () => {
-  it('lists policies with one chip per enabled check, coloured by mode', async () => {
+  it('lists policies with one chip per enabled check, colored by mode', async () => {
     renderPage('/admin/security/policies');
     expect(await screen.findByText('Baseline')).toBeTruthy();
     const row = screen.getByText('Baseline').closest('tr')!;
@@ -339,7 +339,7 @@ describe('security — policies', () => {
     // Observe mode: an outage never blocks, so there is no fail choice.
     expect(within(drawer).queryByLabelText('On classifier failure', { selector: 'select' })).toBeNull();
     expect(within(drawer).getByDisplayValue('Never blocks (observe mode)')).toBeTruthy();
-    // Coverage options appear for a decision model, defaulting to the old behaviour.
+    // Coverage options appear for a decision model, defaulting to the old behavior.
     const scope = within(drawer).getByLabelText('What to judge', { selector: 'select' }) as HTMLSelectElement;
     const longText = within(drawer).getByLabelText('Long text', { selector: 'select' }) as HTMLSelectElement;
     expect(scope.value).toBe('new_turn');

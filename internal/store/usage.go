@@ -486,14 +486,14 @@ type Totals struct {
 }
 
 // Ranking metrics accepted by BreakdownUsage. Token volume (tokens_out) is
-// the default so leaderboards emphasise usage rather than spend.
+// the default so leaderboards emphasize usage rather than spend.
 const (
 	BreakdownMetricTokensOut = "tokens_out"
 	BreakdownMetricCost      = "cost"
 	BreakdownMetricRequests  = "requests"
 )
 
-// Breakdown is one labelled slice of an aggregate.
+// Breakdown is one labeled slice of an aggregate.
 type Breakdown struct {
 	Key    string `json:"key"`
 	Label  string `json:"label"`
@@ -647,7 +647,7 @@ func (s *Store) BreakdownUsage(ctx context.Context, scope UsageScope, dimension 
 		scope.Principal = PrincipalServiceTokens
 	}
 	// Token volume is the default ranking metric for breakdowns; "cost" and
-	// "requests" remain available for surfaces that emphasise spend or volume
+	// "requests" remain available for surfaces that emphasize spend or volume
 	// of calls.
 	rank := BreakdownMetricTokensOut
 	if len(metric) > 0 && metric[0] != "" {

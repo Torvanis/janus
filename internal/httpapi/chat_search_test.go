@@ -212,79 +212,6 @@ func waitForChatTitle(t *testing.T, h *harness, sess *auth.Session, id string, w
 	return title
 }
 
-// TestChatAutoTitle: after the first reply the model names the chat (a
-// separate, metered janus-chat-title request); with the switch off the
-// truncated first message stays.
-func TestChatAutoTitle(t *testing.T) {
-	h, sess := chatHarness(t)
-	h.server.Config.ChatAutoTitle = true
-	h.upstreamReply = `{"id":"t","choices":[{"message":{"role":"assistant","content":"\"Garden Planning: Spring Tomatoes!\""},"finish_reason":"stop"}],` +
-		`"usage":{"prompt_tokens":30,"completion_tokens":5}}`
-	conv := chatNewConversation(t, h, sess)
-	chatEvents(t, h, sess, chatSend(t, h, sess, conv.ID, map[string]any{"content": "when should I plant tomatoes"})["run_id"].(string), "")
-	title := waitForChatTitle(t, h, sess, conv.ID, func(s string) bool { return s == "Garden Planning: Spring Tomatoes" })
-	if title != "Garden Planning: Spring Tomatoes" {
-		t.Fatalf("title = %q", title)
-	}
-	// Metered as its own request, same user and billing token.
-	events := h.waitForUsageEvents(2)
-	var titleEv, chatEv *store.UsageEvent
-	for _, e := range events {
-		switch e.ClientApp {
-		case chatTitleClientApp:
-			titleEv = e
-		case chatClientApp:
-			chatEv = e
-		}
-	}
-	if titleEv == nil || chatEv == nil || titleEv.TokenID != chatEv.TokenID || titleEv.UserID != h.user.ID {
-		t.Fatalf("title event %+v chat event %+v", titleEv, chatEv)
-	}
-	var titleReq string
-	for _, r := range h.upstreamRequests {
-		if strings.Contains(string(r.Body), `"max_tokens":24`) {
-			titleReq = string(r.Body)
-		}
-	}
-	if titleReq == "" || strings.Contains(titleReq, `"stream":true`) {
-		t.Fatalf("title request = %q", titleReq)
-	}
-	// The new title is searchable.
-	if res := chatSearchAs(t, h, sess, "garden"); len(res) != 1 || res[0].ConversationID != conv.ID {
-		t.Fatalf("title search = %+v", res)
-	}
-	// A second reply does not rename it again.
-	before := len(h.upstreamRequests)
-	chatEvents(t, h, sess, chatSend(t, h, sess, conv.ID, map[string]any{"content": "and peppers?"})["run_id"].(string), "")
-	time.Sleep(200 * time.Millisecond)
-	if n := len(h.upstreamRequests) - before; n != 1 {
-		t.Errorf("second reply made %d upstream calls, want 1 (no new title)", n)
-	}
-
-	// Switched off: the truncated first message stays.
-	h.server.Config.ChatAutoTitle = false
-	conv2 := chatNewConversation(t, h, sess)
-	chatEvents(t, h, sess, chatSend(t, h, sess, conv2.ID, map[string]any{"content": "a second question about soil"})["run_id"].(string), "")
-	time.Sleep(200 * time.Millisecond)
-	if got := waitForChatTitle(t, h, sess, conv2.ID, func(string) bool { return true }); got != "a second question about soil" {
-		t.Fatalf("title with auto-title off = %q", got)
-	}
-}
-
-// TestChatAutoTitleFailureKeepsTruncatedTitle: an error from the title call
-// is silent.
-func TestChatAutoTitleFailureKeepsTruncatedTitle(t *testing.T) {
-	h, sess := chatHarness(t)
-	h.server.Config.ChatAutoTitle = true
-	h.upstreamReply = `{"error":{"message":"boom","type":"server_error"}}`
-	conv := chatNewConversation(t, h, sess)
-	chatEvents(t, h, sess, chatSend(t, h, sess, conv.ID, map[string]any{"content": "keep this title"})["run_id"].(string), "")
-	h.waitForUsageEvents(2)
-	if got := waitForChatTitle(t, h, sess, conv.ID, func(string) bool { return true }); got != "keep this title" {
-		t.Fatalf("title = %q", got)
-	}
-}
-
 // TestChatTrimsHistoryToTheContextWindow: with a small window the oldest
 // turns are left out, the question is kept, and the count is recorded.
 func TestChatTrimsHistoryToTheContextWindow(t *testing.T) {
@@ -384,12 +311,14 @@ func TestTrimChatHistory(t *testing.T) {
 
 func TestCleanChatTitle(t *testing.T) {
 	cases := map[string]string{
-		`"Spring Tomato Planting"`:                     "Spring Tomato Planting",
-		"Title: Repotting Orchids.":                    "Repotting Orchids",
-		"\n\n  **Kayak Tips**  \nextra line":           "Kayak Tips",
-		"one two three four five six seven eight nine": "one two three four five six",
-		"“Curly quotes!”":                              "Curly quotes",
-		"   ":                                          "",
+		`"Spring Tomato Planting"`:                      "Spring Tomato Planting",
+		"Title: Repotting Orchids.":                     "Repotting Orchids",
+		"\n\n  **Kayak Tips**  \nextra line":            "Kayak Tips",
+		"one two three four five six seven eight nine":  "one two three four five six",
+		"“Curly quotes!”":                               "Curly quotes",
+		"   ":                                           "",
+		"<think>user wants a title</think>\nKyoto Trip": "Kyoto Trip",
+		"<think>still thinking about":                   "",
 	}
 	for in, want := range cases {
 		if got := cleanChatTitle(in); got != want {

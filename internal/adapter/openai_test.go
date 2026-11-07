@@ -112,7 +112,7 @@ func TestOpenAITransformResponseNormalizesReasoningFields(t *testing.T) {
 	// Both present: keep reasoning_content, drop the alias.
 	out, _ = a.TransformResponse(req, []byte(`{"choices":[{"message":{"reasoning_content":"a","reasoning":"b"}}]}`))
 	if !bytes.Contains(out, []byte(`"reasoning_content":"a"`)) || bytes.Contains(out, []byte(`"reasoning":`)) {
-		t.Fatalf("alias must be dropped in favour of reasoning_content: %s", out)
+		t.Fatalf("alias must be dropped in favor of reasoning_content: %s", out)
 	}
 	// Plain OpenAI bodies are byte-for-byte pass-through.
 	plain := []byte(`{"id":"x","choices":[{"message":{"role":"assistant","content":"hi"}}]}`)
@@ -137,7 +137,7 @@ func TestOpenAIStreamTransformerNormalizesReasoningDeltas(t *testing.T) {
 	}
 	if !bytes.HasPrefix(out, []byte("data: ")) || !bytes.HasSuffix(out, []byte("\n\n")) ||
 		!bytes.Contains(out, []byte(`"reasoning_content":"hm"`)) || bytes.Contains(out, []byte(`"reasoning":`)) {
-		t.Fatalf("delta not normalised: %q", out)
+		t.Fatalf("delta not normalized: %q", out)
 	}
 	for _, passthrough := range []string{
 		"data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n",

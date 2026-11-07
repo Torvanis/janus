@@ -508,7 +508,7 @@ func detectBedrockStreamMode(line []byte) bedrockStreamMode {
 
 // event translates one decoded ConverseStream event. eventType may be empty
 // for JSON frames, in which case the payload's fields identify it; known
-// reports whether the payload was recognised as a ConverseStream event at all.
+// reports whether the payload was recognized as a ConverseStream event at all.
 func (t *bedrockStreamTransformer) event(eventType string, payload []byte) (out []byte, known bool, err error) {
 	var ev struct {
 		Role              string `json:"role"`

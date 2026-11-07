@@ -93,7 +93,7 @@ type ClassificationCategory struct {
 }
 
 // ClassificationOtherSlug is the catch-all. It is always offered to the
-// classifier, so a request that fits nothing is labelled rather than forced
+// classifier, so a request that fits nothing is labeled rather than forced
 // into the nearest wrong bucket.
 const ClassificationOtherSlug = "other"
 
@@ -107,11 +107,11 @@ const (
 
 // BuiltinClassificationCategories is the default taxonomy, in display order.
 // Descriptions are what the classifier reads, so each says what belongs and,
-// where neighbours are easy to confuse, what does not.
+// where neighbors are easy to confuse, what does not.
 var BuiltinClassificationCategories = []ClassificationCategory{
 	{Slug: "coding", Name: "Coding", Description: "Writing, reviewing, explaining, refactoring or debugging source code, scripts or queries. Not configuring or operating software (Technical help)."},
 	{Slug: "technical_help", Name: "Technical help", Description: "IT and technical support: installing, configuring, operating or troubleshooting software, devices, networks and cloud services. Not writing code (Coding)."},
-	{Slug: "data_analysis", Name: "Data analysis", Description: "Analysing data: statistics, spreadsheets, metrics, charts, interpreting results or datasets."},
+	{Slug: "data_analysis", Name: "Data analysis", Description: "Analyzing data: statistics, spreadsheets, metrics, charts, interpreting results or datasets."},
 	{Slug: "extraction", Name: "Extraction and formatting", Description: "Pulling structured fields out of text, converting between formats (JSON, CSV, tables), classifying or tagging records."},
 	{Slug: "writing", Name: "Writing and editing", Description: "Drafting, rewriting, proofreading or improving non-fiction prose: emails, documents, reports, posts."},
 	{Slug: "creative", Name: "Creative writing", Description: "Fiction, poetry, scripts, song lyrics, worldbuilding, role-play and other imaginative writing."},
@@ -424,7 +424,7 @@ func (s *Store) UpdateClassificationCategory(ctx context.Context, id string, in 
 
 // DeleteClassificationCategory removes a custom category and its
 // subcategories. Past results keep their slug and still appear in reports
-// (labelled by slug), so history is never rewritten.
+// (labeled by slug), so history is never rewritten.
 func (s *Store) DeleteClassificationCategory(ctx context.Context, id string) error {
 	cur, err := s.ClassificationCategoryByID(ctx, id)
 	if err != nil {
@@ -476,7 +476,7 @@ const (
 	// ClassificationModeInline classifies before the request is forwarded,
 	// within a time budget, so the label is available to the request itself
 	// (response header today, routing later). A timeout or failure never
-	// fails the request: it proceeds unlabelled and the miss is recorded.
+	// fails the request: it proceeds unlabeled and the miss is recorded.
 	ClassificationModeInline = "inline"
 )
 
@@ -546,7 +546,7 @@ func DefaultClassificationSettings() ClassificationSettings {
 	}
 }
 
-// Validate normalises and checks the settings.
+// Validate normalizes and checks the settings.
 func (c *ClassificationSettings) Validate() error {
 	switch c.Mode {
 	case ClassificationModeAsync, ClassificationModeInline:
@@ -750,7 +750,7 @@ func (s *Store) ListClassificationResults(ctx context.Context, f ClassificationR
 // PruneClassificationResults deletes results older than the cutoff and
 // reports how many went.
 func (s *Store) PruneClassificationResults(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM classification_result WHERE created_at < ?`), FormatTime(before))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM classification_result WHERE created_at < ?`), FormatTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("purge classification results: %w", err)
 	}
@@ -785,7 +785,7 @@ type ClassificationSeriesPoint struct {
 	Counts map[string]int64 `json:"counts"`
 }
 
-// ClassifierHealth summarises the classifier's own behaviour in the range.
+// ClassifierHealth summarizes the classifier's own behavior in the range.
 type ClassifierHealth struct {
 	Attempts int64   `json:"attempts"`
 	OK       int64   `json:"ok"`

@@ -31,7 +31,7 @@ type publicProvider struct {
 func (s *Server) handleAuthProviders(w http.ResponseWriter, r *http.Request) {
 	redirectTo := safeRedirect(r.URL.Query().Get("redirect_uri"))
 	out := []publicProvider{}
-	if s.OIDC != nil && !s.Config.DevAuthEnabled {
+	if s.OIDC != nil && !s.Config.DevAuth() {
 		out = append(out, publicProvider{Slug: "", Name: "Corporate SSO", URL: "/auth/start?redirect_uri=" + url.QueryEscape(redirectTo)})
 	}
 	if s.Registry != nil && s.featureRuns("multi_oidc") {
@@ -44,6 +44,9 @@ func (s *Server) handleAuthProviders(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if sc := s.Store.SecurityPolicy(r.Context()).SmartCard; sc.Enabled {
+		out = append(out, publicProvider{Slug: "smart-card", Name: "Smart card (CAC/PIV)", URL: "/auth/pki?redirect_uri=" + url.QueryEscape(redirectTo)})
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
@@ -52,6 +55,9 @@ func (s *Server) handleProviderLogin(w http.ResponseWriter, r *http.Request) {
 	p, _, err := s.providerFor(r, chi.URLParam(r, "slug"))
 	if err != nil {
 		s.renderLoginError(w, r, "That sign-in method is not available.")
+		return
+	}
+	if !s.requireConsent(w, r) {
 		return
 	}
 	target, err := p.AuthCodeURL(r.Context(), redirectTo)

@@ -1,8 +1,9 @@
 # Janus Edge Helm chart
 
-Chart **0.2.2**, application **2026.10.5**. The chart uses semantic versioning;
-the application uses `YEAR.MONTH.RELEASE_NUMBER`. The default public gateway
-image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.10.5`.
+Chart **2026.11.1**, application **2026.11.1**. From 2026.11.1 the chart is
+versioned with Janus (`YEAR.MONTH.RELEASE_NUMBER`; earlier charts were
+`0.1.x`/`0.2.x`). The default public gateway
+image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.11.1`.
 A nonempty `image.digest` takes precedence over `image.tag`; clear the digest
 explicitly when selecting a different tag.
 
@@ -11,6 +12,14 @@ release (it was named `janus` up to chart 0.1.6). The rename changes only the
 chart's name: rendered resource names and labels are still `janus`, so
 `helm upgrade` of a release installed from the old chart keeps working when you
 point it at the new file.
+
+## FIPS edition
+
+The Janus FIPS edition image is `ghcr.io/torvanis/janus:<version>-fips`
+(Business; PostgreSQL only). Select it with
+`--set image.tag=2026.11.1-fips --set image.digest=`, or set `image.digest` to
+that image's digest. Its offline archives are
+`janus-fips-container-image-<version>-linux-<arch>.tar`.
 
 ## Offline (air-gapped) installs
 
@@ -21,11 +30,11 @@ can reach your private registry, push it there, and set `image.repository`
 (and clear `image.digest`, or set it to the digest your registry reports):
 
 ```bash
-podman load -i janus-container-image-2026.10.5-linux-amd64.tar   # or: docker load -i …
-podman tag ghcr.io/torvanis/janus:2026.10.5 registry.example.internal/janus:2026.10.5
-podman push registry.example.internal/janus:2026.10.5
-helm upgrade --install janus ./janus-helm-chart-0.2.2.tgz --namespace janus \
-  --set image.repository=registry.example.internal/janus --set image.tag=2026.10.5 \
+podman load -i janus-container-image-2026.11.1-linux-amd64.tar   # or: docker load -i …
+podman tag ghcr.io/torvanis/janus:2026.11.1 registry.example.internal/janus:2026.11.1
+podman push registry.example.internal/janus:2026.11.1
+helm upgrade --install janus ./janus-helm-chart-2026.11.1.tgz --namespace janus \
+  --set image.repository=registry.example.internal/janus --set image.tag=2026.11.1 \
   --set image.digest= …
 ```
 

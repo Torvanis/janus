@@ -9,16 +9,17 @@ import (
 	"time"
 )
 
-const upstreamColumns = `id, name, adapter_type, base_url, api_key_encrypted, api_key_mask, enabled, last_check_at, last_error, last_latency_ms, created_at`
+const upstreamColumns = `id, name, adapter_type, base_url, api_key_encrypted, api_key_mask, enabled, last_check_at, last_error, last_latency_ms, created_at, allow_untrusted_tls`
 
 func scanUpstream(scan func(...any) error) (*Upstream, error) {
 	var u Upstream
-	var enabled int
+	var enabled, untrusted int
 	var lastCheck, created string
-	if err := scan(&u.ID, &u.Name, &u.AdapterType, &u.BaseURL, &u.encryptedKey, &u.APIKeyMask, &enabled, &lastCheck, &u.LastError, &u.LastLatencyMs, &created); err != nil {
+	if err := scan(&u.ID, &u.Name, &u.AdapterType, &u.BaseURL, &u.encryptedKey, &u.APIKeyMask, &enabled, &lastCheck, &u.LastError, &u.LastLatencyMs, &created, &untrusted); err != nil {
 		return nil, err
 	}
 	u.Enabled = enabled == 1
+	u.AllowUntrustedTLS = untrusted == 1
 	u.HasAPIKey = u.encryptedKey != ""
 	u.LastCheckAt = ParseTime(lastCheck)
 	u.CreatedAt = ParseTime(created)
@@ -101,6 +102,11 @@ func (s *Store) SoftDeleteUpstream(ctx context.Context, id string) error {
 	if err := s.exec(ctx, `UPDATE model SET status = ? WHERE upstream_id = ?`, ModelDisabled, id); err != nil {
 		return err
 	}
+	// A deleted upstream's header policy assignment would otherwise linger
+	// in the policy editor pointing at a target that no longer exists.
+	if err := s.exec(ctx, `DELETE FROM header_policy_assignment WHERE target_type = ? AND target_id = ?`, HeaderTargetUpstream, id); err != nil {
+		return err
+	}
 	return s.exec(ctx, `UPDATE upstream SET deleted_at = ?, enabled = 0 WHERE id = ?`, FormatTime(nowUTC()), id)
 }
 
@@ -125,7 +131,7 @@ func (s *Store) CountGrantsForUpstreamModels(ctx context.Context, upstreamID str
 // upstream, those grants can never take effect again and only clutter the
 // Grants page as references to models nobody can call.
 func (s *Store) DeleteGrantsForUpstreamModels(ctx context.Context, upstreamID string) (int, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM model_grant
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM model_grant
 		WHERE model_kind = ? AND model_id IN (SELECT id FROM model WHERE upstream_id = ?)`),
 		ModelKindModel, upstreamID)
 	if err != nil {

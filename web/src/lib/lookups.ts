@@ -4,7 +4,7 @@
  * also resolves ids back to labels so a saved filter shows names, not ids.
  *
  * Kept out of the components so the same "type 'samp', get Casey Sample"
- * behaviour is identical wherever a user/model/upstream picker appears.
+ * behavior is identical wherever a user/model/upstream picker appears.
  */
 import { api } from './api';
 import type { AdminUserRow, Group, ManagedModel, Model, ServiceTokenRow, Upstream } from './types';
@@ -201,6 +201,7 @@ const ERROR_CODES: LookupOption[] = [
   { id: 'permission_error', label: 'permission_error', detail: 'Forbidden' },
   { id: 'not_found_error', label: 'not_found_error', detail: 'Unknown route or model' },
   { id: 'server_error', label: 'server_error', detail: 'Gateway fault' },
+  { id: 'audit.write_failed', label: 'audit.write_failed', detail: 'Change refused: audit record not written' },
   {
     id: 'policy.subscription_reauth_required',
     label: 'policy.subscription_reauth_required',

@@ -27,13 +27,16 @@ import (
 // per the product ruling that content stays encrypted at rest.
 
 const (
-	chatSearchKeyLabel    = "chat-search-v1"
-	chatSearchMaxTerms    = 16
-	chatSearchLimit       = 20
-	chatSnippetRunes      = 160
-	chatReindexBatch      = 500
-	chatTitleClientApp    = "janus-chat-title"
-	chatTitleMaxTokens    = 24
+	chatSearchKeyLabel = "chat-search-v1"
+	chatSearchMaxTerms = 16
+	chatSearchLimit    = 20
+	chatSnippetRunes   = 160
+	chatReindexBatch   = 500
+	chatTitleClientApp = "janus-chat-title"
+	// chatTitleMaxTokens caps the title reply. Naming asks for no reasoning,
+	// but a model that cannot switch it off (or ignores the setting) still
+	// needs room to think before the few words of the title.
+	chatTitleMaxTokens    = 1024
 	chatTitleMaxWords     = 6
 	chatTitleInputRunes   = 2000
 	chatTitleTimeout      = 60 * time.Second
@@ -232,67 +235,6 @@ func chatProxyRequest(ctx context.Context, user *store.User, token *store.Token,
 
 func (s *Server) chatAutoTitleEnabled() bool { return s.Config != nil && s.Config.ChatAutoTitle }
 
-// chatMaybeAutoTitle runs after a reply finished. When it was the first
-// successful reply and the title is still the truncated first message, it
-// asks the same model (same billing token) for a short title in the
-// background. Any failure silently keeps the truncated title.
-func (s *Server) chatMaybeAutoTitle(origin *chatOrigin, run *store.ChatRun, user *store.User, token *store.Token, model string) {
-	if !s.chatAutoTitleEnabled() {
-		return
-	}
-	// Not tracked by Drain: a title is cosmetic, and losing one at shutdown
-	// just leaves the truncated title.
-	go func() {
-		defer func() {
-			if p := recover(); p != nil {
-				s.Logger.Error("chat title panicked", "panic", p)
-			}
-		}()
-		ctx, cancel := context.WithTimeout(withChatOrigin(context.Background(), origin), chatTitleTimeout)
-		defer cancel()
-		c, err := s.Store.ChatConversation(ctx, user.ID, run.ConversationID)
-		if err != nil {
-			return
-		}
-		msgs, err := s.Store.ListChatMessages(ctx, c.ID)
-		if err != nil {
-			return
-		}
-		var firstUser, reply *store.ChatMessage
-		completed := 0
-		for _, m := range msgs {
-			if m.Role == store.ChatRoleUser && firstUser == nil {
-				firstUser = m
-			}
-			if m.Role == store.ChatRoleAssistant && m.Status == store.ChatStatusComplete {
-				completed++
-				if m.ID == run.MessageID {
-					reply = m
-				}
-			}
-		}
-		if firstUser == nil || reply == nil || completed != 1 {
-			return
-		}
-		question := s.chatDecrypt(firstUser.ContentEnc)
-		if c.Title != chatTitle(question) {
-			return // the user (or an earlier run) already named it
-		}
-		title := s.chatGenerateTitle(ctx, user, token, model, question, s.chatDecrypt(reply.ContentEnc))
-		// The title is part of what the reply cost: add it to the footer.
-		s.chatRefreshUsage(ctx, reply, origin)
-		if title == "" {
-			return
-		}
-		ok, err := s.Store.SetChatConversationTitleIf(ctx, user.ID, c.ID, c.Title, title)
-		if err != nil || !ok {
-			return
-		}
-		c.Title = title
-		s.chatIndexTitle(ctx, c)
-	}()
-}
-
 func truncateRunes(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n])
@@ -302,30 +244,37 @@ func truncateRunes(s string, n int) string {
 
 // chatGenerateTitle asks the model for a title, non-streaming, through the
 // proxy with X-Janus-Agent janus-chat-title (its own request-log row, billed
-// like the chat). Returns "" on any failure.
-func (s *Server) chatGenerateTitle(ctx context.Context, user *store.User, token *store.Token, model, question, answer string) string {
+// like the chat, under the same Security Gateway policies). excerpt is the
+// part of the conversation the model may see. Returns "" on any failure.
+func (s *Server) chatGenerateTitle(ctx context.Context, user *store.User, token *store.Token, model string, excerpt []map[string]string) string {
+	messages := []map[string]string{{"role": "system", "content": "Write a short title of at most 6 words for this conversation. Reply with the title only: no quotes, no punctuation at the end."}}
+	messages = append(messages, excerpt...)
+	messages = append(messages, map[string]string{"role": "user", "content": "Title for the conversation above:"})
+	// No reasoning: a title needs none, and a reasoning model would spend
+	// its output budget thinking. reasoning_effort "none" turns it off on
+	// vLLM/llama.cpp Qwen, OpenAI and Gemini; Claude takes its least effort.
 	payload, _ := json.Marshal(map[string]any{
 		"model": model, "stream": false, "max_tokens": chatTitleMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": "Write a short title of at most 6 words for this conversation. Reply with the title only: no quotes, no punctuation at the end."},
-			{"role": "user", "content": truncateRunes(question, chatTitleInputRunes)},
-			{"role": "assistant", "content": truncateRunes(answer, chatTitleInputRunes)},
-			{"role": "user", "content": "Title for the conversation above:"},
-		},
+		"reasoning_effort": "none", "messages": messages,
 	})
-	req, err := chatProxyRequest(ctx, user, token, store.NewID(), chatTitleClientApp, payload)
-	if err != nil {
+	sink := s.chatTitleCall(ctx, user, token, payload)
+	if sink == nil {
 		return ""
 	}
-	sink := &chatSink{header: http.Header{}, live: &chatLiveRun{}}
-	func() {
-		defer func() { _ = recover() }()
-		s.handleProxy(sink, req)
-	}()
-	if sink.sse {
-		return "" // asked for a buffered reply; ignore an unexpected stream
+	// A model may refuse a parameter: OpenAI's reasoning models refuse
+	// max_tokens (they take max_completion_tokens), and some models take no
+	// reasoning setting at all. Fix the parameter the refusal names and
+	// resend, at most twice.
+	for attempt := 0; attempt < 2 && sink.status == http.StatusBadRequest; attempt++ {
+		fixed, ok := adjustRefusedParam(payload, sink.raw.Bytes())
+		if !ok {
+			break
+		}
+		payload = fixed
+		if sink = s.chatTitleCall(ctx, user, token, payload); sink == nil {
+			return ""
+		}
 	}
-	sink.finishRaw()
 	if sink.errCd != "" || sink.status >= 400 {
 		return ""
 	}
@@ -333,9 +282,35 @@ func (s *Server) chatGenerateTitle(ctx context.Context, user *store.User, token 
 	return cleanChatTitle(content)
 }
 
+// chatTitleCall makes one buffered naming request through the proxy; nil on
+// an unexpected stream or a request that could not be built.
+func (s *Server) chatTitleCall(ctx context.Context, user *store.User, token *store.Token, payload []byte) *chatSink {
+	req, err := chatProxyRequest(ctx, user, token, store.NewID(), chatTitleClientApp, payload)
+	if err != nil {
+		return nil
+	}
+	sink := &chatSink{header: http.Header{}, live: &chatLiveRun{}}
+	func() {
+		defer func() { _ = recover() }()
+		s.handleProxy(sink, req)
+	}()
+	if sink.sse {
+		return nil // asked for a buffered reply; ignore an unexpected stream
+	}
+	sink.finishRaw()
+	return sink
+}
+
 // cleanChatTitle keeps the first non-empty line, drops a "Title:" label,
 // quotes and surrounding punctuation, and caps it at six words.
 func cleanChatTitle(raw string) string {
+	// A model that writes its thinking into the reply (no reasoning
+	// parser upstream) puts it first, in <think> tags: skip it.
+	if i := strings.LastIndex(raw, "</think>"); i >= 0 {
+		raw = raw[i+len("</think>"):]
+	} else if strings.HasPrefix(strings.TrimSpace(raw), "<think>") {
+		return "" // ran out of room while still thinking
+	}
 	line := ""
 	for _, l := range strings.Split(raw, "\n") {
 		if l = strings.TrimSpace(l); l != "" {

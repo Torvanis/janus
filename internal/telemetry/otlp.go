@@ -62,6 +62,9 @@ type OTLPConfig struct {
 	// carries the JANUS_CA_BUNDLE trust store so collectors signed by a
 	// private corporate CA verify; nil means default verification.
 	TLSConfig *tls.Config
+	// Transport, when non-nil, replaces TLSConfig (the trust store's
+	// transport, which follows certificate changes).
+	Transport http.RoundTripper
 }
 
 // span is one finished span awaiting export.
@@ -112,7 +115,10 @@ func NewOTLP(cfg OTLPConfig, metrics *Metrics, logger *slog.Logger) *OTLP {
 	}
 	base := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
 	client := &http.Client{Timeout: 5 * time.Second}
-	if cfg.TLSConfig != nil {
+	switch {
+	case cfg.Transport != nil:
+		client.Transport = cfg.Transport
+	case cfg.TLSConfig != nil:
 		client.Transport = &http.Transport{
 			Proxy:           http.ProxyFromEnvironment,
 			TLSClientConfig: cfg.TLSConfig,

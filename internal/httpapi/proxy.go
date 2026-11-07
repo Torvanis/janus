@@ -23,6 +23,7 @@ import (
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/subscription"
 	"github.com/torvanis/janus/internal/telemetry"
+	"github.com/torvanis/janus/internal/truststore"
 	"github.com/torvanis/janus/internal/usage"
 )
 
@@ -381,14 +382,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if resolved.ViaManagedModel() {
 		accessID = resolved.Managed.ID
 	}
-	if _, ok := granted[accessID]; !ok {
+	if _, ok := granted[accessID]; !ok && (personal != nil || !chatNamingGrantFree(r, modelName)) {
+		// Chat naming with the administrator's naming model is a system
+		// task: only that request, for exactly that model, skips the grant.
 		s.rejectProxyEvent(w, r, ErrModelNotGranted(modelName), event, started)
 		return
 	}
 	if resolved.FellBack {
 		// The caller can see the substitution; the request log records the
 		// model that actually served, exactly as for any alias. Set only
-		// once the caller is authorised, so a rejection reveals nothing
+		// once the caller is authorized, so a rejection reveals nothing
 		// about the alias's configuration.
 		w.Header().Set(headerFallbackReason, resolved.FallbackReason)
 		event.FallbackReason = resolved.FallbackReason
@@ -909,8 +912,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// adapterReq is handed to Prepare AND to the response-side hooks
 		// (TransformResponse / NewStreamTransformer), so an adapter that
 		// translated the request knows to translate the response back.
+		// Header policy: rewrite the CALLER's headers for this upstream
+		// (or personal-subscription provider) before the adapter adds its
+		// own credentials and identity headers, which always win.
+		callerHeaders := r.Header.Clone()
+		hpTargetType, hpTargetID := store.HeaderTargetUpstream, upstream.ID
+		if personal != nil {
+			hpTargetType, hpTargetID = store.HeaderTargetPersonal, personal.provider.ID()
+		}
+		headerRW := s.applyHeaderPolicy(ctx, callerHeaders, hpTargetType, hpTargetID)
 		adapterReq = &adapter.Request{
-			Method: r.Method, Path: r.URL.Path, Header: r.Header.Clone(),
+			Method: r.Method, Path: r.URL.Path, Header: callerHeaders,
 			// Model is always the native upstream name: adapters that embed the
 			// model in the URL (Bedrock, Vertex) must never see a display name.
 			Body: body, Model: model.Name, Streaming: event.Streaming,
@@ -958,6 +970,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		outbound.Header = prepared.Header
 		outbound.ContentLength = outboundLength
+		s.recordHeaderLog(event, headerRW, outbound.Header)
 
 		// The upstream may bill an attempt even if the connection fails.
 		if !s.Config.LocalOnly {
@@ -1343,22 +1356,25 @@ func (s *Server) upstreamHTTPClientFor(ctx context.Context, modality string) *ht
 }
 
 // buildUpstreamClient constructs a pooled client for one timeout set.
+// TLS verification comes from the trust store (truststore.Transport): it
+// follows certificate uploads and directory changes without a restart, and
+// sends upstreams marked "allow untrusted certificate" (where the edition
+// and profile permit it) through a non-verifying pool.
 func (s *Server) buildUpstreamClient(timeouts config.UpstreamTimeouts) *http.Client {
-	transport := &http.Transport{
-		Proxy:           http.ProxyFromEnvironment,
-		TLSClientConfig: s.Config.TLSClientConfig(),
-		DialContext: (&net.Dialer{
+	transport := &truststore.Transport{Fallback: s.Config.TLSClientConfig, Tune: func(t *http.Transport) {
+		t.Proxy = http.ProxyFromEnvironment
+		t.DialContext = (&net.Dialer{
 			Timeout:   timeouts.Connect,
 			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: timeouts.TTFB,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   32,
-		IdleConnTimeout:       90 * time.Second,
-		ForceAttemptHTTP2:     true,
-	}
+		}).DialContext
+		t.TLSHandshakeTimeout = 10 * time.Second
+		t.ResponseHeaderTimeout = timeouts.TTFB
+		t.ExpectContinueTimeout = 1 * time.Second
+		t.MaxIdleConns = 100
+		t.MaxIdleConnsPerHost = 32
+		t.IdleConnTimeout = 90 * time.Second
+		t.ForceAttemptHTTP2 = true
+	}}
 	return &http.Client{Transport: transport, Timeout: timeouts.Total}
 }
 
@@ -1621,7 +1637,7 @@ func (s *Server) refuseOversizedGuarded(w http.ResponseWriter, resp *http.Respon
 		return false
 	}
 	apiErr := ErrSecurityBlocked(stop, false)
-	apiErr.Message = "The model's response was withheld: it is too large to be checked in full, and the part that was checked matched your organisation's security policy."
+	apiErr.Message = "The model's response was withheld: it is too large to be checked in full, and the part that was checked matched your organization's security policy."
 	refuse(apiErr, store.SecgwActionBlocked, *egress.sink)
 	return true
 }
@@ -1634,7 +1650,7 @@ func (s *Server) refuseOversizedGuarded(w http.ResponseWriter, resp *http.Respon
 // the buffered prefix is replayed and the rest streams straight from the
 // upstream — so the client receives it byte-for-byte. Usage extraction is
 // skipped for those (the prefix is unparseable JSON); metering falls back to
-// byte counting. What must never happen is the pre-fix behaviour: a truncated
+// byte counting. What must never happen is the pre-fix behavior: a truncated
 // body delivered under the upstream's success status with no error signal.
 func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, providerAdapter adapter.Adapter, adapterReq *adapter.Request, event *store.UsageEvent, rates usage.Rates, upstreamStart time.Time, egress *secgwEgress, family *familyEgress) adapter.Usage {
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, s.Config.MaxResponseBytes+1))
@@ -1700,7 +1716,7 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 			event.SecgwViolations = secgw.Recorded(*egress.sink)
 			event.ErrorCode = CodeSecurityBlocked
 			apiErr := ErrSecurityBlocked(res.BlockKind, false)
-			apiErr.Message = "The model's response was withheld: it matched your organisation's security policy."
+			apiErr.Message = "The model's response was withheld: it matched your organization's security policy."
 			apiErr.RequestID = event.RequestID
 			event.HTTPStatus = apiErr.Status()
 			s.Metrics.PolicyRejections.WithLabelValues(CodeSecurityBlocked).Inc()
@@ -1955,7 +1971,7 @@ func (s *Server) relayStream(w http.ResponseWriter, r *http.Request, resp *http.
 				}
 			}
 			if total > s.Config.MaxResponseBytes {
-				// The cut must be signalled in-band, exactly like the
+				// The cut must be signaled in-band, exactly like the
 				// hard-kill path above: without a final error frame the
 				// client cannot distinguish this deliberate cut from a
 				// network failure.
@@ -2342,7 +2358,7 @@ func (s *Server) rejectProxyEvent(w http.ResponseWriter, r *http.Request, apiErr
 // Managed models are listed alongside real ones and are deliberately
 // transparent: each carries a janus.managed block naming the model it
 // currently resolves to. Hiding the target would leave a caller unable to
-// reason about context windows, capabilities, or provider behaviour — the
+// reason about context windows, capabilities, or provider behavior — the
 // point of the alias is to spare users the bookkeeping, not to keep a secret.
 func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 	user := UserFrom(r.Context())
@@ -2488,11 +2504,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 //
 // There is no standard for this. OpenRouter's attribution headers are the
 // de-facto convention and many clients already send them, so those are
-// honoured; X-Janus-Agent is an explicit escape hatch for a client that wants
+// honored; X-Janus-Agent is an explicit escape hatch for a client that wants
 // to name itself unambiguously to this gateway.
 //
 // The value is caller-supplied and therefore untrusted: it is a reporting
-// label, never an authorisation input, and it is length-capped by the caller.
+// label, never an authorization input, and it is length-capped by the caller.
 // An empty result simply means the client did not identify itself.
 func clientAppName(r *http.Request) string {
 	for _, header := range []string{

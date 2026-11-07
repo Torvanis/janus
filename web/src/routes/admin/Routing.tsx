@@ -1565,7 +1565,7 @@ function RouteEditor({
               hint={judgeIsContestant ? undefined : 'Defaults to the judge on the Evaluations tab.'}
               error={
                 judgeIsContestant
-                  ? 'The judge is one of the two models it compares; judges favour their own answers. Pick a third model.'
+                  ? 'The judge is one of the two models it compares; judges favor their own answers. Pick a third model.'
                   : undefined
               }
             >
@@ -1797,8 +1797,8 @@ function CategoriesPanel(): ReactNode {
         <div>
           <h2>Routing categories</h2>
           <p className="small secondary" style={{ margin: 0 }}>
-            What the classifier chooses between. Each description is what it reads, so say what belongs and which neighbours do
-            not. All enabled categories are offered on every request, so near neighbours help it decide.
+            What the classifier chooses between. Each description is what it reads, so say what belongs and which neighbors do
+            not. All enabled categories are offered on every request, so near neighbors help it decide.
           </p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => open()}>
@@ -1968,7 +1968,7 @@ function CategoriesPanel(): ReactNode {
                 </Field>
                 <Field
                   label="Does not include"
-                  hint="Near neighbours and where they belong instead. This is what stops misfiling."
+                  hint="Near neighbors and where they belong instead. This is what stops misfiling."
                 >
                   <textarea
                     className="textarea"
@@ -2382,7 +2382,7 @@ function BatchTest({ classifierId }: { classifierId: string }): ReactNode {
             </table>
           </div>
           <p className="small muted" style={{ margin: 0 }}>
-            Fix a misfile by naming the neighbour in the category’s “Does not include”, or lower its minimum confidence if the
+            Fix a misfile by naming the neighbor in the category’s “Does not include”, or lower its minimum confidence if the
             answer was right but unsure.
           </p>
         </>
@@ -2468,7 +2468,7 @@ function EvaluationsPanel(): ReactNode {
         <div className="routing-form-grid">
           <Field
             label="Judge model"
-            hint="Pick a strong model that is not one of the two being compared: judges favour their own answers."
+            hint="Pick a strong model that is not one of the two being compared: judges favor their own answers."
           >
             <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
               <select className="select" aria-label="Judge model" value={judgeValue} onChange={(e) => setJudge(e.target.value)}>

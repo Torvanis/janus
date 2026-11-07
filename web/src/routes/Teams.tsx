@@ -207,7 +207,36 @@ export function TeamManagementWorkspace() {
   );
 }
 
-function TeamDetail({ id, onClose, history }: { id: string; onClose: () => void; history: Request[] }) {
+/**
+ * One team's workspace for the people in it, outside Administration: team
+ * leads and moderators add members and decide join requests, members see
+ * the roster and can leave, and anyone can ask to join a listed team. The
+ * API authorizes every action by team role; this only places the UI.
+ */
+export function TeamWorkspace({ id, base = '/teams' }: { id: string; base?: string }) {
+  const navigate = useNavigate();
+  const history = useQuery({
+    queryKey: ['teams', 'request-history'],
+    queryFn: () => api.get<{ requests: Request[] }>('/api/v1/team-requests'),
+  });
+  return (
+    <div className="page stack team-directory">
+      <TeamDetail id={id} base={base} onClose={() => navigate(base)} history={history.data?.requests ?? []} />
+    </div>
+  );
+}
+
+function TeamDetail({
+  id,
+  onClose,
+  history,
+  base = '/admin/teams',
+}: {
+  id: string;
+  onClose: () => void;
+  history: Request[];
+  base?: string;
+}) {
   const query = useQuery({
     queryKey: ['teams', 'detail', id],
     refetchInterval: 30_000,
@@ -218,12 +247,12 @@ function TeamDetail({ id, onClose, history }: { id: string; onClose: () => void;
       <button className="btn btn-ghost" onClick={onClose}>
         Close team
       </button>
-      <AsyncSection query={query}>{(data) => <TeamManagement id={id} data={data} history={history} />}</AsyncSection>
+      <AsyncSection query={query}>{(data) => <TeamManagement id={id} data={data} history={history} base={base} />}</AsyncSection>
     </section>
   );
 }
 
-function TeamManagement({ id, data, history }: { id: string; data: Detail; history: Request[] }) {
+function TeamManagement({ id, data, history, base }: { id: string; data: Detail; history: Request[]; base: string }) {
   const { me, refresh } = useSession();
   const client = useQueryClient();
   const admin = me?.role === 'admin';
@@ -307,7 +336,7 @@ function TeamManagement({ id, data, history }: { id: string; data: Detail; histo
               : 'Review requests and manage ordinary members. Only leads and administrators can change roles or settings.'}
           </p>
           {pendingCount > 0 && (
-            <Link className="btn team-request-callout" to={`/admin/teams/${encodeURIComponent(id)}?view=manage&section=requests`}>
+            <Link className="btn team-request-callout" to={`${base}/${encodeURIComponent(id)}?view=manage&section=requests`}>
               {pendingCount} {pendingCount === 1 ? 'request' : 'requests'} waiting
             </Link>
           )}
@@ -326,12 +355,12 @@ function TeamManagement({ id, data, history }: { id: string; data: Detail; histo
           params.set('view', 'manage');
           params.set('section', item.id);
           params.delete('team');
-          return { ...item, to: { pathname: `/admin/teams/${encodeURIComponent(id)}`, search: params.toString() } };
+          return { ...item, to: { pathname: `${base}/${encodeURIComponent(id)}`, search: params.toString() } };
         })}
       />
       {(role || admin) && (
         <RetainedPanel active={section === 'usage'}>
-          <TeamPage teamId={id} workspace="administration" />
+          <TeamPage teamId={id} workspace={base === '/teams' ? 'personal' : 'administration'} embedded />
         </RetainedPanel>
       )}
       <div className="row">
@@ -382,7 +411,7 @@ function TeamManagement({ id, data, history }: { id: string; data: Detail; histo
               <button
                 className="btn"
                 disabled={action.isPending}
-                onClick={() => run(() => api.del(`${path}/join-requests`), 'Membership request cancelled.')}
+                onClick={() => run(() => api.del(`${path}/join-requests`), 'Membership request canceled.')}
               >
                 Cancel request
               </button>

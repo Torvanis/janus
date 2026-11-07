@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -242,6 +243,9 @@ func TestSignInAdminGroupMembership(t *testing.T) {
 // drives the same admin-group evaluation as a real OIDC groups claim, end to
 // end through the HTTP login route.
 func TestSignInDevAuthGroupsParity(t *testing.T) {
+	if !config.DevAuthCompiled {
+		t.Skip("dev auth is not compiled into the Janus FIPS edition; see TestFIPSEditionHasNoDevAuthSignIn")
+	}
 	devLogin := func(t *testing.T, h *harness, query string) *store.User {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/auth/start?"+query, nil)
@@ -290,4 +294,32 @@ func TestSignInDevAuthGroupsParity(t *testing.T) {
 			t.Fatalf("unset variable must ignore groups: role=%q admin_via_group=%v", user.Role, user.AdminViaGroup)
 		}
 	})
+}
+
+// TestFIPSEditionHasNoDevAuthSignIn: even with DevAuthEnabled set directly on
+// the config (bypassing Load's refusal), the FIPS edition's /auth/start never
+// signs anyone in from an email query parameter, and /api/v1/config says
+// dev_auth=false and edition=fips.
+func TestFIPSEditionHasNoDevAuthSignIn(t *testing.T) {
+	h := newHarness(t) // harness config sets DevAuthEnabled: true
+	if config.DevAuthCompiled {
+		t.Skip("default edition: dev auth is covered by TestSignInDevAuthGroupsParity")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/start?email=intruder@example.com", nil)
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == auth.SessionCookie && c.Value != "" {
+			t.Fatalf("FIPS edition issued a session from the dev-auth query: %d %s", rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	if _, err := h.store.UserByEmail(context.Background(), "intruder@example.com"); err == nil {
+		t.Fatal("FIPS edition provisioned a user from the dev-auth query")
+	}
+	cfg := httptest.NewRecorder()
+	h.handler.ServeHTTP(cfg, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	body := cfg.Body.String()
+	if !strings.Contains(body, `"dev_auth":false`) || !strings.Contains(body, `"edition":"fips"`) {
+		t.Fatalf("/api/v1/config = %s", body)
+	}
 }

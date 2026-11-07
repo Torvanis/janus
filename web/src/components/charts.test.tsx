@@ -1,5 +1,5 @@
 /**
- * Chart component tests, centred on the stacked-series mode of AreaChart.
+ * Chart component tests, centered on the stacked-series mode of AreaChart.
  *
  * The single-series contract is locked with a GOLDEN markup string captured
  * from the implementation as it existed BEFORE stacked mode was added: when
@@ -32,7 +32,7 @@ function tp(bucket: string, tokensIn: number, tokensOut: number, requests: numbe
 }
 
 // useId output (e.g. ":R0:") depends on tree position, not on the component's
-// markup contract. Normalise it in both the golden and the fresh render.
+// markup contract. Normalize it in both the golden and the fresh render.
 const SINGLE_SERIES: TimePoint[] = [tp('a', 10, 5, 3), tp('b', 20, 10, 7), tp('c', 5, 2, 1)];
 
 // Captured from `renderToStaticMarkup(<AreaChart series={SINGLE_SERIES} metric="tokens" />)`
@@ -72,7 +72,7 @@ function yFor(value: number, max: number): string {
 
 describe('AreaChart single-series mode (backward compatibility)', () => {
   it('plots against a rounded axis top so the scale reads in round numbers', () => {
-    // The chart gained a labelled y-axis, which required two deliberate
+    // The chart gained a labeled y-axis, which required two deliberate
     // changes from the old golden markup: the SVG is wrapped by an HTML scale
     // (SVG <text> would be distorted by preserveAspectRatio="none"), and the
     // paths are drawn against niceAxisMax(peak) rather than the raw peak — so
@@ -94,7 +94,7 @@ describe('AreaChart single-series mode (backward compatibility)', () => {
     expect(stroke).not.toContain(',8.00');
   });
 
-  it('renders a readable y-axis scale rather than unlabelled gridlines', () => {
+  it('renders a readable y-axis scale rather than unlabeled gridlines', () => {
     // The reported gap: a chart shape with no magnitude anywhere on it.
     const { container } = render(<AreaChart series={SINGLE_SERIES} metric="tokens" />);
     const text = container.textContent ?? '';
@@ -169,7 +169,7 @@ describe('AreaChart stacked mode', () => {
     expect(screen.getByText('total 15')).toBeTruthy(); // 3 + 5 + 7
   });
 
-  it('renders a legend entry per layer with label, colour swatch, and dash sample', () => {
+  it('renders a legend entry per layer with label, color swatch, and dash sample', () => {
     const { container } = render(<AreaChart series={STACKED} metric="tokens" />);
     const legend = container.querySelector('ul[aria-label="Chart series"]');
     expect(legend).not.toBeNull();
@@ -181,7 +181,7 @@ describe('AreaChart stacked mode', () => {
     expect(first.textContent).toBe('Tokens in');
     expect(second.textContent).toBe('Tokens out');
 
-    // Colour swatches carry the layer's palette token.
+    // Color swatches carry the layer's palette token.
     const swatch = (entry: Element): string => (entry.querySelector('span[aria-hidden="true"]') as HTMLElement).style.background;
     expect(swatch(first)).toBe(seriesColor(0));
     expect(swatch(second)).toBe(seriesColor(1));
@@ -192,7 +192,7 @@ describe('AreaChart stacked mode', () => {
     expect(second.querySelector('svg line')).not.toBeNull();
   });
 
-  it('never encodes layers by hue alone: distinct colours AND distinct dash patterns', () => {
+  it('never encodes layers by hue alone: distinct colors AND distinct dash patterns', () => {
     const three: AreaSeries[] = [0, 1, 2].map((index) => ({
       key: `layer-${index}`,
       label: `Layer ${index}`,
@@ -215,7 +215,7 @@ describe('AreaChart stacked mode', () => {
     expect(dashes[2]).toBe(seriesDash(2));
   });
 
-  it('normalises comma-separated dash patterns to SVG space form', () => {
+  it('normalizes comma-separated dash patterns to SVG space form', () => {
     const series: AreaSeries[] = [
       { key: 'a', label: 'A', color: seriesColor(0), dash: '4,2', values: [1, 2] },
       { key: 'b', label: 'B', color: seriesColor(1), values: [1, 2] },

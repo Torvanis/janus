@@ -105,7 +105,7 @@ const (
 // What a decision-model guard judges (check option "judge_scope"), and how
 // it reads text longer than one call takes (option "long_text"). Both only
 // apply to checks bound to a decision model; Prompt Guard and Llama Guard
-// always read every message. The defaults are the original behaviour: the
+// always read every message. The defaults are the original behavior: the
 // new turn only, its last 12,000 characters, in one call per check.
 const (
 	// SecgwJudgeNewTurn judges the new turn: the messages after the last
@@ -226,7 +226,7 @@ type SecgwPolicy struct {
 // characters and anything that reads as markup are out.
 var secgwNameRE = regexp.MustCompile(`^[\pL\pN][\pL\pN .,:;'&/()_\-–—]{0,79}$`)
 
-// Validate normalises defaults and rejects impossible policies.
+// Validate normalizes defaults and rejects impossible policies.
 func (p *SecgwPolicy) Validate() error {
 	p.Name = strings.TrimSpace(p.Name)
 	if !secgwNameRE.MatchString(p.Name) {
@@ -320,7 +320,7 @@ func (p *SecgwPolicy) Validate() error {
 		}
 	}
 	if p.SyntheticRefusal && strings.TrimSpace(p.RefusalText) == "" {
-		p.RefusalText = "This request was declined by your organisation's security policy."
+		p.RefusalText = "This request was declined by your organization's security policy."
 	}
 	if len(p.RefusalText) > 2000 {
 		return &ValidationError{Field: "refusal_text", Message: "refusal_text must be at most 2000 characters"}
@@ -417,7 +417,7 @@ type SecgwTermList struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Validate normalises a term list.
+// Validate normalizes a term list.
 func (l *SecgwTermList) Validate() error {
 	l.Name = strings.TrimSpace(l.Name)
 	if !secgwNameRE.MatchString(l.Name) {
@@ -506,7 +506,7 @@ type SecgwViolation struct {
 	// CaptureDisabled says the owning policy had text capture turned off
 	// when this violation was recorded, so there is no text to reveal and
 	// never will be. Without it the UI can only say "no text was captured",
-	// which reads as a failure rather than the configured behaviour.
+	// which reads as a failure rather than the configured behavior.
 	CaptureDisabled bool `json:"capture_disabled,omitempty"`
 	// RuleNames are the category names of a content-safety violation's
 	// rule_id, in the same order: security categories by their name, and

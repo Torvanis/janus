@@ -72,7 +72,7 @@ func TestFitAfterProviderRefusals(t *testing.T) {
 
 func TestToolsNeedResponses(t *testing.T) {
 	if !ToolsNeedResponses([]byte(openaiToolsNoEffort)) {
-		t.Fatal("the OpenAI tools refusal was not recognised")
+		t.Fatal("the OpenAI tools refusal was not recognized")
 	}
 	if ToolsNeedResponses([]byte(openaiNoneRefused)) {
 		t.Fatal("an ordinary effort refusal was taken for the tools refusal")

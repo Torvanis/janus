@@ -181,7 +181,7 @@ func (a *OpenAICompatible) ExtractUsage(body []byte) (Usage, bool) { return pars
 // NewStreamCollector returns a collector for OpenAI-style SSE frames.
 func (a *OpenAICompatible) NewStreamCollector() StreamCollector { return &openAIStreamCollector{} }
 
-// TransformResponse leaves OpenAI-shaped bodies alone apart from normalising
+// TransformResponse leaves OpenAI-shaped bodies alone apart from normalizing
 // the vendor-specific reasoning field (see normalizeReasoningFields).
 func (a *OpenAICompatible) TransformResponse(req *Request, body []byte) ([]byte, error) {
 	if req == nil || !strings.HasPrefix(req.Path, "/v1/chat/completions") {
@@ -190,7 +190,7 @@ func (a *OpenAICompatible) TransformResponse(req *Request, body []byte) ([]byte,
 	return normalizeReasoningFields(body), nil
 }
 
-// NewStreamTransformer applies the same reasoning-field normalisation to
+// NewStreamTransformer applies the same reasoning-field normalization to
 // each streamed chunk.
 func (a *OpenAICompatible) NewStreamTransformer(req *Request, _ http.Header) StreamTransformer {
 	if req == nil || !strings.HasPrefix(req.Path, "/v1/chat/completions") {

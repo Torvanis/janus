@@ -1,3 +1,5 @@
+//go:build !fips
+
 package reporting
 
 // The PDF is a presentation of the frozen result, never a second reporting
@@ -198,42 +200,6 @@ func (d *reportPDF) headingSized(s string, size float64) {
 	d.p.SetY(d.p.GetY() + 2)
 }
 
-// pdfNumber is the reader format for one value (grouped, currency, percent).
-func pdfNumber(v *float64, unit string) string { return formatValue(v, unit) }
-
-func pdfMetric(r Result, key string) Column {
-	for _, c := range r.Columns {
-		if c.Key == key {
-			return c
-		}
-	}
-	for _, s := range r.Sections {
-		for _, c := range s.Columns {
-			if c.Key == key {
-				return c
-			}
-		}
-	}
-	return Column{Key: key, Label: label(key), Unit: resultUnit(r, key)}
-}
-
-func pdfKeys(m map[string]*float64) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-func containsKey(keys []string, k string) bool {
-	for _, v := range keys {
-		if v == k {
-			return true
-		}
-	}
-	return false
-}
-
 func (d *reportPDF) cover(r Result) {
 	p := d.p
 	if t := strings.TrimSpace(strings.ReplaceAll(r.Definition.Template, "_", " ")); t != "" {
@@ -353,92 +319,6 @@ func (d *reportPDF) notices(list []string) {
 	p.SetY(y + h + 5)
 }
 
-// pdfChartMetric skips all-null metrics and never compares unlike units.
-func pdfChartMetric(cols []Column, rows []Row) (Column, bool) {
-	for _, key := range []string{"requests", "total_tokens", "cost_usd"} {
-		for _, c := range cols {
-			if c.Key == key {
-				for _, r := range rows {
-					if r.Values[c.Key] != nil {
-						return c, true
-					}
-				}
-			}
-		}
-	}
-	for _, c := range cols {
-		for _, r := range rows {
-			if r.Values[c.Key] != nil {
-				return c, true
-			}
-		}
-	}
-	return Column{}, false
-}
-func pdfDate(s string) (time.Time, bool) {
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02", "2006-01", "2006-01-02 15:04:05"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
-}
-func pdfDateKey(cols []Column, rows []Row) string {
-	for _, c := range cols {
-		if !(c.Key == "day" || c.Key == "date" || c.Key == "bucket" || c.Key == "month" || c.Key == "week" || c.Key == "hour" || c.Key == "time") {
-			continue
-		}
-		for _, r := range rows {
-			if _, ok := pdfDate(r.Dimensions[c.Key]); ok {
-				return c.Key
-			}
-		}
-	}
-	return ""
-}
-
-// A single time axis cannot distinguish multiple dimensions or duplicate
-// buckets. Date-only buckets lack an offset, so they are only interpreted in
-// UTC reports. A day bucket may overlap a partial first or last day (rolling
-// periods start mid-day); it is drawn and the partial boundary is disclosed.
-func pdfTimeAxisSafe(r Result, s Section) bool {
-	key := pdfDateKey(s.Columns, s.Rows)
-	seen := map[time.Time]bool{}
-	for _, row := range s.Rows {
-		if len(row.Dimensions) != 1 {
-			return false
-		}
-		value := row.Dimensions[key]
-		dt, ok := pdfDate(value)
-		if !ok || seen[dt] {
-			return false
-		}
-		seen[dt] = true
-		span := time.Duration(0)
-		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
-			if r.Definition.Timezone != "" && r.Definition.Timezone != "UTC" {
-				return false
-			}
-			span = 24 * time.Hour
-		}
-		if (!r.Start.IsZero() && !dt.Add(span).After(r.Start) && !(span == 0 && dt.Equal(r.Start))) || (!r.End.IsZero() && !dt.Before(r.End)) {
-			return false
-		}
-	}
-	return true
-}
-
-func partialBoundary(r Result) bool {
-	midnight := func(t time.Time) bool {
-		if t.IsZero() {
-			return true
-		}
-		t = t.In(reportLocation(r))
-		return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
-	}
-	return !midnight(r.Start) || !midnight(r.End)
-}
-
 func (d *reportPDF) charts(r Result) {
 	sets := append([]Section{{ID: "data", Title: "Main data", Columns: r.Columns, Rows: r.Rows}}, r.Sections...)
 	timeline, ranking := -1, -1
@@ -514,61 +394,6 @@ func (d *reportPDF) charts(r Result) {
 			d.paragraph("No category or date breakdown to chart. All values, including zeros and negatives, are in the tables that follow.", 9)
 		}
 	}
-}
-
-type pdfObservation struct {
-	date  time.Time
-	value *float64
-}
-
-func pdfObservations(s Section, c Column) []pdfObservation {
-	key := pdfDateKey(s.Columns, s.Rows)
-	out := []pdfObservation{}
-	for _, row := range s.Rows {
-		if dt, ok := pdfDate(row.Dimensions[key]); ok {
-			out = append(out, pdfObservation{dt, row.Values[c.Key]})
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].date.Before(out[j].date) })
-	return out
-}
-
-// niceStep picks a 1/2/5×10^n tick step giving about four intervals.
-func niceStep(span float64, whole bool) float64 {
-	if span <= 0 {
-		span = 1
-	}
-	step := math.Pow(10, math.Floor(math.Log10(span/4)))
-	for _, f := range []float64{1, 2, 2.5, 5, 10} {
-		if step*f >= span/4 {
-			step *= f
-			break
-		}
-	}
-	if whole {
-		step = math.Max(1, math.Round(step))
-	}
-	return step
-}
-
-func axisValue(v float64, unit string) string {
-	c := v
-	switch strings.ToLower(unit) {
-	case "usd":
-		if math.Abs(v) >= 1000 {
-			return "$" + trimmed(v/1000, 1) + "k"
-		}
-		return "$" + trimmed(v, 0)
-	case "ratio":
-		return trimmed(v*100, 0) + "%"
-	}
-	if math.Abs(c) >= 1e6 {
-		return trimmed(c/1e6, 1) + "M"
-	}
-	if math.Abs(c) >= 1e4 {
-		return trimmed(c/1e3, 0) + "k"
-	}
-	return grouped(c, 0)
 }
 
 func (d *reportPDF) timeline(r Result, s Section, c Column, col rgb) {
@@ -694,34 +519,6 @@ func (d *reportPDF) timeline(r Result, s Section, c Column, col rgb) {
 	}
 	p.SetY(y + ch + 7)
 }
-
-func pdfRowLabel(cols []Column, row Row, index int) string {
-	parts := []string{}
-	// Producers often return both an opaque dimension and its display-name
-	// companion. Prefer the companion, while preserving identities in tables.
-	for _, c := range tableColumns(cols, []Row{row}) {
-		v, ok := row.Dimensions[c.Key]
-		if !ok || v == "" {
-			continue
-		}
-		if _, named := row.Dimensions[c.Key+"_name"]; named {
-			continue
-		}
-		if _, named := row.Dimensions[c.Key+"_label"]; named {
-			continue
-		}
-		if strings.HasSuffix(c.Key, "_id") {
-			if _, named := row.Dimensions[strings.TrimSuffix(c.Key, "_id")+"_name"]; named {
-				continue
-			}
-		}
-		parts = append(parts, v)
-	}
-	if len(parts) == 0 {
-		return fmt.Sprintf("Row %d", index+1)
-	}
-	return strings.Join(parts, " · ")
-}
 func (d *reportPDF) ranking(s Section, c Column) {
 	indices := make([]int, len(s.Rows))
 	for i := range indices {
@@ -809,16 +606,6 @@ func (d *reportPDF) ranking(s Section, c Column) {
 	d.paragraph("Bars are scaled to the largest value shown. Share is of all groups in this breakdown. Unavailable is not zero.", 7.5)
 }
 
-// pdfRowColumn is the column that names ranking rows (display name preferred).
-func pdfRowColumn(s Section) Column {
-	for _, c := range displayColumns(s.Columns, s.Rows) {
-		if isDimension(c, s.Rows) {
-			return c
-		}
-	}
-	return Column{Key: "group", Label: "Group"}
-}
-
 // section routes one result section to the right reader layout.
 func (d *reportPDF) section(r Result, s Section) {
 	switch {
@@ -894,23 +681,6 @@ func (d *reportPDF) comparison(r Result, s Section) {
 	for _, n := range s.Notes {
 		d.paragraph(n, 8)
 	}
-}
-
-func signedPercent(v float64) string {
-	if math.Abs(v) < .0005 {
-		if v == 0 {
-			return "0%"
-		}
-		return "<0.1%"
-	}
-	s := trimmed(math.Abs(v)*100, 1) + "%"
-	switch {
-	case v > 0:
-		return "+" + s
-	case v < 0:
-		return "-" + s
-	}
-	return s
 }
 
 // Tables use real cell geometry with right-aligned numbers. Opaque identities
@@ -1199,4 +969,156 @@ func (d *reportPDF) about(r Result) {
 	for i, kv := range details {
 		d.rowFragments([]string{kv[0], kv[1]}, widths, 8.5, i, func() {}, "Report details")
 	}
+}
+
+// pdfNumber is the reader format for one value (grouped, currency, percent).
+func pdfNumber(v *float64, unit string) string { return formatValue(v, unit) }
+
+// pdfChartMetric skips all-null metrics and never compares unlike units.
+func pdfChartMetric(cols []Column, rows []Row) (Column, bool) {
+	for _, key := range []string{"requests", "total_tokens", "cost_usd"} {
+		for _, c := range cols {
+			if c.Key == key {
+				for _, r := range rows {
+					if r.Values[c.Key] != nil {
+						return c, true
+					}
+				}
+			}
+		}
+	}
+	for _, c := range cols {
+		for _, r := range rows {
+			if r.Values[c.Key] != nil {
+				return c, true
+			}
+		}
+	}
+	return Column{}, false
+}
+
+// A single time axis cannot distinguish multiple dimensions or duplicate
+// buckets. Date-only buckets lack an offset, so they are only interpreted in
+// UTC reports. A day bucket may overlap a partial first or last day (rolling
+// periods start mid-day); it is drawn and the partial boundary is disclosed.
+func pdfTimeAxisSafe(r Result, s Section) bool {
+	key := pdfDateKey(s.Columns, s.Rows)
+	seen := map[time.Time]bool{}
+	for _, row := range s.Rows {
+		if len(row.Dimensions) != 1 {
+			return false
+		}
+		value := row.Dimensions[key]
+		dt, ok := pdfDate(value)
+		if !ok || seen[dt] {
+			return false
+		}
+		seen[dt] = true
+		span := time.Duration(0)
+		if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
+			if r.Definition.Timezone != "" && r.Definition.Timezone != "UTC" {
+				return false
+			}
+			span = 24 * time.Hour
+		}
+		if (!r.Start.IsZero() && !dt.Add(span).After(r.Start) && !(span == 0 && dt.Equal(r.Start))) || (!r.End.IsZero() && !dt.Before(r.End)) {
+			return false
+		}
+	}
+	return true
+}
+
+func partialBoundary(r Result) bool {
+	midnight := func(t time.Time) bool {
+		if t.IsZero() {
+			return true
+		}
+		t = t.In(reportLocation(r))
+		return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+	}
+	return !midnight(r.Start) || !midnight(r.End)
+}
+
+// niceStep picks a 1/2/5×10^n tick step giving about four intervals.
+func niceStep(span float64, whole bool) float64 {
+	if span <= 0 {
+		span = 1
+	}
+	step := math.Pow(10, math.Floor(math.Log10(span/4)))
+	for _, f := range []float64{1, 2, 2.5, 5, 10} {
+		if step*f >= span/4 {
+			step *= f
+			break
+		}
+	}
+	if whole {
+		step = math.Max(1, math.Round(step))
+	}
+	return step
+}
+
+func axisValue(v float64, unit string) string {
+	c := v
+	switch strings.ToLower(unit) {
+	case "usd":
+		if math.Abs(v) >= 1000 {
+			return "$" + trimmed(v/1000, 1) + "k"
+		}
+		return "$" + trimmed(v, 0)
+	case "ratio":
+		return trimmed(v*100, 0) + "%"
+	}
+	if math.Abs(c) >= 1e6 {
+		return trimmed(c/1e6, 1) + "M"
+	}
+	if math.Abs(c) >= 1e4 {
+		return trimmed(c/1e3, 0) + "k"
+	}
+	return grouped(c, 0)
+}
+
+// pdfRowColumn is the column that names ranking rows (display name preferred).
+func pdfRowColumn(s Section) Column {
+	for _, c := range displayColumns(s.Columns, s.Rows) {
+		if isDimension(c, s.Rows) {
+			return c
+		}
+	}
+	return Column{Key: "group", Label: "Group"}
+}
+
+func signedPercent(v float64) string {
+	if math.Abs(v) < .0005 {
+		if v == 0 {
+			return "0%"
+		}
+		return "<0.1%"
+	}
+	s := trimmed(math.Abs(v)*100, 1) + "%"
+	switch {
+	case v > 0:
+		return "+" + s
+	case v < 0:
+		return "-" + s
+	}
+	return s
+}
+
+func isDimension(c Column, rows []Row) bool {
+	for _, row := range rows {
+		if _, ok := row.Dimensions[c.Key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// higherIsWorse decides the color of a change; it never alters the value.
+func higherIsWorse(key string) bool {
+	for _, w := range []string{"cost", "error", "denial", "block", "latency", "ttfb", "unpriced", "estimated", "unknown", "_ms"} {
+		if strings.Contains(key, w) {
+			return true
+		}
+	}
+	return false
 }

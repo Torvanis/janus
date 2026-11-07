@@ -142,10 +142,7 @@ func (s *Store) SetChatMemoryOff(ctx context.Context, userID string, off bool) e
 // execOne runs a statement that must touch exactly one row (ErrNotFound
 // otherwise: the id is not the caller's).
 func (s *Store) execOne(ctx context.Context, query string, args ...any) error {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(query), args...)
 	if err != nil {
 		return err

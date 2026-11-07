@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { pageOffset } from '../lib/collections';
 import { useUrlState, useUrlStateBatch } from '../lib/hooks';
 import type { ReportResult } from '../lib/reports';
-import { useLocalOnly } from '../app/session';
+import { useFIPSEdition, useLocalOnly } from '../app/session';
 import { isCostMetric } from '../lib/reports';
 import { formatNumber } from '../lib/format';
 import './report-result.css';
@@ -603,6 +603,10 @@ export function ReportResultView({
   drillableDimensions?: string[];
 }): ReactNode {
   const localOnly = useLocalOnly();
+  // The Janus FIPS edition does not include PDF export (the PDF library needs
+  // SHA-1, MD5 and RC4); the server refuses it, so the menu does not offer it.
+  const fipsEdition = useFIPSEdition();
+  const formats = fipsEdition ? exportFormats.filter((f) => f.format !== 'pdf') : exportFormats;
   // Defense in depth for old frozen runs. Server downloads enforce their own policy.
   const hidden = (text: string) =>
     /prompt|user[_ -]?agent|\bip[_ -]?address\b/i.test(text) ||
@@ -650,7 +654,7 @@ export function ReportResultView({
         <details className="report-result-export">
           <summary>Export</summary>
           <nav aria-label="Export report">
-            {exportFormats.map((f) => (
+            {formats.map((f) => (
               <a key={f.format} href={`/api/v1/reports/runs/${encodeURIComponent(runID)}/download?format=${f.format}`} download>
                 <strong>{f.name}</strong>
                 <span>{f.detail}</span>

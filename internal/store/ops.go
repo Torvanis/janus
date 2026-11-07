@@ -7,30 +7,97 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // --- Audit ------------------------------------------------------------------
 
-// AppendAudit writes one immutable administrative record.
+// AppendAudit writes one immutable audit record. Once it is committed
+// (at once, or when the request transaction commits) it is handed to the
+// audit forwarder (SetAuditForwarder: syslog/SIEM).
 func (s *Store) AppendAudit(ctx context.Context, e *AuditEntry) error {
 	e.ID = NewID()
 	e.CreatedAt = nowUTC()
-	return s.exec(ctx,
-		`INSERT INTO audit_log (id, actor_user_id, actor_label, action, resource_type, resource_id, old_value, new_value, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?)`,
-		e.ID, e.ActorUserID, e.ActorLabel, e.Action, e.ResourceType, e.ResourceID, e.OldValue, e.NewValue, FormatTime(e.CreatedAt))
+	if e.Outcome == "" {
+		e.Outcome = AuditSuccess
+	}
+	if err := s.exec(ctx,
+		`INSERT INTO audit_log (id, actor_user_id, actor_label, action, resource_type, resource_id, old_value, new_value, source_ip, outcome, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		e.ID, e.ActorUserID, e.ActorLabel, e.Action, e.ResourceType, e.ResourceID, e.OldValue, e.NewValue, e.SourceIP, e.Outcome, FormatTime(e.CreatedAt)); err != nil {
+		return err
+	}
+	if fwd := auditForwarder.Load(); fwd != nil {
+		entry := *e
+		onCommit(ctx, func() { (*fwd)(entry) })
+	}
+	return nil
 }
+
+// Audit outcomes.
+const (
+	AuditSuccess = "success"
+	AuditFailure = "failure"
+)
+
+var auditForwarder atomic.Pointer[func(AuditEntry)]
+
+// SetAuditForwarder installs fn to receive every committed audit record (nil
+// removes it). fn must not block: the syslog forwarder queues.
+func SetAuditForwarder(fn func(AuditEntry)) {
+	if fn == nil {
+		auditForwarder.Store(nil)
+		return
+	}
+	auditForwarder.Store(&fn)
+}
+
+// Audit categories group actions for the audit page.
+const (
+	AuditCategoryAuthentication = "authentication"
+	AuditCategoryAccess         = "access"
+	AuditCategoryAdministration = "administration"
+)
+
+// AuthenticationAuditActions are the sign-in and session events.
+var AuthenticationAuditActions = []string{"sign_in", "sign_in_failed", "sign_out", "session_timeout", "session_ended_cap",
+	"account_locked", "account_unlocked", "banner_acknowledged", "password_expired", "user_password_changed",
+	"user_recovery_code_used", "user_totp_enabled", "user_totp_disabled"}
+
+// AccessAuditActions are refusals of signed-in or presented credentials.
+var AccessAuditActions = []string{"access_denied"}
 
 // AuditFilter narrows an audit query.
 type AuditFilter struct {
 	Actor        string
 	Action       string
 	ResourceType string
-	Start        time.Time
-	End          time.Time
-	Limit        int
-	Offset       int
+	// Category: authentication, access or administration ("" = all).
+	Category string
+	// Outcome: success or failure ("" = both).
+	Outcome string
+	// IP: exact source address.
+	IP string
+	// Query matches actor, action, resource and values (case-insensitive).
+	Query string
+	Start time.Time
+	End   time.Time
+	// Sort: created_at (default), action, actor, outcome, ip. Asc reverses
+	// the default newest-first order.
+	Sort   string
+	Asc    bool
+	Limit  int
+	Offset int
+}
+
+func inList(col string, vals []string) (string, []any) {
+	ph := make([]string, len(vals))
+	args := make([]any, len(vals))
+	for i, v := range vals {
+		ph[i], args[i] = "?", v
+	}
+	return col + " IN (" + strings.Join(ph, ",") + ")", args
 }
 
 // ListAudit returns a page of audit entries plus the total match count.
@@ -49,6 +116,34 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]*AuditEntry, in
 		where = append(where, "resource_type = ?")
 		args = append(args, f.ResourceType)
 	}
+	switch f.Category {
+	case AuditCategoryAuthentication:
+		c, a := inList("action", AuthenticationAuditActions)
+		where, args = append(where, c), append(args, a...)
+	case AuditCategoryAccess:
+		c, a := inList("action", AccessAuditActions)
+		where, args = append(where, c), append(args, a...)
+	case AuditCategoryAdministration:
+		c, a := inList("action", append(append([]string{}, AuthenticationAuditActions...), AccessAuditActions...))
+		where, args = append(where, "NOT "+c), append(args, a...)
+	}
+	switch f.Outcome {
+	case AuditSuccess:
+		where = append(where, "outcome <> ?")
+		args = append(args, AuditFailure)
+	case AuditFailure:
+		where = append(where, "outcome = ?")
+		args = append(args, AuditFailure)
+	}
+	if f.IP != "" {
+		where = append(where, "source_ip = ?")
+		args = append(args, f.IP)
+	}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		like := "%" + strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(strings.ToLower(q)) + "%"
+		where = append(where, `(LOWER(actor_label) LIKE ? ESCAPE '\' OR LOWER(action) LIKE ? ESCAPE '\' OR LOWER(resource_type) LIKE ? ESCAPE '\' OR LOWER(resource_id) LIKE ? ESCAPE '\' OR LOWER(new_value) LIKE ? ESCAPE '\' OR LOWER(old_value) LIKE ? ESCAPE '\' OR source_ip LIKE ? ESCAPE '\')`)
+		args = append(args, like, like, like, like, like, like, like)
+	}
 	if !f.Start.IsZero() {
 		where = append(where, "created_at >= ?")
 		args = append(args, FormatTime(f.Start))
@@ -66,8 +161,20 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]*AuditEntry, in
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	rows, err := s.query(ctx, `SELECT id, actor_user_id, actor_label, action, resource_type, resource_id, old_value, new_value, created_at
-		FROM audit_log WHERE `+clause+` ORDER BY created_at DESC LIMIT ? OFFSET ?`, append(args, limit, f.Offset)...)
+	col := map[string]string{"created_at": "created_at", "action": "action", "actor": "actor_label", "outcome": "outcome", "ip": "source_ip"}[f.Sort]
+	if col == "" {
+		col = "created_at"
+	}
+	dir := "DESC"
+	if f.Asc {
+		dir = "ASC"
+	}
+	order := col + " " + dir
+	if col != "created_at" {
+		order += ", created_at DESC"
+	}
+	rows, err := s.query(ctx, `SELECT id, actor_user_id, actor_label, action, resource_type, resource_id, old_value, new_value, source_ip, outcome, created_at
+		FROM audit_log WHERE `+clause+` ORDER BY `+order+`, id LIMIT ? OFFSET ?`, append(args, limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -76,7 +183,7 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]*AuditEntry, in
 	for rows.Next() {
 		var e AuditEntry
 		var created string
-		if err := rows.Scan(&e.ID, &e.ActorUserID, &e.ActorLabel, &e.Action, &e.ResourceType, &e.ResourceID, &e.OldValue, &e.NewValue, &created); err != nil {
+		if err := rows.Scan(&e.ID, &e.ActorUserID, &e.ActorLabel, &e.Action, &e.ResourceType, &e.ResourceID, &e.OldValue, &e.NewValue, &e.SourceIP, &e.Outcome, &created); err != nil {
 			return nil, 0, fmt.Errorf("scan audit entry: %w", err)
 		}
 		e.CreatedAt = ParseTime(created)
@@ -87,7 +194,7 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]*AuditEntry, in
 
 // PurgeAudit deletes audit entries past the retention window.
 func (s *Store) PurgeAudit(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM audit_log WHERE created_at < ?`), FormatTime(before))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM audit_log WHERE created_at < ?`), FormatTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("purge audit log: %w", err)
 	}
@@ -606,7 +713,7 @@ func (s *Store) ResolveDocsFeedback(ctx context.Context, id string) error {
 
 // PurgeDocsFeedback deletes feedback past its retention window.
 func (s *Store) PurgeDocsFeedback(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM docs_feedback WHERE created_at < ?`), FormatTime(before))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM docs_feedback WHERE created_at < ?`), FormatTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("purge docs feedback: %w", err)
 	}

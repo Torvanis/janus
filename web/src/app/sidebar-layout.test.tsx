@@ -91,7 +91,7 @@ it('puts Chat at the top of administration, grants and service tokens under Gate
       .queryAllByRole('link', { hidden: true })
       .map((a) => a.getAttribute('href'));
   // Chat is its own entry, not inside a folded group.
-  expect(links('admin-chat')).toEqual(['/admin/chat']);
+  expect(links('admin-chat')).toEqual(['/admin/chat', '/admin/settings']);
   expect(within(section('admin-chat')).queryByRole('button')).toBeNull();
   expect(links('admin-gateway')).toEqual(expect.arrayContaining(['/admin/grants', '/admin/service-tokens']));
   expect(links('admin-gateway')).not.toContain('/admin/chat');
@@ -119,4 +119,30 @@ it('puts Overview at the very top of administration, on its own', () => {
       .queryAllByRole('link', { hidden: true })
       .map((a) => a.getAttribute('href')),
   ).not.toContain('/admin');
+});
+
+it('keeps header policies out of the menu: they are a tab of Policy rules', () => {
+  renderAt('/admin/rules/headers');
+  const sidebar = screen.getByRole('navigation', { name: /primary/i });
+  const hrefs = Array.from(sidebar.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+  expect(hrefs).not.toContain('/admin/header-policies');
+  const security = sidebar.querySelector('[data-section="admin-security"]')!;
+  const rules = within(security as HTMLElement).getByRole('link', { name: /Policy rules/ });
+  expect(rules.getAttribute('aria-current')).toBe('page');
+});
+
+it('makes section titles a heading with a chevron, and sets their pages apart from them', () => {
+  renderAt('/admin/requests');
+  const sidebar = screen.getByRole('navigation', { name: /primary/i });
+  const gateway = within(sidebar).getByRole('button', { name: /Gateway/ });
+  expect(gateway.getAttribute('aria-expanded')).toBe('false');
+  expect(gateway.querySelector('svg.chevron.is-collapsed')).toBeTruthy();
+  expect(gateway.textContent).not.toContain('▸');
+  fireEvent.click(gateway);
+  expect(gateway.getAttribute('aria-expanded')).toBe('true');
+  expect(gateway.querySelector('svg.chevron.is-collapsed')).toBeNull();
+  const group = sidebar.querySelector('#nav-admin-gateway')!;
+  expect(group.classList.contains('nav-group-folded')).toBe(true);
+  // Unlabeled, standalone entries (Overview, Chat, Settings) are not indented.
+  expect(sidebar.querySelector('#nav-admin-overview')!.classList.contains('nav-group-folded')).toBe(false);
 });

@@ -86,6 +86,22 @@ export interface Me {
    * new items is blocked. Optional for wire compatibility with older servers.
    */
   license?: LicenseSummary;
+  /** The caller's session limits (absent for token callers and older servers). */
+  session?: { idle_timeout_seconds?: number; ends_at?: string };
+  /** Rules local passwords must meet. */
+  password_policy?: PasswordPolicy;
+}
+
+export interface PasswordPolicy {
+  min_length: number;
+  require_upper: boolean;
+  require_lower: boolean;
+  require_digit: boolean;
+  require_special: boolean;
+  min_changed_chars: number;
+  history: number;
+  min_age_hours: number;
+  max_age_days: number;
 }
 
 export interface RenewalNotice {
@@ -401,7 +417,7 @@ export interface UsageEvent {
   route_reason?: string;
   /** Inline Usage insights label ("coding/rust"). */
   classification?: string;
-  /** Admin request log: how Usage insights labelled the request (inline or background). */
+  /** Admin request log: how Usage insights labeled the request (inline or background). */
   classification_tag?: ClassificationTag;
   secgw_action?: string;
   secgw_violations?: number;
@@ -524,6 +540,8 @@ export interface Upstream {
   last_latency_ms: number;
   model_count: number;
   created_at: string;
+  /** Skip TLS certificate verification for this upstream (refused by FIPS/STIG). */
+  allow_untrusted_tls?: boolean;
 }
 
 export interface Grant {
@@ -758,6 +776,8 @@ export interface AdminUserDetail {
   user: AdminUserRow;
   groups: string[];
   teams: Team[];
+  /** UPN or DoD ID number a CAC/PIV certificate is matched by ("" = none). */
+  smart_card_identity?: string;
   effective_grants: Array<{ model: string; upstream: string; source: string; status: string }>;
   tokens: Array<{ id: string; description: string; prefix: string; revoked_at: string }>;
   quotas: Array<{ id: string; metric_label: string; window_label: string; percent: number }>;
@@ -826,6 +846,10 @@ export interface AuditEntry {
   resource_id: string;
   old_value: string;
   new_value: string;
+  /** Client address (sign-in, access and HTTP-made changes). */
+  source_ip?: string;
+  /** success or failure ("" on older rows = success). */
+  outcome?: string;
   created_at: string;
 }
 
@@ -875,6 +899,42 @@ export interface GlobalDashboard {
   top_teams?: Breakdown[];
 }
 
+/** One feature the Janus FIPS edition switches off, with what to use instead. */
+export interface FIPSRestriction {
+  feature: string;
+  description: string;
+  alternative: string;
+}
+
+/** GET /api/v1/admin/system/status → cryptography. */
+export interface SystemCryptography {
+  edition: 'default' | 'fips';
+  fips140_enabled: boolean;
+  fips140_enforced: boolean;
+  /** Linked Go Cryptographic Module version; "latest" outside the FIPS edition. */
+  module_version: string;
+  validated_module: boolean;
+  cmvp_certificate?: string;
+  restricted_features: FIPSRestriction[];
+  /** FIPS edition only: local accounts holding credentials it cannot use. */
+  legacy_credentials?: { bcrypt_passwords: number; bcrypt_recovery_codes: number; sha1_totp: number };
+  /** Outbound certificate revocation checking (JANUS_TLS_REVOCATION). */
+  tls_revocation?: {
+    mode: 'off' | 'soft' | 'hard';
+    ocsp_responder?: string;
+    good: number;
+    revoked: number;
+    unavailable: number;
+    no_source: number;
+    cache_hits: number;
+    last_error?: string;
+  };
+  /** True when JANUS_STIG_PROFILE=true. */
+  stig_profile?: boolean;
+  /** FIPS edition or STIG profile: the Business license the startup check required. */
+  edition_license?: { required: 'business'; ok: boolean; edition: string; status: string };
+}
+
 export interface SystemStatus {
   database: {
     ok: boolean;
@@ -912,6 +972,8 @@ export interface SystemStatus {
   metering: MeteringHealth;
   retention: { usage_days: number; audit_days: number; purge_at_utc: string };
   build: { version: string; sha: string; started_at: string; uptime_seconds: number };
+  /** Edition and FIPS 140-3 state; absent on servers older than the FIPS edition. */
+  cryptography?: SystemCryptography;
   /**
    * Every registered flag with its current value (incl. spend_emphasis) —
    * the /admin/system panel renders one toggle per entry.
@@ -923,7 +985,7 @@ export interface SystemStatus {
   local_only?: boolean;
   /**
    * Performance mode (JANUS_PERFORMANCE_MODE, Business edition), decided at
-   * startup. reason explains a request that was not honoured.
+   * startup. reason explains a request that was not honored.
    */
   performance_mode?: { requested: boolean; active: boolean; reason?: string };
   /**
@@ -948,7 +1010,7 @@ export interface UpstreamTimeoutValues {
  * boot; an administrator override is persisted and applied without a restart.
  */
 export interface DiscoveryInterval {
-  /** Cadence the scheduler honours right now. */
+  /** Cadence the scheduler honors right now. */
   effective_minutes: number;
   /** Environment value (JANUS_DISCOVERY_INTERVAL_MINUTES). */
   default_minutes: number;

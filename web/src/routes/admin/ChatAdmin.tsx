@@ -34,6 +34,19 @@ export interface ChatModelSetting {
   video?: '' | 'yes' | 'no';
 }
 
+export interface WebPagePolicy {
+  default: boolean;
+  allow_private: boolean;
+  allow_networks: string[];
+  deny_networks: string[];
+  allow_domains: string[];
+  deny_domains: string[];
+  ports: string[];
+  https_only: boolean;
+  proxy: string;
+  tls_trust: 'system' | 'custom' | 'custom-only';
+}
+
 export interface ChatAdminDoc {
   enabled: boolean;
   access: { mode: 'everyone' | 'restricted'; groups: string[]; teams: string[]; users: string[]; message: string };
@@ -54,10 +67,16 @@ export interface ChatAdminDoc {
    * that cannot take them ('' = the first one a person may use). */
   transcribe_model?: string;
   describe_model?: string;
+  /** How chats get titles: the chat's own model (default), naming_model for
+   * every chat, or off. '' follows JANUS_CHAT_AUTO_TITLE. */
+  naming?: '' | 'same_model' | 'model' | 'off';
+  naming_model?: string;
   /** Janus-run web search for models whose provider has none. */
   search?: ChatSearchSettings;
   /** Read-only: which search services have a stored key. */
   search_keys_set?: Record<string, boolean>;
+  /** What read_page may open (JANUS_WEB_*, startup only). Read-only. */
+  web_page_policy?: WebPagePolicy;
   /** Write-only: a new key for search.provider, or clear it. */
   search_key?: string;
   search_key_clear?: boolean;

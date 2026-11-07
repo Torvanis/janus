@@ -78,7 +78,7 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			"ok": dbOK, "engine": string(s.Store.Dialect()), "migrations": migrations,
 			"backend": backend, "location": location, "defaulted": s.Config.DatabaseURLDefaulted,
 		},
-		"identity_provider": map[string]any{"ok": s.OIDC != nil || s.Config.DevAuthEnabled, "provider": s.providerLabel(), "dev_auth": s.Config.DevAuthEnabled},
+		"identity_provider": map[string]any{"ok": s.OIDC != nil || s.Config.DevAuth(), "provider": s.providerLabel(), "dev_auth": s.Config.DevAuth()},
 		"quota_ledger":      map[string]any{"ok": true, "mode": "durable ledger with event-log reconciliation"},
 		"email":             map[string]any{"ok": s.Alerts.EmailEnabled(), "detail": smtpDetail(s.Alerts.EmailEnabled())},
 		"telemetry":         map[string]any{"prometheus": "/metrics"},
@@ -98,12 +98,13 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"retention":     map[string]any{"usage_days": s.Config.UsageRetentionDays, "audit_days": s.Config.AuditRetentionDays, "purge_at_utc": s.Config.PurgeJobTimeUTC},
 		"build":         map[string]any{"version": s.Config.BuildVersion, "sha": s.Config.BuildSHA, "started_at": s.StartedAt, "uptime_seconds": int(time.Since(s.StartedAt).Seconds())},
 		"feature_flags": flags,
+		"cryptography":  s.cryptographyStatus(ctx),
 		"docs_feedback": feedback,
 		"adapters":      adapter.Types(),
 		// Local-only mode (JANUS_LOCAL_ONLY): cost tracking disabled instance-wide.
 		"local_only": s.Config.LocalOnly,
 		// Performance mode (JANUS_PERFORMANCE_MODE, Business): decided at
-		// startup; reason explains a request that was not honoured.
+		// startup; reason explains a request that was not honored.
 		"performance_mode": s.Performance,
 		// Per-hop upstream timeouts in force right now, with their provenance,
 		// so the System page can offer the same document the dedicated
@@ -316,7 +317,7 @@ func (s *Server) finishUpstreamTimeoutChange(w http.ResponseWriter, r *http.Requ
 // discoveryIntervalDocument is the shape served by GET/PATCH/DELETE
 // /api/v1/admin/system/discovery-interval and embedded in the status document.
 type discoveryIntervalDocument struct {
-	// EffectiveMinutes is the cadence the scheduler honours right now.
+	// EffectiveMinutes is the cadence the scheduler honors right now.
 	EffectiveMinutes int `json:"effective_minutes"`
 	// DefaultMinutes is the environment value (JANUS_DISCOVERY_INTERVAL_MINUTES).
 	DefaultMinutes int `json:"default_minutes"`

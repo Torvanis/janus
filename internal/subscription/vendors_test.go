@@ -198,7 +198,7 @@ func TestOpenAIUsageWindows(t *testing.T) {
 	if err != nil || u.Plan != "ChatGPT Plus" || len(u.Windows) != 2 {
 		t.Fatalf("usage: %+v %v", u, err)
 	}
-	// Labelled by window length, not slot.
+	// Labeled by window length, not slot.
 	if u.Windows[0].Label != "Weekly limit" || u.Windows[1].Label != "5-hour limit" || u.Windows[0].ResetsAt.Unix() != 1790000000 || u.Windows[1].ResetsAt.IsZero() {
 		t.Fatalf("windows: %+v", u.Windows)
 	}

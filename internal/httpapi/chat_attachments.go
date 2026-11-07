@@ -646,6 +646,9 @@ type chatHistoryBuild struct {
 	describe, transcribe *string
 	texts                map[string]string // text ref -> text, cached per send
 	warnings             []string
+	// files is every file on this branch (uploads and files replies made),
+	// oldest first: what read_file can open.
+	files []*store.ChatAttachment
 }
 
 func (b *chatHistoryBuild) warn(msg string) {

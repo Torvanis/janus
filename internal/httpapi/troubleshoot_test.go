@@ -20,7 +20,7 @@ import (
 // the captured request, then disable and purge.
 func TestTroubleshootingModeEndToEnd(t *testing.T) {
 	h := newHarness(t)
-	bizLicense(t, h) // enforcing/fallback/capture behaviour is Business
+	bizLicense(t, h) // enforcing/fallback/capture behavior is Business
 	ctx := context.Background()
 	session, err := h.server.Sessions.Create(ctx, h.user.ID)
 	if err != nil {
@@ -229,7 +229,7 @@ func TestTroubleshootingModeEndToEnd(t *testing.T) {
 // a directory, and over-long windows.
 func TestTroubleshootingPutValidation(t *testing.T) {
 	h := newHarness(t)
-	bizLicense(t, h) // enforcing/fallback/capture behaviour is Business
+	bizLicense(t, h) // enforcing/fallback/capture behavior is Business
 	session, _ := h.server.Sessions.Create(context.Background(), h.user.ID)
 	cases := []struct {
 		name string
@@ -301,7 +301,7 @@ func fileNames(m map[string][]byte) []string {
 // skips a non-member's, and skips a service token (which is in no group).
 func TestTroubleshootingCapturesByGroup(t *testing.T) {
 	h := newHarness(t)
-	bizLicense(t, h) // enforcing/fallback/capture behaviour is Business
+	bizLicense(t, h) // enforcing/fallback/capture behavior is Business
 	ctx := context.Background()
 	admin, err := h.server.Sessions.Create(ctx, h.user.ID)
 	if err != nil {

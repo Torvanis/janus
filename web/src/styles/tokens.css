@@ -1,7 +1,7 @@
 /*
  * Janus design tokens.
  *
- * Every colour, space, radius, and duration in the product resolves through one
+ * Every color, space, radius, and duration in the product resolves through one
  * of these custom properties. A corporate rebrand replaces the --janus-color-*
  * ramps only; the structural tokens below are not intended to be overridden.
  */
@@ -268,7 +268,7 @@
 
 /*
  * Reduced motion is a first-class alternate experience, not a degraded one:
- * layout, spacing, and colour are byte-identical — only animation is removed.
+ * layout, spacing, and color are byte-identical — only animation is removed.
  */
 [data-motion='reduced'] *,
 [data-motion='reduced'] *::before,

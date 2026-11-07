@@ -376,7 +376,7 @@ func withholdEcho(msg, text string) string {
 }
 
 // echoes reports whether msg contains a run of at least 24 bytes of text
-// (whitespace-normalised, as errorSnippet normalises msg).
+// (whitespace-normalised, as errorSnippet normalizes msg).
 func echoes(msg, text string) bool {
 	const window = 24
 	norm := strings.Join(strings.Fields(text), " ")

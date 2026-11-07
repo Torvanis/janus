@@ -539,6 +539,9 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
                 {data.teams.length ? data.teams.map((team) => team.name).join(', ') : '—'}
               </DetailRow>
               <DetailRow label={t('adminPeople.colLastSignIn')}>{formatRelative(data.user.last_login_at)}</DetailRow>
+              <DetailRow label="Smart card">
+                <SmartCardIdentity userId={data.user.id} value={data.smart_card_identity ?? ''} />
+              </DetailRow>
             </div>
 
             <section>
@@ -955,5 +958,70 @@ function GroupsTab(): ReactNode {
         busy={remove.isPending}
       />
     </>
+  );
+}
+
+/**
+ * The UPN or DoD ID number (EDIPI) a CAC/PIV certificate is matched by,
+ * for people whose card carries neither their Janus email nor a UPN that
+ * equals it.
+ */
+function SmartCardIdentity({ userId, value }: { userId: string; value: string }): ReactNode {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: (identity: string) => api.put(`/api/v1/admin/users/${userId}/smart-card`, { identity }),
+    onSuccess: () => {
+      setEditing(false);
+      toast('Smart-card identity saved');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'user', userId] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error: Error) => toast(error.message, 'danger'),
+  });
+  if (!editing) {
+    return (
+      <span className="row" style={{ gap: 'var(--janus-space-2)', flexWrap: 'wrap' }}>
+        <span className={value ? 'mono' : 'muted'}>{value || 'Matched by email'}</span>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost"
+          onClick={() => {
+            setDraft(value);
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      </span>
+    );
+  }
+  return (
+    <form
+      className="row"
+      style={{ gap: 'var(--janus-space-2)', flexWrap: 'wrap' }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate(draft.trim());
+      }}
+    >
+      <input
+        className="input mono"
+        aria-label="Smart-card identity (UPN or DoD ID number)"
+        placeholder="1234567890@mil or 1234567890"
+        value={draft}
+        autoFocus
+        onChange={(e) => setDraft(e.target.value)}
+        style={{ minWidth: 0, flex: '1 1 12em' }}
+      />
+      <button type="submit" className="btn btn-sm btn-primary" disabled={save.isPending}>
+        Save
+      </button>
+      <button type="button" className="btn btn-sm" onClick={() => setEditing(false)}>
+        Cancel
+      </button>
+    </form>
   );
 }

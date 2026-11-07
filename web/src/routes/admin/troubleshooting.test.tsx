@@ -149,7 +149,7 @@ describe('troubleshooting card — off state', () => {
     expect(await screen.findByText('Capturing')).toBeTruthy();
   });
 
-  it('organises rules into Include/Require/Exclude gates with badges, collapsing, chips and clearing', async () => {
+  it('organizes rules into Include/Require/Exclude gates with badges, collapsing, chips and clearing', async () => {
     mocked.get.mockResolvedValue(offStatus);
     renderCard();
     const user = userEvent.setup();

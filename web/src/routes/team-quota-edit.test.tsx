@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe('team lead quota editing', () => {
-  it('changes a quota’s limit and breach behaviour in place', async () => {
+  it('changes a quota’s limit and breach behavior in place', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>

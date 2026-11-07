@@ -27,7 +27,7 @@ func TestOpenAIUsageParsesXAICostTicks(t *testing.T) {
 func TestOpenAIUsageParsesTopLevelCostTicks(t *testing.T) {
 	u, ok := parseOpenAIUsage([]byte(`{"cost_in_usd_ticks":15,"data":[]}`))
 	if !ok || !u.CostReported {
-		t.Fatal("top-level cost_in_usd_ticks must be recognised")
+		t.Fatal("top-level cost_in_usd_ticks must be recognized")
 	}
 	if u.CostNano != 2 { // 15 ticks = 1.5 nano-USD, rounded to nearest
 		t.Fatalf("cost nano = %d, want 2", u.CostNano)

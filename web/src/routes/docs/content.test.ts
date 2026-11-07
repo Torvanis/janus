@@ -24,6 +24,7 @@ const CODES_EMITTED_BY_GATEWAY = [
   'license.required',
   'license.feature_not_licensed',
   'license.seats_exhausted',
+  'audit.write_failed',
   'not_found_error',
   'upstream.unavailable',
   'upstream.rate_limit',

@@ -149,7 +149,7 @@ type storageRequest struct {
 	} `json:"s3"`
 }
 
-// resolveStorageRequest normalises a request into a blobstore config,
+// resolveStorageRequest normalizes a request into a blobstore config,
 // filling the secret from the saved setting when the request leaves it
 // blank. It returns the stored setting for audit comparison.
 func (s *Server) resolveStorageRequest(ctx context.Context, body *storageRequest) (string, blobstore.S3Config, store.FileStorageSetting, error) {

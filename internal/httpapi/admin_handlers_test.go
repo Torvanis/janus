@@ -233,7 +233,7 @@ func TestUpstreamTimeoutOverrideAppliesWithoutRestart(t *testing.T) {
 		t.Fatalf("upstream client must be rebuilt for the override while keeping env connect/total, got %+v", second.timeouts)
 	}
 
-	// Reverting to the environment restores the original behaviour.
+	// Reverting to the environment restores the original behavior.
 	if rec := h.doAsSession(session, http.MethodDelete, "/api/v1/admin/system/upstream-timeouts", nil); rec.Code != http.StatusOK {
 		t.Fatalf("DELETE upstream-timeouts returned %d: %s", rec.Code, rec.Body.String())
 	}

@@ -52,6 +52,11 @@ type chatAssist struct {
 	// ReadPage: Janus-run page reading (the "Read web pages" tool for
 	// models whose provider does not read pages itself; deep research).
 	ReadPage bool
+	// Files: the files on this branch read_file may open (uploads and
+	// files earlier replies made). read_file is offered when there are any.
+	Files []*store.ChatAttachment
+	// Ask: ask_user (not in Compare or deep research).
+	Ask bool
 }
 
 // chatRunPlan is everything a reply run needs.
@@ -164,6 +169,9 @@ type chatToolbox struct {
 	functionsOff bool
 	// judge judges tool output before the model sees it (nil: nothing to).
 	judge *chatToolJudge
+	// asked: the model asked the user a question (ask_user); the reply
+	// ends after this round.
+	asked bool
 }
 
 func (b *chatToolbox) defs() []any {
@@ -192,6 +200,12 @@ func (b *chatToolbox) defs() []any {
 	}
 	if a.ReadPage {
 		list = append(list, chatReadPageToolDef)
+	}
+	if len(a.Files) > 0 {
+		list = append(list, chatReadFileToolDef)
+	}
+	if a.Ask && !b.asked {
+		list = append(list, chatAskToolDef)
 	}
 	return list
 }
@@ -227,6 +241,10 @@ func (b *chatToolbox) handles(name string) bool {
 		return a.Memory
 	case "read_page":
 		return a.ReadPage
+	case chatReadFileTool:
+		return len(a.Files) > 0
+	case store.ChatToolAsk:
+		return a.Ask
 	}
 	return false
 }
@@ -242,7 +260,7 @@ func (b *chatToolbox) round(ctx context.Context, calls []chatToolCall) (chatWire
 			c.ID = "call_" + store.NewID()
 		}
 		turn.ToolCalls = append(turn.ToolCalls, map[string]any{"id": c.ID, "type": "function",
-			"function": map[string]any{"name": c.Name, "arguments": firstNonEmpty(c.Arguments, "{}")}})
+			"function": map[string]any{"name": c.Name, "arguments": chatEchoArguments(c)}})
 		var out string
 		switch {
 		case ctx.Err() != nil:
@@ -266,6 +284,10 @@ func (b *chatToolbox) round(ctx context.Context, calls []chatToolCall) (chatWire
 			out = b.forget(ctx, c.Arguments)
 		case c.Name == "read_page":
 			out = b.readPage(ctx, c.Arguments)
+		case c.Name == chatReadFileTool:
+			out = b.readFile(ctx, c.Arguments)
+		case c.Name == store.ChatToolAsk:
+			out = b.ask(c.Arguments, len(calls) == 1)
 		}
 		results = append(results, chatWireMessage{Role: "tool", ToolCallID: c.ID, Content: out})
 	}
@@ -617,6 +639,7 @@ func (s *Server) chatAssistFor(ctx context.Context, user *store.User, c *store.C
 	// Gemini: a hosted tool), Janus's for every other model. Deep research
 	// always reads its sources.
 	a.ReadPage = (research || !off(store.ChatToolWebFetch)) && !s.chatModelTools(ctx, model)[store.ChatToolWebFetch]
+	a.Ask = !research && !off(store.ChatToolAsk)
 	return a
 }
 

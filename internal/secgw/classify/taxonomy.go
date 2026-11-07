@@ -8,7 +8,7 @@ package classify
 // what S7 means.
 //
 // Tier is an editorial grouping for the picker, not a model property:
-// Critical is the set an organisation almost never has a legitimate reason
+// Critical is the set an organization almost never has a legitimate reason
 // to let through; Contextual is the set whose acceptability genuinely
 // depends on the team (a creative-writing group and a customer-support
 // group differ on S12). The default selection for a new check is Critical.

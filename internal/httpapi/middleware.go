@@ -161,7 +161,7 @@ func Recoverer() func(http.Handler) http.Handler {
 	}
 }
 
-// ClientIP resolves the caller address, honouring X-Forwarded-For only when the
+// ClientIP resolves the caller address, honoring X-Forwarded-For only when the
 // immediate peer is a configured trusted proxy.
 func ClientIP(r *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

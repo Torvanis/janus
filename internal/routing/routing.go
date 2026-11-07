@@ -8,7 +8,7 @@
 //
 //   - category: one flat choice over every enabled routing category plus
 //     "none of these". Every category is offered, not only the ones the
-//     router uses, so the classifier has the near neighbours it needs to
+//     router uses, so the classifier has the near neighbors it needs to
 //     tell them apart (offering only "Legal" and "none" pulls borderline
 //     requests into Legal).
 //   - difficulty: a five-level complexity scale, asked only when some route

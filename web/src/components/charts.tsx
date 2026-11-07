@@ -15,7 +15,7 @@ const SERIES_VARS = [
   'var(--janus-chart-8)',
 ];
 
-// Dash patterns pair with colour so a series is still distinguishable when hue
+// Dash patterns pair with color so a series is still distinguishable when hue
 // alone is not perceivable.
 const DASH_PATTERNS = ['0', '0', '5 3', '2 3', '8 3', '5 3 1 3', '1 3', '10 4'];
 
@@ -42,11 +42,11 @@ export interface AreaSeries {
   key: string;
   /** Legend label, e.g. t('explore.tokensIn'). */
   label: string;
-  /** Layer colour — pass a chart palette token via seriesColor(i), never raw hex. */
+  /** Layer color — pass a chart palette token via seriesColor(i), never raw hex. */
   color: string;
   /**
    * Optional stroke-dasharray for the layer boundary ("5 3" or "5,3"). When
-   * omitted the layer gets a distinct default from seriesDash(i) so colour is
+   * omitted the layer gets a distinct default from seriesDash(i) so color is
    * never the only thing telling two layers apart.
    */
   dash?: string;
@@ -189,7 +189,7 @@ function ChartScale({
  * Two modes, discriminated by the shape of `series`:
  * - `TimePoint[]` (the historical contract) — single-series render, unchanged.
  * - `AreaSeries[]` — stacked mode: layers are drawn bottom-up as cumulative
- *   areas summing to the total, each boundary gets a distinct colour AND a
+ *   areas summing to the total, each boundary gets a distinct color AND a
  *   distinct dash pattern, and an inline legend (swatch + dash sample + label)
  *   is rendered under the chart.
  */
@@ -435,7 +435,7 @@ export interface LineSeries {
 
 /**
  * Overlaid (NOT stacked) lines for per-model averages, where adding the series
- * up would be meaningless. Each line gets a palette colour and a distinct dash
+ * up would be meaningless. Each line gets a palette color and a distinct dash
  * so hue is never the only encoding; null buckets break the line instead of
  * dropping it to zero; a bucket with a single point gets a dot so it is seen.
  */
@@ -612,7 +612,7 @@ export function BarList({
   );
 }
 
-/** Donut used for modality mix; every slice is also labelled in the legend. */
+/** Donut used for modality mix; every slice is also labeled in the legend. */
 export function DonutChart({ items, metric }: { items: Breakdown[]; metric: MetricKey }): ReactNode {
   const ordered = sortCollection(items, (row) => breakdownValue(row, metric), false);
   // Preserve the denominator instead of making the displayed subset look like 100%.
@@ -721,7 +721,7 @@ export function DonutChart({ items, metric }: { items: Breakdown[]; metric: Metr
   );
 }
 
-/** Circular quota gauge with 80% / 95% / breach colouring. */
+/** Circular quota gauge with 80% / 95% / breach coloring. */
 export function QuotaRing({ percent, label, caption }: { percent: number; label: string; caption?: string }): ReactNode {
   const clamped = Math.max(0, Math.min(100, percent));
   const radius = 34;

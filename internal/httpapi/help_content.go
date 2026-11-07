@@ -195,6 +195,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				{"code": "policy.service_token_expired", "status": "401", "fix": "This service token passed its expiry date. Ask an administrator for a replacement."},
 				{"code": "policy.security_blocked", "status": "403", "fix": "A guardrail check refused the request. Remove the flagged material, or give the request_id to an administrator."},
 				{"code": "policy.subscription_reauth_required", "status": "403", "fix": "Your personal provider subscription needs to be reconnected on the Subscriptions page."},
+				{"code": "audit.write_failed", "status": "500", "fix": "STIG profile: the change was not saved because its audit record could not be written. An administrator checks the database, then retries."},
 				{"code": "policy.service_token_scope", "status": "403", "fix": "Service tokens only work on the /v1 model API."},
 				{"code": "policy.rate_limit", "status": "429", "fix": "Too many requests per minute. Wait retry_after seconds."},
 				{"code": "policy.managed_model_unavailable", "status": "503", "fix": "This managed model points at a missing or disabled model. Use another model and tell an administrator."},

@@ -462,7 +462,7 @@ func (r *Recorder) Bodies(ctx context.Context, c *store.TroubleshootingCapture) 
 	return req, resp, nil
 }
 
-// RetentionResult summarises one retention pass.
+// RetentionResult summarizes one retention pass.
 type RetentionResult struct {
 	Deleted         int64     `json:"deleted"`
 	SessionExpired  bool      `json:"session_expired"`

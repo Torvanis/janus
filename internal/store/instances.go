@@ -49,7 +49,7 @@ func (s *Store) RemoveInstance(ctx context.Context, id string) error {
 // PruneInstances removes rows that have been stale for well over the
 // liveness window, so a churny deployment does not accumulate history.
 func (s *Store) PruneInstances(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM gateway_instance WHERE seen_at < ?`),
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM gateway_instance WHERE seen_at < ?`),
 		FormatTime(now.Add(-24*time.Hour)))
 	if err != nil {
 		return 0, fmt.Errorf("prune instances: %w", err)

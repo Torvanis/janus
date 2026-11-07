@@ -153,7 +153,7 @@ func (s *Server) routingDocument(ctx context.Context) (*routingDocument, error) 
 
 // evalWarnings lists evaluation set-ups an admin should know about:
 //   - the judge is (or serves from) one of the two models it compares:
-//     judges favour their own answers;
+//     judges favor their own answers;
 //   - a route to a self-hosted model is evaluated against an externally
 //     hosted default or judge: the evaluation copies those prompts off
 //     site. Policies that block or redact still stop the copy (the sample
@@ -187,7 +187,7 @@ func (s *Server) evalWarnings(ctx context.Context, settings store.RoutingSetting
 			}
 			judge := servedBy(judgeID)
 			if judge != "" && (judge == servedBy(rt.ModelID) || judge == def) {
-				out = append(out, fmt.Sprintf("Router %s, %s: the evaluation judge is one of the two models it compares, and judges favour their own answers. Pick a third model.", r.Name, label))
+				out = append(out, fmt.Sprintf("Router %s, %s: the evaluation judge is one of the two models it compares, and judges favor their own answers. Pick a third model.", r.Name, label))
 			}
 			if hosting[servedBy(rt.ModelID)] != "self_hosted" {
 				continue

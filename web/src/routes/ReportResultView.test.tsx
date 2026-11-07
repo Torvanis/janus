@@ -42,11 +42,21 @@ function render(ui: Parameters<typeof baseRender>[0]) {
   });
   return view;
 }
-const session = vi.hoisted(() => ({ localOnly: false }));
-vi.mock('../app/session', () => ({ useLocalOnly: () => session.localOnly }));
+const session = vi.hoisted(() => ({ localOnly: false, fips: false }));
+vi.mock('../app/session', () => ({ useLocalOnly: () => session.localOnly, useFIPSEdition: () => session.fips }));
 afterEach(() => {
   cleanup();
   session.localOnly = false;
+  session.fips = false;
+});
+it('does not offer PDF export on the Janus FIPS edition', () => {
+  session.fips = true;
+  render(<ReportResultView result={fixture()} runID="fips" />);
+  const exportMenu = screen.getByText('Export').closest('details')!;
+  expect(within(exportMenu).queryByRole('link', { name: /^PDF/ })).toBeNull();
+  for (const name of ['Excel', 'CSV', 'JSON']) {
+    expect(within(exportMenu).getByRole('link', { name: new RegExp(`^${name}`) })).toBeTruthy();
+  }
 });
 it('does not present an incomplete comparison as growth', () => {
   const result = fixture();

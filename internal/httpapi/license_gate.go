@@ -62,6 +62,10 @@ func featureLabel(f string) string {
 		return "email alerting"
 	case "load_balancing":
 		return "load-balanced model pools"
+	case "fips_edition":
+		return "Janus FIPS edition"
+	case "stig_profile":
+		return "STIG configuration profile"
 	}
 	return strings.ReplaceAll(f, "_", " ")
 }

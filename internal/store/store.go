@@ -180,10 +180,7 @@ func (s *Store) rebind(query string) string {
 }
 
 func (s *Store) exec(ctx context.Context, query string, args ...any) error {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	if _, err := runner.ExecContext(ctx, s.rebind(query), args...); err != nil {
 		return fmt.Errorf("exec: %w", err)
 	}
@@ -191,10 +188,7 @@ func (s *Store) exec(ctx context.Context, query string, args ...any) error {
 }
 
 func (s *Store) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	rows, err := runner.QueryContext(ctx, s.rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
@@ -203,14 +197,17 @@ func (s *Store) query(ctx context.Context, query string, args ...any) (*sql.Rows
 }
 
 func (s *Store) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	if s.tx != nil {
-		return s.tx.QueryRowContext(ctx, s.rebind(query), args...)
-	}
-	return s.db.QueryRowContext(ctx, s.rebind(query), args...)
+	return s.runner(ctx).QueryRowContext(ctx, s.rebind(query), args...)
 }
 
 // InTx runs fn inside a transaction, rolling back on any error or panic.
+// Inside a request transaction (BeginRequestTx) fn runs in a savepoint of
+// it instead, so the block still succeeds or fails as a unit but commits
+// only with the request.
 func (s *Store) InTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	if rt := requestTxFrom(ctx); rt != nil && s.tx == nil {
+		return rt.savepoint(ctx, func() error { return fn(rt.tx) })
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -261,6 +258,11 @@ func (s *Store) bumpModelRevision() {
 		s.modelRevision.Add(1)
 	}
 }
+
+// InvalidateModelRevision bumps the model revision so every revision-tagged
+// cache reloads. The fail-closed audit transaction calls it when a request
+// transaction ends.
+func (s *Store) InvalidateModelRevision() { s.bumpModelRevision() }
 
 func (s *Store) ModelRevision() uint64 {
 	if s.modelRevision == nil {

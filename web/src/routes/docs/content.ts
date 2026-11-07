@@ -35,7 +35,7 @@ export interface PricingRow {
   group?: string;
   /** Modality/kind pill shown in the first cell of a sub-row (Image, Text, Audio, per minute…). */
   tag?: string;
-  /** Emphasise the cell at this index (the figure an admin should copy into Janus). */
+  /** Emphasize the cell at this index (the figure an admin should copy into Janus). */
   highlight?: number;
 }
 
@@ -249,6 +249,14 @@ export const ERROR_CATALOG: ErrorEntry[] = [
     retryable: false,
   },
   {
+    code: 'audit.write_failed',
+    status: 500,
+    when: 'The gateway runs the STIG profile (JANUS_STIG_PROFILE=true), and an administrative change was refused because its audit record could not be written. The change was not saved.',
+    action:
+      'Check the database (disk space, permissions, connectivity) and the gateway log, then make the change again. Reads keep working.',
+    retryable: true,
+  },
+  {
     code: 'server_error',
     status: 500,
     when: 'The gateway hit an unexpected internal failure.',
@@ -304,7 +312,7 @@ export const GLOSSARY: Array<{ term: string; definition: string }> = [
       'The period a limit is measured over. Calendar windows (day, week starting Monday, month) snap to UTC boundaries; rolling windows (24 hours, 7 days, 30 days) slide continuously.',
   },
   {
-    term: 'Breach behaviour',
+    term: 'Breach behavior',
     definition:
       'What happens when a limit is crossed mid-request. The default lets the in-flight request finish and refuses the next one; hard-kill cuts a stream within a fraction of a second of the limit being crossed and ends it with a policy.quota_exceeded error frame. Non-streaming requests always finish.',
   },
@@ -524,7 +532,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'The model picker in the message box lists the models you can use while working under the current “Working under” selection, plus the chat models from your own connected plans under “Your subscriptions” (unless your administrator turned personal plans off for Chat). Your administrator decides how the picker is grouped and may give models friendly names, a short description and a Recommended badge. “Billed to” says who pays: the team or personal account you work under, or your own plan for a subscription model. New chats start on the model you last started a chat with, or on your organization’s default model if that one is no longer offered.',
           'Press Enter to send and Shift+Enter for a new line. Replies keep going if you close the tab; reopen the chat to see them. Esc stops a reply, Ctrl/Cmd+Shift+O starts a new chat, and / jumps to the message box. An unsent message is kept per chat while the tab is open.',
           'While a reply streams, the thread follows it until you scroll up to read; Jump to latest follows it again. Edit a message you sent, or regenerate a reply, to make a new version; the arrows under it switch between versions.',
-          'After the first reply, the chat’s model gives the conversation a short title. This is a separate request, metered like the chat and shown in the request log as janus-chat-title. Its cost is added to the first reply’s footer, and it does not count as a request toward rate limits or request quotas.',
+          'After three replies, or once a chat has been quiet for 10 minutes, Janus gives it a short name in the background, once. By default the model that wrote the last reply names it, so the conversation goes nowhere it has not already been. An administrator can choose one model to name every chat, or turn naming off, in Administration → Chat → Tools → Chat names. A chosen model gets only what the person typed (the first and latest messages, trimmed), never replies, files or instructions; chats the Security Gateway had any finding on are not sent to it. Naming is a system task, so people don’t need access to the naming model. Naming asks the model not to reason (a title needs none). Chats you renamed and temporary chats are never named. Naming is a separate request, metered like the chat and shown in the request log as janus-chat-title; when it follows a reply its cost is added to that reply’s footer, and it does not count as a request toward rate limits or request quotas.',
         ],
       },
       {
@@ -564,7 +572,9 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'Ask a chat model for a picture and it makes one in the same reply, up to four per reply. It uses your own image model if you chose one under Your models, otherwise your plan’s image model on a subscription chat, otherwise the organization’s.',
           'You can also pick a model from “Make images” in the model picker (it lists the image models you are granted under the current “Working under”). The message box then asks for a description; send it and the reply is the image. Generation takes from a few seconds to about a minute. Under the image are its size, a download link, the description the provider actually used, and what it cost.',
           'Images are kept in Janus, encrypted, so they stay after the provider’s own link expires; only you can open them, and deleting the chat deletes them (for good 30 days later, like the chat). You can switch back to a chat model in the same chat to talk about the image; the chat model is told an image was made, but does not see it. Image models make new images from a description; editing an attached image is not supported yet.',
+          'When a model needs a detail to answer well (which environment, how often, which of two approaches), it can stop and ask you. The question appears as a card under its reply with a few choices, the recommended one first, and sometimes room to type your own answer. Pick and press Send answer, or just type a reply. Turn Ask questions off in the Tools menu for a chat, or for everyone under Administration → Chat → Tools. Not used when comparing models or in deep research.',
           'A model can hand you whole files, such as code, web pages, games, documents or data, up to 10 per reply and 2 MiB each. A complete HTML or SVG page in a reply becomes a file card too. A file card has Preview (in a sandbox with no access to Janus), Download and Copy, and code blocks have Download.',
+          'Files stay part of the chat. Later in the conversation, any model you switch to can see the files made earlier: small text files are included in full, and it opens larger ones, and files you attached, by name when it needs them (shown as “Read a file”). So you can ask one model to check or change files another one made.',
           'With Create videos and Create music, a model makes short videos or music clips with the organization’s video or music model, or your own under Your models, at most two per reply. They play in the thread and can be downloaded. Each one is its own metered request, billed like an image, and a video can take a few minutes.',
         ],
       },
@@ -628,6 +638,39 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
     ],
   },
   {
+    slug: 'admin/chat-web-pages',
+    title: 'Chat web pages',
+    summary: 'Which web pages chat models may open: the public internet by default, or your intranet on offline networks.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'Default',
+        body: [
+          'When a chat model opens a link (read page, deep research), Janus fetches the page for it. By default only the public internet, on ports 80, 443, 8080 and 8443, verified against the system roots, connected directly. Private networks and internal names are refused.',
+          'This server itself, link-local addresses (including cloud metadata at 169.254.169.254), multicast and unspecified addresses are never opened, whatever is set.',
+        ],
+      },
+      {
+        heading: 'Startup options',
+        body: [
+          'Set as environment variables (with the Helm chart, under extraEnv); shown read-only under Administration → Chat → Tools.',
+          'JANUS_WEB_ALLOW_PRIVATE=true also opens private networks (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) and internal names (intranet, *.local, *.internal, *.lan, *.svc): for offline networks.',
+          'JANUS_WEB_ALLOW_NETWORKS / JANUS_WEB_DENY_NETWORKS: only, or never, these IP ranges. JANUS_WEB_ALLOW_DOMAINS / JANUS_WEB_DENY_DOMAINS: only, or never, these sites (each matches its subdomains). Deny always wins.',
+          'JANUS_WEB_ALLOW_PORTS replaces the standard ports. JANUS_WEB_HTTPS_ONLY=true refuses http:// pages.',
+          'JANUS_WEB_PROXY sends every page read through that proxy, with no direct fallback; the proxy then decides where names lead.',
+          'JANUS_WEB_TLS_TRUST: system (default), custom (system roots plus the trust store: DoD roots, JANUS_CA_BUNDLE, JANUS_CA_DIR and certificates uploaded under Settings → Certificates), or custom-only (only sites signed by the trust store’s CAs). Certificate changes apply without a restart, and page reads run the revocation check when JANUS_TLS_REVOCATION is on.',
+        ],
+        code: {
+          language: 'yaml',
+          code: `extraEnv:
+  JANUS_WEB_ALLOW_PRIVATE: "true"           # offline network: open the intranet
+  JANUS_WEB_ALLOW_DOMAINS: docs.enclave.example
+  JANUS_WEB_TLS_TRUST: custom-only          # CAs from Settings → Certificates or JANUS_CA_DIR`,
+        },
+      },
+    ],
+  },
+  {
     slug: 'admin/chat',
     title: 'Setting up Janus Chat',
     summary: 'Who can use Chat, which models it offers, its tools, and the instructions every chat starts with.',
@@ -677,14 +720,14 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'Who can use Chat',
         body: [
           'On Janus Business, Who can use Chat limits Chat to Everyone or to Only these groups, teams and people. Message for people without access (up to 300 characters) is shown instead of Chat; without one, they are told to ask an administrator. Administrators can always use Chat. People outside the restriction can still open share links others send them (read-only). Someone who loses access can still list and revoke the links they made, but cannot make new ones.',
-          'On Community, everyone with an account can use Chat, and only the instance-wide on/off switch applies. A restriction saved under a Business license keeps applying after the license expires or the gateway is downgraded to Community; the Who can use Chat tab then shows a warning with Let everyone use Chat, which lifts it. Saving a new or changed restriction needs Business. Chat being turned off is always honoured.',
+          'On Community, everyone with an account can use Chat, and only the instance-wide on/off switch applies. A restriction saved under a Business license keeps applying after the license expires or the gateway is downgraded to Community; the Who can use Chat tab then shows a warning with Let everyone use Chat, which lifts it. Saving a new or changed restriction needs Business. Chat being turned off is always honored.',
         ],
       },
       {
         heading: 'Search index, audit and environment',
         body: [
           'Chat search stores keyed hashes of words, never the words. After changing JANUS_ENCRYPTION_KEY, rebuild the index with POST /api/v1/admin/chat/reindex. Every change to these settings is recorded in the audit log as chat_settings_updated; search API keys are never written there.',
-          'JANUS_CHAT_PREVIEW (default false) must be true for Chat to run. JANUS_CHAT_AUTO_TITLE (default true) names each chat after its first reply with a separate, metered janus-chat-title request; set false to turn it off. JANUS_CHAT_MAX_UPLOAD_BYTES (default 20 MiB) caps one attachment, and never exceeds JANUS_STORAGE_MAX_OBJECT_BYTES. JANUS_CHAT_SEARCH_SEARXNG_URL is the address of a SearXNG installed with the deployment. Attachments and made files are kept in Administration → Settings → General → File storage.',
+          'JANUS_CHAT_PREVIEW (default false) must be true for Chat to run. JANUS_CHAT_AUTO_TITLE (default true) is the starting point for chat naming until an administrator chooses in Administration → Chat → Tools → Chat names; set false to start with naming off. JANUS_CHAT_MAX_UPLOAD_BYTES (default 20 MiB) caps one attachment, and never exceeds JANUS_STORAGE_MAX_OBJECT_BYTES. JANUS_CHAT_SEARCH_SEARXNG_URL is the address of a SearXNG installed with the deployment. Attachments and made files are kept in Administration → Settings → General → File storage.',
         ],
       },
     ],
@@ -760,7 +803,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         body: [
           'A managed model can list several models — typically the same model served by several vLLM or llama.cpp servers — and Janus spreads its traffic across them. Open Managed models → Edit, and under Load balancing use Add a model. Callers keep using the one alias name; grants, quotas and the fallback stay on the alias, and the request log records which server actually answered.',
           'Balancing: Failover sends traffic to the servers with the lowest priority number and keeps higher numbers as standbys; servers that share a priority also share conversations. A server added under Failover gets the next number, so it starts as a standby; under the other policies it joins the serving tier. Round robin takes turns by weight. Least loaded picks the server with the shortest queue (waiting requests count double). Context aware compares how much of each server’s context capacity is taken by the conversations it is running, so one 100,000-token conversation counts for more than several short chats — set a server’s Context capacity to override what it reports. Whatever the policy, each server’s Priority (0–100) groups servers into tiers: lower numbers serve first and higher numbers only take traffic when every lower-priority server is out.',
-          'Keep conversations together: every turn of a conversation goes to the server that already holds its prompt cache, which makes follow-up turns much faster. Janus recognises a conversation from an X-Janus-Session, X-Session-Id or X-Conversation-Id header, the OpenAI prompt_cache_key field, or — when a client sends none — from its tools, system prompt and first message, which stay the same on every turn. Bounded (the default) moves a conversation to its second-choice server only while its own server is busier than the pool average by the chosen percentage and by a meaningful absolute amount; Strict moves it only when its server is out of service; Off balances every request separately.',
+          'Keep conversations together: every turn of a conversation goes to the server that already holds its prompt cache, which makes follow-up turns much faster. Janus recognizes a conversation from an X-Janus-Session, X-Session-Id or X-Conversation-Id header, the OpenAI prompt_cache_key field, or — when a client sends none — from its tools, system prompt and first message, which stay the same on every turn. Bounded (the default) moves a conversation to its second-choice server only while its own server is busier than the pool average by the chosen percentage and by a meaningful absolute amount; Strict moves it only when its server is out of service; Off balances every request separately.',
           'Every gateway replica makes the same choice for the same conversation without sharing any state on the request path, so pools work the same with one replica or many. Live load is read every 2 seconds from each server’s /metrics endpoint (vLLM: requests running and waiting, KV-cache use and size; llama.cpp: run llama-server with --metrics, and --slots for context figures). Servers without metrics (cloud APIs, Ollama) are balanced on Janus’s own in-flight counts and marked “No live metrics”. The full flag list per engine is in “Self-hosted engines”.',
           'Failures: a server that refuses a request before sending anything (connection error, 502, 503, 504, 429) is skipped and the request goes to the next server in the same call, so the caller does not see the error; nothing is retried once a response has started. Three consecutive failures (connection errors, 502, 503, 504 — not 429, which means the server is busy) take a server out for 5 seconds, doubling up to 2 minutes, and every replica takes it out together. When every server is out, the alias’s fallback model serves (response header X-Janus-Fallback-Reason: pool_exhausted); without a fallback the request fails with a message naming the pool.',
           'When a member fails before answering, Janus retries on the next member only if that member gets the same Security Gateway checks, isn’t blocked by Child Safety for the caller, and the caller’s quota on it isn’t used up; a member that fails any of these is skipped. Bind a stricter policy to the pool’s name rather than to one member if every member should be checked the same way. Security Gateway classifiers are never pool members.',
@@ -851,7 +894,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Other OpenAI-compatible servers',
         body: [
-          'SGLang, LM Studio, LocalAI, TGI’s OpenAI endpoint and similar servers work with the Other OpenAI-compatible endpoint provider type. Check three things on the first requests in the request log: the counting method should say Reported by upstream (not Estimated from byte count), streamed requests should carry token counts (the server must honour stream_options.include_usage), and the model’s context window should be filled in after discovery. Set any missing context window by hand in Administration → Gateway → Models.',
+          'SGLang, LM Studio, LocalAI, TGI’s OpenAI endpoint and similar servers work with the Other OpenAI-compatible endpoint provider type. Check three things on the first requests in the request log: the counting method should say Reported by upstream (not Estimated from byte count), streamed requests should carry token counts (the server must honor stream_options.include_usage), and the model’s context window should be filled in after discovery. Set any missing context window by hand in Administration → Gateway → Models.',
         ],
       },
       {
@@ -866,7 +909,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
   {
     slug: 'admin/quotas',
     title: 'Setting quotas',
-    summary: 'Choose a metric, a window, and a breach behaviour.',
+    summary: 'Choose a metric, a window, and a breach behavior.',
     group: 'Admin guide',
     sections: [
       {
@@ -883,7 +926,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Set limits with headroom',
         body: [
-          'The default breach behaviour lets an in-flight request finish, so a single large streaming completion can overshoot the limit. Choose a limit that tolerates one maximum-size request beyond it.',
+          'The default breach behavior lets an in-flight request finish, so a single large streaming completion can overshoot the limit. Choose a limit that tolerates one maximum-size request beyond it.',
           '“Cut the stream immediately” stops a stream as soon as the limit is reached, counting the stream’s own tokens, so the overshoot is at most the last chunk — but it cuts users off mid-answer. Reach for it only when a hard ceiling matters more than the experience.',
         ],
       },
@@ -1103,7 +1146,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'Background or inline',
         body: [
           'Background (the default) labels requests after they are sent on, from a queue on each replica, so reporting adds no latency. When the queue is full a sample is skipped and counted as dropped.',
-          'Inline labels the request before it is forwarded and returns the label in the X-Janus-Category response header (category/subcategory). The request waits at most the classifier timeout; a timeout or error never fails the request, it proceeds unlabelled and the miss is recorded. When more inline calls are in flight than the parallel limit, extra requests are labelled in the background instead, so a slow classifier cannot pile up latency. Auto-routing does not use this label; it asks its own questions (see Auto-routing).',
+          'Inline labels the request before it is forwarded and returns the label in the X-Janus-Category response header (category/subcategory). The request waits at most the classifier timeout; a timeout or error never fails the request, it proceeds unlabeled and the miss is recorded. When more inline calls are in flight than the parallel limit, extra requests are labeled in the background instead, so a slow classifier cannot pile up latency. Auto-routing does not use this label; it asks its own questions (see Auto-routing).',
           'When a Security Gateway check already calls the same decision model about the same text, and that model takes questions together, the Usage insights question is added to that call in either mode. That happens for a first message (or for any message with Latest user message only), with Include the system prompt off, and when the label is a single question (subcategories off, or category and subcategory asked together). A follow-up read with its conversation is asked on its own, because the guards judge the new turn alone. A shared label costs no extra call or wait, is recorded as inline, and an answer Janus cannot use is recorded as a classifier error without affecting the check.',
         ],
       },
@@ -1112,14 +1155,14 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         body: [
           'Janus ships 22 general categories (Coding, Technical help, Data analysis, Extraction and formatting, Writing and editing, Creative writing, Summarization, Translation and language, Research, Learning and tutoring, Science and math, Business and strategy, Marketing and sales, Customer communication, Finance and accounting, Legal, Medical and health, HR and people, Security, Personal and lifestyle, General chat, Other). Built-ins can be renamed, re-described or disabled, not deleted. Other is always offered so a request that fits nothing is not forced into a wrong category.',
           "Add your own top-level categories for your industry, and subcategories one level deep: languages under Coding, Reverse engineering under Security. The description is what the classifier reads, so say what belongs and, when two categories are easy to confuse, what does not. A category's subcategories are also named in its description when the classifier picks the top level, so it knows that work belongs there.",
-          'At most 26 top-level categories and 25 subcategories per category can be enabled at once. Deleting a category stops new labels; requests already labelled keep theirs.',
+          'At most 26 top-level categories and 25 subcategories per category can be enabled at once. Deleting a category stops new labels; requests already labeled keep theirs.',
           'When the classifier accepts enough choices in one question, Janus asks for the category and subcategory together, offering every category and every subcategory as its own answer ("Coding", "Coding › Rust", …). That is one call instead of two and was the most accurate way to ask on every decision model we tested. A server with a lower limit (Ollama accepts 26 choices) is asked the category first and the subcategory second. Usage insights → Performance → Decision models shows the limit Janus detected for each classifier (Most choices per question) and lets you change it.',
         ],
       },
       {
         heading: 'Sampling and what is sent',
         body: [
-          'Requests to classify sets the share of chat requests labelled. Text to classify chooses the latest message with the recent conversation as context (default), the latest user message only, every user message, or the whole conversation. With context, a follow-up such as “What about Ohio?” is labelled by what the conversation is about rather than read on its own; the last six earlier messages are sent (each user message cut to its first 1,000 characters and each assistant reply to its first 300, at most 4,000 characters in all, newest kept) with the latest message marked as the one to judge, and a first message is classified exactly as it is. Installs that had saved the old default (latest user message) were moved to the new one; Include the system prompt helps when applications put the task there. Only the most recent characters up to the limit are sent (Nimble reads about 8,000 tokens). Embeddings, images and audio are not classified, and neither are requests refused by quota, rate limits or the Security Gateway. Usage insights reads the caller’s own text (after any Security Gateway redaction). Instructions Janus adds — a router’s instructions and Child Safety’s instructions — are never classified, even with Include the system prompt on. Janus Chat messages are classified once; Chat’s tool rounds, research rounds, media calls and titles are not classified.',
+          'Requests to classify sets the share of chat requests labeled. Text to classify chooses the latest message with the recent conversation as context (default), the latest user message only, every user message, or the whole conversation. With context, a follow-up such as “What about Ohio?” is labeled by what the conversation is about rather than read on its own; the last six earlier messages are sent (each user message cut to its first 1,000 characters and each assistant reply to its first 300, at most 4,000 characters in all, newest kept) with the latest message marked as the one to judge, and a first message is classified exactly as it is. Installs that had saved the old default (latest user message) were moved to the new one; Include the system prompt helps when applications put the task there. Only the most recent characters up to the limit are sent (Nimble reads about 8,000 tokens). Embeddings, images and audio are not classified, and neither are requests refused by quota, rate limits or the Security Gateway. Usage insights reads the caller’s own text (after any Security Gateway redaction). Instructions Janus adds — a router’s instructions and Child Safety’s instructions — are never classified, even with Include the system prompt on. Janus Chat messages are classified once; Chat’s tool rounds, research rounds, media calls and titles are not classified.',
           "Classifier calls are reported on the Usage insights page with their tokens and cost (from the provider's reported price, or the model's rate card for chat models). They never count against the caller's quota. Prometheus: janus_classifications_total{status,mode}, janus_classification_latency_seconds{mode,protocol} and janus_classification_queue.",
         ],
       },
@@ -1127,7 +1170,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'In the request log',
         body: [
           "Administration → Requests shows each request's label in the Classified as column and can filter by category, by category › subcategory, or by whether a request was classified at all. The request drawer says whether the label was produced inline or in the background, how confident the classifier was, and how long it took.",
-          'Every request also records how long it waited on classifiers before it was forwarded and how many classifier calls that took (the Classifier wait column, hidden by default). That covers the Security Gateway guards and an inline label. Background labelling never delays a request, so it is not in that number; its own time, queue wait and call count are shown separately in the drawer.',
+          'Every request also records how long it waited on classifiers before it was forwarded and how many classifier calls that took (the Classifier wait column, hidden by default). That covers the Security Gateway guards and an inline label. Background labeling never delays a request, so it is not in that number; its own time, queue wait and call count are shown separately in the drawer.',
         ],
       },
     ],
@@ -1168,8 +1211,8 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Routing categories',
         body: [
-          'Routing categories are what the classifier chooses between. Fifteen are built in, including Legal, which is kept apart from Specialist so legal work can go to its own model; you can add your own. Each has a name, what it includes, what it does not include, a minimum confidence, and test examples. The descriptions are what the classifier reads: say what belongs, and name the neighbours that do not and where they go. That is what stops misfiling; bare names were measurably worse in testing.',
-          'Every enabled category is offered on every request, plus “none of these”. Offering only the categories a router uses pulls borderline requests into them; offering the near neighbours lets the classifier say “this is planning advice, not research”.',
+          'Routing categories are what the classifier chooses between. Fifteen are built in, including Legal, which is kept apart from Specialist so legal work can go to its own model; you can add your own. Each has a name, what it includes, what it does not include, a minimum confidence, and test examples. The descriptions are what the classifier reads: say what belongs, and name the neighbors that do not and where they go. That is what stops misfiling; bare names were measurably worse in testing.',
+          'Every enabled category is offered on every request, plus “none of these”. Offering only the categories a router uses pulls borderline requests into them; offering the near neighbors lets the classifier say “this is planning advice, not research”.',
           'At most 25 routing categories can be enabled at once. A category a router uses cannot be disabled or deleted until it is removed from that router’s routes. Built-in categories can be disabled or reset to their shipped wording, not deleted.',
           'A routing category can follow a Usage insights category instead of having its own description, so one definition serves both.',
           'Below a category’s minimum confidence, the answer does not count: the request is not routed by that category.',
@@ -1184,7 +1227,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'Classifier → Try routing classifies a prompt with any classifier (saved or not) and shows where every router would send it. The batch test runs every category’s test examples and lists the misfiles.',
           'The routing classifier reads the latest message with the recent conversation as context, so a short follow-up is routed by the task it belongs to: “Keep going” on a hard coding task stays hard coding, and “What about Ohio?” after a legal question stays legal. The last six earlier messages are included (user messages cut to their first 1,000 characters and assistant replies to their first 300, at most 4,000 characters in all, newest kept) with the latest message marked as the one to judge, which keeps a real change of topic (“Unrelated quick one: …”) from being dragged to the earlier subject. A first message is classified on its own, exactly as before, and can share a Security Gateway guard’s call; a follow-up is asked in a call of its own, in parallel with the guards, because the guards still judge the new turn alone. Try routing takes an optional earlier conversation to test follow-ups.',
           'On a live router, conversations stick to the route of their first decided turn for 30 minutes by default (1 minute to 24 hours; each turn starts the window again), so the model does not change mid-task: switching models makes the new one re-read the whole conversation, and the old one’s cached context is thrown away. Only the model sticks. When the route’s thinking scales with difficulty, each turn’s thinking still follows that turn: Janus asks the classifier about difficulty only (with the conversation as context) and sets the level, so an easy step of a hard task does not pay for high thinking, and a hard turn in an easy conversation gets it. If that question fails or times out, the level from the last judged turn is used. A sticky turn with fixed or passthrough thinking makes no classifier call. Either way the route must still fit the turn: a conversation that outgrows the route model’s context window, loses the grant a restricted route needs, or goes over a quota the route skips on is decided afresh. Revoking a grant therefore takes effect on the next turn.',
-          'Janus recognises a conversation by an X-Janus-Session header (or X-Session-Id, X-Conversation-Id or X-Correlation-Id), a prompt_cache_key or session_id in the body, or otherwise by its opening (tools, system prompt and first user message), always per caller. A turn the default served because the classifier was too slow, failed or was busy is not remembered, so the next turn is decided afresh.',
+          'Janus recognizes a conversation by an X-Janus-Session header (or X-Session-Id, X-Conversation-Id or X-Correlation-Id), a prompt_cache_key or session_id in the body, or otherwise by its opening (tools, system prompt and first user message), always per caller. A turn the default served because the classifier was too slow, failed or was busy is not remembered, so the next turn is decided afresh.',
         ],
       },
       {
@@ -1215,7 +1258,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'A route’s tally covers only comparisons between the models it uses now: its model, the router’s default and the judge. Change any of them and the tally starts again; earlier comparisons stay listed as history under the card and never count towards the new verdict.',
           'Only the verdict, scores, the judge’s one-line reason, cost and timing are stored, never the prompt or either answer. Evaluation covers chat completions without tools or images, up to 64 KB of request; a streamed answer too long to keep in full is not judged. It stops at the end date (14 days by default), at its daily count and daily budget, and pauses while the gateway is busy. The count and budget are reserved before anything is spent, at a deliberately high estimate, so a burst or several replicas cannot overshoot them. Evaluations at once per replica, the busy threshold and the default answer’s token cap are set on the Evaluations tab. Evaluation calls are platform overhead: they never count against the caller’s quota and are hidden from the request log. Requests from people covered by Child Safety are never sampled for evaluation.',
           'Auto-routing → Classifier → Advanced → Keep decisions (days) (90 by default; 0 keeps them) deletes decisions and evaluation verdicts older than that in the daily retention job. Remembered conversations are deleted once they expire. A decision kept longer than usage events (JANUS_USAGE_RETENTION_DAYS) no longer names the caller: its user and service token are cleared when the matching usage events are purged.',
-          'Pick a judge that is neither the route’s model nor the default: judges favour their own answers. The judge must be an enabled model that is not a classifier; a disabled default or judge is not called.',
+          'Pick a judge that is neither the route’s model nor the default: judges favor their own answers. The judge must be an enabled model that is not a classifier; a disabled default or judge is not called.',
         ],
       },
     ],
@@ -1239,7 +1282,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         heading: 'Together or one at a time',
         body: [
           'Hosted decision APIs (TypeSafe, OpenRouter) answer each question in a request independently and in parallel. Several questions in one request cost about the same time as one and give the same answers as asking separately, so Janus sends them together.',
-          'Self-hosted Nimble (llama.cpp or Ollama) reads every question in the request while answering each one, so related questions influence each other: a coding request asked alongside a language question can come back labelled as data analysis. Janus therefore sends each question in its own request, all at the same time. The server reads the prompt once per question, which costs some throughput but keeps every answer as accurate as asking alone.',
+          'Self-hosted Nimble (llama.cpp or Ollama) reads every question in the request while answering each one, so related questions influence each other: a coding request asked alongside a language question can come back labeled as data analysis. Janus therefore sends each question in its own request, all at the same time. The server reads the prompt once per question, which costs some throughput but keeps every answer as accurate as asking alone.',
           'Janus picks the style from the provider automatically. Administration → Usage insights → Performance lists every decision classifier with the style in use, and lets you override it; run a benchmark before and after so the change is measured, not guessed.',
         ],
       },
@@ -1357,14 +1400,14 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
         body: [
           'Every check defaults to observe. In observe mode nothing is blocked or rewritten; matches are recorded exactly as they would be in block mode. Run a new policy in observe for long enough to see what it would have done to real traffic, review the Violations tab, then switch individual checks to redact or block.',
           'Save a new policy without binding it (an unbound policy affects nothing), then use Security → Policies → Test to dry-run a sample request against it. Test runs the saved policy, not unsaved edits, and saving a policy that is already bound changes live traffic. A dry run makes no upstream call, writes no usage event and records no violation.',
-          'On Community every check runs in observe mode; redact and block need Business. Policies that already redact or block keep doing so after a downgrade, but a policy with a redact or block check cannot be saved again until the licence allows it.',
+          'On Community every check runs in observe mode; redact and block need Business. Policies that already redact or block keep doing so after a downgrade, but a policy with a redact or block check cannot be saved again until the license allows it.',
         ],
       },
       {
         heading: 'The checks',
         body: [
           'Secrets: gitleaks-style rules for API keys, tokens, private keys, JWTs, and credentials embedded in connection strings. Structured rules (AWS, GitHub, Slack, Stripe, private-key blocks, …) are enabled by default; the generic high-entropy rule is off because it fires on base64 images, hashes and tool-call payloads in prose. Patterns are Go RE2 — linear time, so an administrator-authored rule can never take the proxy down.',
-          'PII: payment cards (Luhn-checked), IBANs (mod-97), US Social Security numbers (hyphenated by default, structural checks), NPIs, e-mail addresses and phone numbers. Redact rather than block for most of these: blocking "summarise this complaint" over an e-mail address is the false positive that gets the feature switched off.',
+          'PII: payment cards (Luhn-checked), IBANs (mod-97), US Social Security numbers (hyphenated by default, structural checks), NPIs, e-mail addresses and phone numbers. Redact rather than block for most of these: blocking "summarize this complaint" over an e-mail address is the false positive that gets the feature switched off.',
           'Term lists: your own words — project codenames, client names, classification markings. Modes: exact (whole words), substring, regex, or fuzzy (catches Pr0j3ct H4lb3rd and confusable characters). Lists are encrypted at rest and never shown in listings; viewing or exporting a list is written to the audit log. Import a text or CSV file rather than typing four hundred names into a form.',
           'Shape: limits on message count, body size, image parts and tools, and a rule that refuses system-role messages from service tokens.',
           'Prompt injection: a text-classification guard model (Llama Prompt Guard 2 is the reference) scores every message in overlapping windows, or a decision model (Jev, Nimble) judges the newest turn (see What a decision model reads). Unlike harmful-content filtering, nothing upstream protects you from injection — it targets the application, not the model.',
@@ -1402,10 +1445,10 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           "Add the guard model's server as an upstream of type TEI (Hugging Face Text Embeddings Inference, the standard host for Llama Prompt Guard 2 — an encoder model that generative engines such as vLLM cannot load). Discovery reads the server's /info, finds the one model it serves, and assigns the classifier role automatically; confirm it under Administration → Safety & Security → Security → Classifiers before referencing it in a policy.",
           'A decision model (TypeSafe Jev, Bespoke Nimble) takes the Decision model role and can back prompt injection, content safety, or both. When both checks use the same decision model Janus asks them together; see Classifiers: speed and accuracy.',
           'A model with a classifier role is removed from /v1/models, cannot be granted, and is called only by the gateway. Classifier models (guard and text-classification roles) only check traffic: they can’t be an alias’s target, fallback or pool member, and a model a managed model uses can’t be made a classifier until it is removed from that managed model. A request that still resolves to one is refused. A caller who could invoke the judge directly would have free, unlimited oracle access to the thing judging them.',
-          "Every classifier call is metered as a usage event on a platform-overhead subject with no user or service token attached: finance can see what the security feature costs and no user's quota moves because of it. The classifier is wrapped in a circuit breaker: three consecutive failures of the security checks' own calls open it for thirty seconds and raise a critical admin alert. Calls made by other features on the same decision model (Auto-routing, Usage insights, policy dry runs, Try boxes) never open it, and neither does a call the caller cancelled. While it is open, blocking checks with fail=closed refuse requests and say so in the error message; checks with fail=open pass and log. Observe-mode checks never block, whatever their fail setting. Choose fail=closed for security; choose fail=open only where availability matters more, and pair it with the alert. “Security classifier unavailable” is sent once per outage for the whole cluster (again after 6 hours if it is still down), followed by “Security classifier recovered” when it answers again.",
+          "Every classifier call is metered as a usage event on a platform-overhead subject with no user or service token attached: finance can see what the security feature costs and no user's quota moves because of it. The classifier is wrapped in a circuit breaker: three consecutive failures of the security checks' own calls open it for thirty seconds and raise a critical admin alert. Calls made by other features on the same decision model (Auto-routing, Usage insights, policy dry runs, Try boxes) never open it, and neither does a call the caller canceled. While it is open, blocking checks with fail=closed refuse requests and say so in the error message; checks with fail=open pass and log. Observe-mode checks never block, whatever their fail setting. Choose fail=closed for security; choose fail=open only where availability matters more, and pair it with the alert. “Security classifier unavailable” is sent once per outage for the whole cluster (again after 6 hours if it is still down), followed by “Security classifier recovered” when it answers again.",
           'A classifier whose model is disabled or stale in Models is not called. Checks that use it follow their fail setting: fail closed refuses requests, fail open lets them through. Child Safety always fails closed. Rotating the API key or base URL of a classifier’s upstream takes effect on every replica within JANUS_CONFIG_CACHE_TTL_SECONDS (5 seconds by default).',
           'Generative guard calls that report token usage (for example Llama Guard on a paid API) are priced from the model’s rate card, like decision-model calls; encoder guards on TEI report no usage and cost nothing.',
-          'Llama Prompt Guard 2 is distributed under the Llama 4 Community License: the download is gated, "Built with Llama" attribution applies, and any fine-tune must carry a name beginning with "Llama". If those terms are unacceptable to your organisation, any model served in the same text-classification shape can back the check instead.',
+          'Llama Prompt Guard 2 is distributed under the Llama 4 Community License: the download is gated, "Built with Llama" attribution applies, and any fine-tune must carry a name beginning with "Llama". If those terms are unacceptable to your organization, any model served in the same text-classification shape can back the check instead.',
         ],
       },
       {
@@ -1468,7 +1511,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Passwords and lockout',
         body: [
-          'Passwords are 12–128 characters with no composition rules (a sentence is a good password) and are stored as bcrypt hashes. Ten wrong attempts in a row lock the account for 15 minutes, and the form then says so. Otherwise a wrong email and a wrong password give the same answer, so the sign-in form cannot be used to discover accounts. Each network address may try to sign in 20 times a minute. Changing a password signs out every other session.',
+          'Passwords are 12–128 characters with no composition rules (a sentence is a good password) and are stored as salted PBKDF2-HMAC-SHA-512 hashes (400,000 iterations; accounts created by older releases move from bcrypt to PBKDF2 automatically at their next sign-in). Ten wrong attempts in a row lock the account for 15 minutes, and the form then says so. Otherwise a wrong email and a wrong password give the same answer, so the sign-in form cannot be used to discover accounts. Each network address may try to sign in 20 times a minute. Changing a password signs out every other session.',
           'Administrators create accounts and reset passwords with a temporary password the person must replace at their next sign-in. Administrators never see or set a permanent password.',
         ],
       },
@@ -1516,15 +1559,15 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
       {
         heading: 'Editions',
         body: [
-          'Janus Edge runs without a key as the Community edition: 25 active users, one node, guardrails observe-only, one identity provider. Business keys add seats, high availability, SCIM, LDAP, multiple identity providers, guardrail enforcement, scheduled reports, troubleshooting captures, audit export, model fallbacks and email alerting. Enterprise keys are issued per agreement and may be perpetual or air-gapped.',
+          'Janus Edge runs without a key as the Community edition: 25 active users, one node, guardrails observe-only, one identity provider. Business keys add seats, high availability, SCIM, LDAP, multiple identity providers, guardrail enforcement, scheduled reports, troubleshooting captures, model fallbacks, email alerting, the Janus FIPS edition and the STIG configuration profile. Audit export (CSV) is available on every edition and in every license state. Enterprise keys are issued per agreement and may be perpetual or air-gapped.',
           'A key is a signed JANUS-LICENSE-1 string verified against public keys embedded in the binary. Nothing phones home: an air-gapped gateway is fully licensed with just the file.',
         ],
       },
       {
         heading: 'What a Business key unlocks',
         body: [
-          'Every Business feature is a control that is already in the product; Community shows it greyed out with a one-line reason, and the API answers 402 feature_not_licensed if it is called anyway. Reads are never gated, and most things configured before a downgrade keep running — only the enabling write is refused. The exception is sign-in: without a valid key that includes them, sign-in through additional identity providers and LDAP stops (Janus-account passwords and the environment-configured provider keep working). A saved Chat access restriction keeps applying on every edition; only saving a new or changed one needs Business.',
-          'Guardrails enforce: redact and block modes on security policies (observe is Community; Child Safety blocks on every edition). Request capture: turning troubleshooting recording on. Email alerts: the email channel on an alert (in-app and webhook are Community). Model fallbacks: a fallback model on a managed model. Load balancing: a managed model with more than one model, or a balancing policy other than failover. Audit export: the CSV download on the audit log. Chat access: limiting Janus Chat to chosen users, groups or teams (Administration → Chat → Who can use Chat). Scheduled reports, SCIM provisioning, multiple identity providers, LDAP directory sign-in and more than one node are described on their own pages.',
+          'Every Business feature is a control that is already in the product; Community shows it grayed out with a one-line reason, and the API answers 402 feature_not_licensed if it is called anyway. Reads are never gated, and most things configured before a downgrade keep running — only the enabling write is refused. The exception is sign-in: without a valid key that includes them, sign-in through additional identity providers and LDAP stops (Janus-account passwords and the environment-configured provider keep working). A saved Chat access restriction keeps applying on every edition; only saving a new or changed one needs Business.',
+          'Guardrails enforce: redact and block modes on security policies (observe is Community; Child Safety blocks on every edition). Request capture: turning troubleshooting recording on. Email alerts: the email channel on an alert (in-app and webhook are Community). Model fallbacks: a fallback model on a managed model. Load balancing: a managed model with more than one model, or a balancing policy other than failover. Chat access: limiting Janus Chat to chosen users, groups or teams (Administration → Chat → Who can use Chat). Scheduled reports, SCIM provisioning, multiple identity providers, LDAP directory sign-in and more than one node are described on their own pages. The FIPS edition and the STIG profile check the key at startup instead: they need a verified Business, Enterprise or trial key, and keep running when it expires.',
         ],
       },
       {
@@ -1583,7 +1626,7 @@ curl "$JANUS_BASE_URL/v1/chat/completions" \\
           'Administration → Settings owns gateway configuration: General, Sign-in & provisioning, License & updates, Troubleshooting, and System status. Personal settings remain under the account menu, with Account, Security, Appearance, and Regional sections. Each card keeps its own save controls; switching workspace sections retains unsaved drafts in memory, not across reloads.',
           'Configure and test OIDC or direct LDAP sign-in under Settings → Sign-in & provisioning; SCIM 2.0 provisioning is separate. Administration → People has Users, Groups, and Teams. People → Teams owns organization-wide creation, CSV import, membership roles, join-request decisions, group mappings, quota delegation, and deletion. Deleting a team switches API keys, Chat conversations and “Working under” selections that use it to personal context; their owners get a notification. Usage history keeps the team name. The top-level Team workspace is informational: it shows only your actual memberships, members, usage, and quotas, even for administrators. Administrator permissions alone do not make a team one of your memberships. Model access still requires Grants. CSV imports validate the complete upload and apply all rows or none.',
           'Deleting a person disables the account and revokes their API tokens at once; their share links stop working. Their chats, files, memories, saved prompts, chat settings, share links and personal subscriptions are kept for 30 days — the list shows “Deleted — held until <date>”. Choose Restore to bring the person and everything back, or open the person and choose Delete content now (POST /api/v1/admin/users/{id}/purge) to delete it straight away. After 30 days it is deleted automatically. Usage history and the audit log are kept as before. If your directory deletes someone through SCIM and provisions them again within 30 days (same user name or email, or the same external ID), they get their account and content back.',
-          'Deployment settings come from environment variables; nothing is hardcoded. Gateway behaviour that administrators change at runtime — file storage, additional sign-in providers and the directory, feature flags, Chat, troubleshooting — is set in the app and stored in the database. JANUS_ENCRYPTION_KEY is always required. An identity provider is optional: without one, people sign in with Janus accounts. If you set JANUS_OIDC_PROVIDER_URL you must also set JANUS_OIDC_CLIENT_ID and JANUS_OIDC_CLIENT_SECRET.',
+          'Deployment settings come from environment variables; nothing is hardcoded. Gateway behavior that administrators change at runtime — file storage, additional sign-in providers and the directory, feature flags, Chat, troubleshooting — is set in the app and stored in the database. JANUS_ENCRYPTION_KEY is always required. An identity provider is optional: without one, people sign in with Janus accounts. If you set JANUS_OIDC_PROVIDER_URL you must also set JANUS_OIDC_CLIENT_ID and JANUS_OIDC_CLIENT_SECRET.',
           'JANUS_DATABASE_URL selects the database: a postgres:// URL for production, or a sqlite:// URL. When it is unset the gateway defaults to embedded SQLite at /data/janus.db — single-node evaluation mode — and logs a prominent startup warning; Settings → System status shows which backend is in force.',
           'Startup validates every required variable and dependency, and exits with a message naming what is missing rather than failing later under load.',
           'Feature flags are the exception to environment-variable configuration: they are runtime database settings toggled on Admin → Settings → General, audit-logged, and applied without a restart. The spend_emphasis flag chooses whether dashboard graphs open on the Spend metric (on) or the Tokens metric (off, the shipped usage-emphasis default); viewers can still switch metrics per graph, and links with an explicit metric keep it.',
@@ -1655,6 +1698,245 @@ sudo janus-ctl status`,
           'Alert rules (Administration → Safety & Security → Alerts) pick a trigger. Besides quota warnings and breaches, Upstream unreachable, System events and Child Safety, there are: Pool member taken out of rotation (a load-balanced alias stopped sending requests to one member after repeated failures; sent once per ejection); Personal subscription needs reconnecting (sent to the person whose subscription it is, when Janus can no longer renew their sign-in); License expiring or expired (weekly in the last 30 days, then daily in the grace period and after expiry); and Chat replies failing (at most once per model every 15 minutes).',
           'Severity is the lowest severity this rule sends by email or webhook. Critical sends only critical alerts and Info sends everything. Recovered notices are always sent. The in-app inbox receives every alert regardless.',
           'With several replicas, Upstream unreachable, Security classifier unavailable, pool ejection, license, Chat failure and Child Safety blocked notices are deduplicated in the database, so the cluster sends each once.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/fips-edition',
+    title: 'Janus FIPS edition',
+    summary:
+      'The separate build whose cryptography runs in a FIPS 140-3 validated module, what it changes, and how to prove which edition is running.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'What it is',
+        body: [
+          'The Janus FIPS edition is a separate build of the same Janus source. Its cryptography runs in the Go Cryptographic Module v1.0.0, FIPS 140-3 validated under CMVP certificate #5247, operating in approved mode. It ships as the ghcr.io/torvanis/janus:<version>-fips image (linux/amd64 and arm64) and as janus-fips standalone binaries and offline image archives for Linux, from the same commit and release as the default edition.',
+          'The module is what is validated. Janus itself is not “FIPS validated” or “FIPS certified”, and an authorization to operate belongs to your authorizing official for your system.',
+          'Run the FIPS edition when you need cryptography in a FIPS 140-3 validated module: U.S. federal, DoW (DoD) or FedRAMP-style environments, or a contract that requires it. Everyone else runs the default edition.',
+        ],
+      },
+      {
+        heading: 'License and database',
+        body: [
+          'The FIPS edition is a Business feature: Business, Enterprise and trial keys include it, Community does not. It refuses to start unless the installed key verifies and is a business or enterprise edition key (trial keys are). With no key, a Community key, or a key that fails verification, it exits with one line saying what is required and “Start a free trial at https://janusedge.com/pricing”.',
+          'An expired Business key, even past its grace period, keeps the gateway running: expiry never disrupts a running deployment. The check reads the key’s edition, not its feature list, so Business keys issued before the fips_edition feature existed qualify. It needs no network: mount the key and set JANUS_LICENSE_FILE, which also works for a first install in an air-gapped enclave.',
+          'The FIPS edition runs on PostgreSQL only. It refuses to start on SQLite, including the embedded default when JANUS_DATABASE_URL is unset. For the documented STIG configuration, also set JANUS_STIG_PROFILE=true (see the STIG configuration profile page).',
+        ],
+      },
+      {
+        heading: 'What is the same',
+        body: [
+          'Both editions protect Janus’s own data with the same approved algorithms: AES-256-GCM with a module-generated random nonce for secrets at rest, HKDF-SHA-256 for subkeys, PBKDF2-HMAC-SHA-512 (400,000 iterations) for passwords, HMAC-SHA-256 for recovery codes and token digests, and TLS 1.2 or newer for direct TLS. Stored data has one format, so moving between editions needs no database migration.',
+        ],
+      },
+      {
+        heading: 'What the FIPS edition switches off',
+        body: [
+          'Authenticator codes with HMAC-SHA-1 (the common default): new enrollments use HMAC-SHA-256 and the QR code says so. Apps that honor the setting work, for example 1Password, Bitwarden, Aegis, 2FAS, FreeOTP and Yubico Authenticator; some apps ignore it, and then the first code is not accepted during setup. Existing SHA-1 enrollments are refused with a message asking the person to set up two-factor again; recovery codes still sign them in. For DoW deployments, rely on your identity provider for MFA (CAC/PIV) and keep local accounts as break-glass.',
+          'Passwords and recovery codes stored as bcrypt by releases before PBKDF2: bcrypt is not compiled in, so these accounts need an administrator password reset. Accounts that signed in once on a recent default-edition release are already on PBKDF2.',
+          'Report export as PDF (the PDF library needs SHA-1, MD5 and RC4): use Excel, CSV or JSON. Reading encrypted PDF attachments in Janus Chat: attach an unencrypted copy.',
+          'JANUS_DEV_AUTH is not compiled in; setting it stops startup. LDAP skip_verify and an upstream’s Allow untrusted certificate are refused; trust the CA under Administration → Settings → Certificates (or JANUS_CA_DIR). The DoD PKI root CAs are trusted by default (JANUS_TRUST_DOD_ROOTS).',
+          'Administration → Settings → System status → Cryptography lists all of this at runtime, with the module version, the certificate, FIPS 140-3 mode, and how many local accounts still need a password reset or a new authenticator.',
+        ],
+      },
+      {
+        heading: 'Proving which edition is running',
+        body: [
+          'Every binary answers --fips-status with its edition, module version, FIPS 140-3 mode and restricted features, and exits non-zero when the FIPS edition would refuse to start. The FIPS edition refuses to start unless it runs the validated module in FIPS mode (for example, GODEBUG=fips140=off stops it). The startup log carries one “cryptography” line with the same facts, and the image contains the build-time output at /fips-status.json.',
+          'CI runs the whole test suite a second time as the FIPS edition in Go’s strict fips140=only mode, where any non-approved algorithm fails the build. Government audit artifacts (STIG checklist, FIPS statement, scan reports) describe the FIPS edition and name the exact image tag and digest they were produced against.',
+        ],
+        code: {
+          language: 'bash',
+          code: `docker run --rm ghcr.io/torvanis/janus:<version>-fips --fips-status
+# "edition": "fips", "module_version": "v1.0.0",
+# "validated_module": true, "cmvp_certificate": "#5247", "fips140_enabled": true`,
+        },
+      },
+      {
+        heading: 'Moving to the FIPS edition',
+        body: [
+          'Remove JANUS_DEV_AUTH and any LDAP skip_verify setting, then change the image to :<version>-fips. No migration runs. Afterwards, check System status → Cryptography and reset the passwords it lists; people with a SHA-1 authenticator set up two-factor again. Moving back to the default edition is safe: it reads everything the FIPS edition wrote.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/listener-tls',
+    title: 'Listener TLS',
+    summary: 'Encrypt the hop from your proxy to Janus: an issued certificate, or a temporary self-signed one.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'Options',
+        body: [
+          'By default Janus serves plain HTTP and your ingress or load balancer terminates TLS (declare it in JANUS_TRUSTED_PROXIES). To encrypt the hop from the proxy to Janus too, have Janus serve TLS itself.',
+          'Issued certificate: JANUS_TLS_CERT_PATH and JANUS_TLS_KEY_PATH (for example a mounted kubernetes.io/tls Secret, such as one from cert-manager). Renewals are picked up without a restart.',
+          'Self-signed: JANUS_TLS_SELF_SIGNED=true. Janus generates the certificate on first start and stores it encrypted in the database, so every replica serves the same one. Names: JANUS_TLS_SELF_SIGNED_NAMES; lifetime: JANUS_TLS_SELF_SIGNED_DAYS (1–1095, default 365).',
+          'Strict mode: JANUS_TLS_REQUIRE=true refuses to start unless Janus serves TLS itself.',
+        ],
+      },
+      {
+        heading: 'Self-signed: temporary by design',
+        body: [
+          'Use it for testing, or while an issued certificate is on its way. Under Administration → Settings → Certificates → Janus listener, download the certificate and install it in the proxy as the certificate to trust for the Janus backend.',
+          'Regenerate makes a new certificate, served at once (every replica within a minute). Install the new one in the proxy; until then the proxy cannot verify Janus. Regeneration is audited.',
+          'Administrators are alerted when the listener certificate is within 30 days of expiry and when it expires. In the STIG profile a self-signed listener certificate is reported as a deviation from the DoD PKI requirement.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/certificates',
+    title: 'Trusted certificates',
+    summary:
+      'One trust store for every outbound TLS connection: the host’s roots, the built-in DoD PKI roots, mounted ConfigMaps and files, and certificates uploaded in the app.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'What it covers',
+        body: [
+          'Every outbound TLS connection Janus makes verifies against one trust store: AI providers and model discovery, identity providers (OIDC), LDAP, S3 object storage, alert webhooks and SMTP, OTLP, personal-subscription vendors. Public web pages read by deep research verify against the host’s roots only.',
+          'Changes apply to new connections within seconds, on every replica, without a restart. Revocation checking (JANUS_TLS_REVOCATION) applies on top.',
+        ],
+      },
+      {
+        heading: 'Sources',
+        body: [
+          'The host’s system roots (the image’s CA bundle).',
+          'DoD PKI root CAs 3–6, built in and refreshed each release from DISA’s signed PKI/PKE bundle. On by default in the Janus FIPS edition, off otherwise; set JANUS_TRUST_DOD_ROOTS=true or false to choose. Intermediate CAs are not built in: servers send them.',
+          'A directory of PEM certificates: point JANUS_CA_DIR at any directory of .pem, .crt or .cer files (on Kubernetes, a mounted ConfigMap or Secret), or JANUS_CA_BUNDLE at one PEM file. The directory is rescanned every 30 seconds, so an edited ConfigMap applies without a restart.',
+          'In the app: Administration → Settings → Certificates → Add certificate. Paste a PEM certificate or chain, or choose a file. A private key is refused, and so is an expired certificate. Uploads are stored in the database, shared by every replica, and audited (trusted_certificate_added / trusted_certificate_removed).',
+          'Mounted and built-in certificates are listed read-only (“Managed by the deployment”); change them in the deployment.',
+        ],
+        code: {
+          language: 'yaml',
+          code: `extraEnv:
+  JANUS_TRUST_DOD_ROOTS: "true"   # unset: on for the FIPS edition image
+  JANUS_CA_DIR: /etc/janus/ca      # mount your PEM certificates here`,
+        },
+      },
+      {
+        heading: 'Expiry',
+        body: [
+          'Certificates within 30 days of expiry are flagged on the Certificates page and the System status Cryptography card, and administrators get one alert when a certificate enters that window and another when it expires. The built-in DoD roots are refreshed by releases and not alerted on.',
+        ],
+      },
+      {
+        heading: 'Allow untrusted certificate',
+        body: [
+          'An upstream can be set to Allow untrusted certificate (edit the upstream). Janus then skips certificate verification for that upstream’s host only; every other connection is still verified. It applies to https:// upstreams and is audited (upstream_untrusted_tls_changed). Prefer adding the upstream’s CA instead.',
+          'The Janus FIPS edition and the STIG profile refuse the setting when saved, ignore a saved one when connecting, and the STIG profile refuses to start while an upstream has it on.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/stig-profile',
+    title: 'STIG configuration profile',
+    summary:
+      'JANUS_STIG_PROFILE=true: one switch that sets the STIG defaults, refuses unsafe settings at startup, and makes administrative changes fail closed when they cannot be audited.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'What it is',
+        body: [
+          'JANUS_STIG_PROFILE=true puts Janus into its documented STIG configuration. It sets the defaults below, refuses settings that would undo them with a named error before serving anything, and logs one “stig profile” line at startup with the profile in force. It works in both editions; run it on the FIPS edition for FIPS 140-3 validated cryptography.',
+          'The profile is designed to support your ATO against the DISA Application Security and Development STIG. It is a configuration, not a certification, and the authorization to operate belongs to your authorizing official for your system.',
+        ],
+      },
+      {
+        heading: 'License',
+        body: [
+          'The STIG profile is a Business feature: Business, Enterprise and trial keys include it, Community does not. With the profile on, Janus refuses to start unless the installed key verifies and is a business or enterprise edition key (trial keys are). No key, a Community key, or a key that fails verification stops startup with one line ending “Start a free trial at https://janusedge.com/pricing”. An expired Business key, even past its grace period, keeps the gateway running.',
+          'The check reads the key’s edition, so older Business keys without the stig_profile feature name qualify. It reads JANUS_LICENSE_FILE or the key installed under Administration → Settings → License & updates, and needs no network access.',
+        ],
+      },
+      {
+        heading: 'Defaults',
+        body: [
+          'Offline (JANUS_OFFLINE=true): no update check, no license sync, no personal subscriptions; nothing contacts janusedge.com. License sync is pinned off.',
+          'Audit retention 913 days (30 months) instead of 730.',
+          'Local-account authenticator codes use HMAC-SHA-256 for new enrollments; HMAC-SHA-1 enrollments are refused, and the person sets up two-factor again or uses a recovery code. LDAP skip_verify is refused when saved and ignored at connect time.',
+          'Administrative changes fail closed: every state-changing API and SCIM request runs in one database transaction with its audit record. If the audit record cannot be written, the change is rolled back and the request answers 500 audit.write_failed. Janus Chat messages, dry runs and tests, classifier benchmark starts and personal subscription connect/poll are not wrapped: they are not configuration changes, and their handlers use background work.',
+          'Certificate revocation checking is hard (JANUS_TLS_REVOCATION=hard): every outbound TLS server certificate, and each intermediate, is checked by stapled OCSP, then the OCSP responder, then the CRL. A revoked certificate, or one whose status cannot be established, fails the connection. JANUS_OCSP_RESPONDER points every OCSP query at an enclave responder. Certificates that publish no OCSP or CRL source are accepted and counted. Outside the profile revocation checking is off unless JANUS_TLS_REVOCATION is soft (revoked fails, unknown is allowed and logged) or hard.',
+          'Audit export (CSV) is available to every administrator, in every edition and license state.',
+        ],
+      },
+      {
+        heading: 'Refused at startup',
+        body: [
+          'SQLite: set JANUS_DATABASE_URL=postgres://…. The FIPS edition refuses SQLite too, with or without the profile.',
+          'JANUS_DEV_AUTH=true, whatever JANUS_DEV_AUTH_ALLOW_UNSAFE says.',
+          'Plain HTTP. JANUS_PUBLIC_URL must start with https://, cookies must stay Secure, and TLS must be terminated by Janus (JANUS_TLS_CERT_PATH and JANUS_TLS_KEY_PATH, or JANUS_TLS_SELF_SIGNED=true) or by a proxy you declare in JANUS_TRUSTED_PROXIES. Janus cannot see whether the proxy-to-Janus hop is encrypted; if your enclave requires it, set JANUS_TLS_REQUIRE=true so Janus refuses to start without serving TLS itself. A self-signed listener certificate is reported as a deviation (APSC-DV-002300).',
+          'JANUS_AUDIT_RETENTION_DAYS below 913.',
+          'Anything that phones home: JANUS_LICENSE_SYNC=true, JANUS_UPDATE_CHECK=true or JANUS_OFFLINE=false.',
+          'A saved LDAP directory with skip_verify on, or an upstream with Allow untrusted certificate on. Add the CA under Administration → Settings → Certificates (or mount it with JANUS_CA_DIR) and turn the setting off.',
+          'JANUS_TLS_REVOCATION=off. Use soft while an OCSP responder or CRL is being made reachable from the enclave.',
+        ],
+        code: {
+          language: 'bash',
+          code: `JANUS_STIG_PROFILE=true
+JANUS_DATABASE_URL=postgres://janus@db.example.mil/janus
+JANUS_PUBLIC_URL=https://janus.example.mil
+JANUS_TRUSTED_PROXIES=10.42.0.0/16      # the TLS-terminating ingress
+JANUS_LICENSE_FILE=/etc/janus/license/janus.lic`,
+        },
+      },
+      {
+        heading: 'Security settings it enforces',
+        body: [
+          'Administration → Settings → Security holds sessions, the sign-in notice, lockout, passwords, audit forwarding and smart cards (see Security settings). With the profile on, every value is read with the STIG values as a floor, and saving a weaker value is refused with the control named.',
+          'Idle sign-out ≤ 15 minutes for people and ≤ 10 for administrators (APSC-DV-000070/000080); at most 3 sessions per person; the DoD Notice and Consent banner acknowledged before any sign-in (APSC-DV-000520/000530); lockout after 3 failures in 15 minutes until an administrator unlocks (APSC-DV-000500/000510); passwords of 15 or more characters with upper case, lower case, digit and special, 8 characters changed, 24-hour minimum and 180-day maximum age, and none of the last 5 (APSC-DV-001680..001780).',
+          'Sign-in, sign-out, failures, lockouts, time-outs and access-denied are always audited with the source address and outcome. Audit forwarding to syslog or a SIEM and smart-card (CAC/PIV) sign-in are on the same page; they need a destination and the DoD roots, so the profile does not switch them on by itself.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'admin/security-settings',
+    title: 'Security settings',
+    summary:
+      'Session time-outs, the sign-in notice, lockout, password rules, audit forwarding to syslog or a SIEM, and smart-card (CAC/PIV) sign-in.',
+    group: 'Admin guide',
+    sections: [
+      {
+        heading: 'Where',
+        body: [
+          'Administration → Settings → Security. Saving is audited (security_policy_changed) and every replica applies it within 10 seconds. The defaults keep Janus as it was; Start from a baseline (NIST SP 800-63B, PCI DSS 4.0, FedRAMP Moderate or the DoD STIG) and Apply baseline fills in its values for you to review and save; only the STIG is enforced, by the STIG profile.',
+        ],
+      },
+      {
+        heading: 'Sessions',
+        body: [
+          'Idle sign-out for people and for administrators, the longest session, and a limit of sessions per person (a new sign-in ends the oldest). JANUS_SESSION_IDLE_TIMEOUT_HOURS and JANUS_SESSION_TTL_HOURS remain upper bounds. Only what the person does counts as activity, not the app refreshing by itself; a minute before the limit the person is warned and can stay signed in.',
+        ],
+      },
+      {
+        heading: 'Sign-in notice',
+        body: [
+          'When on, the notice is shown before every sign-in method and nothing is offered until the person acknowledges it; the server refuses a sign-in without a fresh acknowledgment. Use the DoD Notice and Consent text fills in the standard DoD banner. Editing the text makes people acknowledge again.',
+        ],
+      },
+      {
+        heading: 'Lockout and passwords',
+        body: [
+          'After the set number of failures within the window, the sign-in name is locked for the set time, or until an administrator unlocks it under Locked now (0 minutes). It covers Janus passwords and directory sign-in. Password rules (length, character kinds, characters changed, history, minimum and maximum age) apply at the next change; an expired password must be changed at sign-in.',
+        ],
+      },
+      {
+        heading: 'Audit log and forwarding',
+        body: [
+          'Sign-in, sign-out, failures, lockouts, time-outs and access-denied are part of the audit log, each with the source address and outcome. The Audit page filters by kind, outcome, address, action, person and time, searches, and sorts; the export follows the filters.',
+          'Audit forwarding sends every record to syslog or a SIEM over UDP, TCP or TLS, as RFC 5424 or CEF. TLS servers are verified against Settings → Certificates. Send a test event shows the exact error. Records wait in a queue and never slow a request; they always stay in Janus too.',
+        ],
+      },
+      {
+        heading: 'Smart card (CAC/PIV)',
+        body: [
+          'Adds a Smart card button to the sign-in page. The certificate comes from Janus itself (listener TLS on; Janus asks for an optional client certificate) or from the proxy in front of Janus in a header (X-Forwarded-Client-Cert, escaped PEM or base64), accepted only from JANUS_TRUSTED_PROXIES.',
+          'The certificate must chain to an authority under Settings → Certificates (the DoD roots, a mounted bundle or an upload) and passes the revocation check. It is matched to a person by UPN, email or DoD ID number (EDIPI), in the order you choose; an administrator can also set a card identity on a person. Unknown cards are refused unless you allow creating accounts, and administrators can be required to use a card.',
         ],
       },
     ],
@@ -1853,6 +2135,12 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
         ],
       },
       {
+        heading: 'Administrators: a change answered 500 audit.write_failed',
+        body: [
+          '`audit.write_failed` — the gateway runs the STIG profile, which saves an administrative change only together with its audit record. The audit record could not be written, so the change was not saved. Fix the database (disk space, permissions, connectivity) and try again.',
+        ],
+      },
+      {
         heading: 'My model is missing from /v1/models',
         body: [
           'Either the model is not enabled, or you hold no grant for it. Both are administrator actions. A model that has never been priced cannot be enabled at all — an administrator must save a rate card first ($0 rates are allowed for self-hosted models).',
@@ -1997,12 +2285,12 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
       {
         heading: 'Serving and sessions',
         body: [
-          'JANUS_LISTEN_ADDR (default :8080), JANUS_TLS_CERT_PATH / JANUS_TLS_KEY_PATH for direct TLS (set both or neither), JANUS_COOKIE_SECURE to force secure cookies (default: on when the public URL is https), JANUS_TRUSTED_PROXIES as a comma- or space-separated list of IP addresses or CIDR blocks gating X-Forwarded-For, JANUS_CA_BUNDLE for private upstream CAs. Outbound calls honor the standard HTTPS_PROXY, HTTP_PROXY and NO_PROXY variables.',
+          'JANUS_LISTEN_ADDR (default :8080), JANUS_TLS_CERT_PATH / JANUS_TLS_KEY_PATH for direct TLS with an issued certificate (set both or neither; re-read when they change), JANUS_TLS_SELF_SIGNED=true for a self-signed listener certificate Janus generates and stores (temporary; names JANUS_TLS_SELF_SIGNED_NAMES, lifetime JANUS_TLS_SELF_SIGNED_DAYS), JANUS_TLS_REQUIRE=true to refuse to start without serving TLS itself, JANUS_COOKIE_SECURE to force secure cookies (default: on when the public URL is https), JANUS_TRUSTED_PROXIES as a comma- or space-separated list of IP addresses or CIDR blocks gating X-Forwarded-For. Outbound trust store (every outbound TLS connection): JANUS_CA_BUNDLE (a PEM file), JANUS_CA_DIR (a directory of .pem/.crt/.cer files, rescanned every 30 seconds), JANUS_TRUST_DOD_ROOTS (the built-in DoD PKI root CAs; default on in the FIPS edition, off otherwise), plus certificates uploaded under Administration → Settings → Certificates. Outbound calls honor the standard HTTPS_PROXY, HTTP_PROXY and NO_PROXY variables.',
           'JANUS_SESSION_TTL_HOURS (default 24) and JANUS_SESSION_IDLE_TIMEOUT_HOURS (default 4) bound browser sessions.',
         ],
       },
       {
-        heading: 'Proxy behaviour and retention',
+        heading: 'Proxy behavior and retention',
         body: [
           'JANUS_UPSTREAM_CONNECT_TIMEOUT_SECONDS (default 10), JANUS_UPSTREAM_TTFB_TIMEOUT_SECONDS (30), and JANUS_UPSTREAM_TOTAL_TIMEOUT_SECONDS (600) set the default bound for each hop. An administrator can override any of them at runtime from Administration → Settings → General → Upstream timeouts (PATCH /api/v1/admin/system/upstream-timeouts): the override is stored in the database, survives restarts, applies to the next request on every replica without a redeploy, and is audit-logged. Raise the time-to-first-byte bound when a busy provider queues requests and callers see 503s. A streamed reply is timed out on silence, not on its total length. The same limits apply when Janus resends a request it fitted to a model’s limits. JANUS_MAX_RESPONSE_BYTES (default 104857600, 100 MiB) caps buffered responses. JANUS_DISCOVERY_INTERVAL_MINUTES (default 2) sets the model-discovery cadence — each run also records whether every upstream is reachable, so it doubles as the availability probe — and an administrator can override it at runtime from Administration → Settings → General → Model discovery (PATCH /api/v1/admin/system/discovery-interval), stored in the database, applied immediately without a restart, and audit-logged.',
           'JANUS_DB_MAX_CONNS (default 25) caps each replica\u2019s PostgreSQL connection pool. Keep replicas \u00d7 this value well under the database\u2019s max_connections, with headroom for maintenance tools: when the database runs out of connections, requests fail.',
@@ -2014,7 +2302,7 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
       {
         heading: 'Chat and files',
         body: [
-          'JANUS_CHAT_PREVIEW (default false) must be true for Janus Chat to be available at all; while it is false, Chat stays off whatever Administration → Chat says. JANUS_CHAT_AUTO_TITLE (default true) names each chat with a short model-written title; the call is metered and shows in the request log as janus-chat-title. JANUS_CHAT_MAX_UPLOAD_BYTES (default 20 MiB) caps one chat attachment; the smaller of this and the storage cap applies. JANUS_CHAT_SEARCH_SEARXNG_URL (unset) points at a SearXNG instance, such as http://searxng:8080, and turns Chat web search on with it once at startup; later admin changes stick.',
+          'JANUS_CHAT_PREVIEW (default false) must be true for Janus Chat to be available at all; while it is false, Chat stays off whatever Administration → Chat says. JANUS_CHAT_AUTO_TITLE (default true) is the starting point for chat naming until an administrator chooses in Administration → Chat → Tools → Chat names. Each naming call is metered and shows in the request log as janus-chat-title. JANUS_CHAT_MAX_UPLOAD_BYTES (default 20 MiB) caps one chat attachment; the smaller of this and the storage cap applies. JANUS_CHAT_SEARCH_SEARXNG_URL (unset) points at a SearXNG instance, such as http://searxng:8080, and turns Chat web search on with it once at startup; later admin changes stick.',
           'JANUS_STORAGE_MODE (database or s3; unset lets Administration → Settings → General → File storage decide) fixes where chat attachments and troubleshooting captures are stored. With s3, JANUS_S3_ENDPOINT, JANUS_S3_BUCKET, JANUS_S3_ACCESS_KEY_ID and JANUS_S3_SECRET_ACCESS_KEY are required; JANUS_S3_REGION (default us-east-1), JANUS_S3_PATH_STYLE (default false), JANUS_S3_PREFIX (key prefix) and JANUS_S3_CA_FILE (PEM file of extra CAs for the endpoint) are optional. JANUS_STORAGE_MAX_OBJECT_BYTES (default 25 MiB) caps one stored file.',
         ],
       },
@@ -2116,9 +2404,9 @@ JANUS_OIDC_SCOPES=openid,profile,email`,
         ],
       },
       {
-        heading: 'Full licence texts',
+        heading: 'Full license texts',
         body: [
-          'Each component remains under its own licence. Full texts ship in each dependency’s source distribution: `go list -m all` enumerates the Go module graph, and `npm ls --all` under web/ enumerates the JavaScript tree. The repository’s NOTICE file is the authoritative copy of this attribution list.',
+          'Each component remains under its own license. Full texts ship in each dependency’s source distribution: `go list -m all` enumerates the Go module graph, and `npm ls --all` under web/ enumerates the JavaScript tree. The repository’s NOTICE file is the authoritative copy of this attribution list.',
         ],
       },
     ],

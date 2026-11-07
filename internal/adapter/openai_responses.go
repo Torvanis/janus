@@ -92,7 +92,7 @@ func chatToPublicResponses(body []byte, model string) ([]byte, error) {
 		delete(m, "instructions")
 	}
 	if r, ok := m["reasoning"].(map[string]any); ok {
-		// A summary needs a verified organisation on the public API.
+		// A summary needs a verified organization on the public API.
 		delete(r, "summary")
 	}
 	switch {

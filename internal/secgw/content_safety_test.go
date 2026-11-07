@@ -142,7 +142,7 @@ func TestIngressContentSafetyBlocksOnlySelectedCategories(t *testing.T) {
 	if dec.Action != store.SecgwActionBlocked || dec.BlockKind != store.SecgwCheckContentSafety || dec.Violations[0].RuleID != "S1,S9" {
 		t.Fatalf("selected category must block: %+v", dec)
 	}
-	// The guard saw the whole conversation, last turn under judgement.
+	// The guard saw the whole conversation, last turn under judgment.
 	if last := guard.calls[len(guard.calls)-1]; len(last) != 1 || last[0].Role != "user" {
 		t.Fatalf("guard must receive the conversation turns: %+v", last)
 	}

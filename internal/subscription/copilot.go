@@ -17,7 +17,7 @@ import (
 // Enterprise). GitHub supports third-party tools using a Copilot
 // subscription through a normal GitHub OAuth app; Janus ships its own
 // ("Janus", registered by the Janus vendor) so no administrator has to
-// register anything. JANUS_GITHUB_OAUTH_CLIENT_ID lets an organisation that
+// register anything. JANUS_GITHUB_OAUTH_CLIENT_ID lets an organization that
 // insists on its own OAuth app use that instead.
 //
 // Sign-in is GitHub's device flow. The OAuth app does not expire user
@@ -178,7 +178,7 @@ func (c *Copilot) PollDeviceAuthorization(ctx context.Context, client *http.Clie
 	}
 	tok := &Tokens{AccessToken: out.AccessToken, RefreshToken: out.RefreshToken, Scope: out.Scope}
 	if out.ExpiresIn > 0 {
-		// Only when an organisation's own OAuth app has token expiry on.
+		// Only when an organization's own OAuth app has token expiry on.
 		tok.ExpiresAt = time.Now().UTC().Add(time.Duration(out.ExpiresIn) * time.Second)
 	}
 	return tok, nil

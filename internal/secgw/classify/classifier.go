@@ -1,11 +1,11 @@
-// Package classify is the pluggable model-backed judgement layer of the
+// Package classify is the pluggable model-backed judgment layer of the
 // Security Gateway. v1 ships one protocol, text_classification, which is how
 // encoder guard models such as Llama Prompt Guard 2 are served (HF TEI /
 // transformers pipeline wire shape). Generative guards (Llama Guard) are a
 // later protocol behind the same interface; adding one is a registry
 // entry, not a pipeline change.
 //
-// Every backend honours the same operational contract: a per-call timeout
+// Every backend honors the same operational contract: a per-call timeout
 // from the check's options, a per-model circuit breaker that opens after
 // consecutive failures so a wedged classifier is loud rather than a silent
 // 100%-fail-closed outage, and metering of every call to a platform
@@ -255,7 +255,7 @@ func isTrialCall(ctx context.Context) bool {
 // breaker at the threshold. guardOnly limits the accounting to calls
 // marked WithGuardCall (decision models, which other features share).
 // Administrators' trial calls (WithTrialCall) never count. A call the
-// caller itself cancelled (client gone, request finished) is
+// caller itself canceled (client gone, request finished) is
 // never a classifier failure.
 func (b *Breaker) record(ctx context.Context, err error, guardOnly bool) {
 	if isTrialCall(ctx) || (guardOnly && !IsGuardCall(ctx)) {

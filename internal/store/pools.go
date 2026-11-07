@@ -122,7 +122,7 @@ func (p ManagedModelPool) servableMembers() int {
 }
 
 // IsLoadBalanced reports whether the pool uses anything beyond the
-// single-target behaviour every edition has: more than one enabled member,
+// single-target behavior every edition has: more than one enabled member,
 // or a policy other than failover.
 func (p ManagedModelPool) IsLoadBalanced() bool {
 	enabled := 0

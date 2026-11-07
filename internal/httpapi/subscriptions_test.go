@@ -21,17 +21,21 @@ import (
 // pending round, rotating refresh tokens, userinfo, revoke, and an
 // OpenAI-shaped inference API that checks the bearer token.
 type fakeXAI struct {
-	mu            sync.Mutex
-	srv           *httptest.Server
-	subject       string
-	pendingLeft   int
-	accessSeq     int
-	liveAccess    string
-	liveRefresh   string
-	refreshFails  bool
-	revoked       []string
-	inferenceAuth []string
-	inferenceBody []string
+	mu           sync.Mutex
+	srv          *httptest.Server
+	subject      string
+	pendingLeft  int
+	accessSeq    int
+	liveAccess   string
+	liveRefresh  string
+	refreshFails bool
+	// modelsDeadStatus is what /v1/models answers a dead token (default 401).
+	modelsDeadStatus int
+	revoked          []string
+	inferenceAuth    []string
+	inferenceBody    []string
+	// inferenceHeader records each inference request's headers.
+	inferenceHeader []http.Header
 	// streamType overrides the streaming Content-Type (default
 	// text/event-stream); the ChatGPT backend has sent text/plain.
 	streamType string
@@ -107,13 +111,18 @@ func (f *fakeXAI) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	case "/v1/models":
 		if bearer != f.liveAccess {
-			writeJSON(401, map[string]any{"error": "invalid_token"})
+			st := 401
+			if f.modelsDeadStatus != 0 {
+				st = f.modelsDeadStatus
+			}
+			writeJSON(st, map[string]any{"error": "invalid_token"})
 			return
 		}
 		writeJSON(200, map[string]any{"data": []map[string]any{{"id": "grok-test"}, {"id": "grok-test-fast"}}})
 	case "/v1/chat/completions":
 		f.inferenceAuth = append(f.inferenceAuth, bearer)
 		f.inferenceBody = append(f.inferenceBody, string(body))
+		f.inferenceHeader = append(f.inferenceHeader, r.Header.Clone())
 		if bearer != f.liveAccess {
 			writeJSON(401, map[string]any{"error": "invalid_token"})
 			return

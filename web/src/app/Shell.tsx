@@ -5,8 +5,9 @@ import { Breadcrumb } from './Breadcrumb';
 import { api } from '../lib/api';
 import { resolveTheme, useAppearance, useMediaQuery } from '../lib/hooks';
 import { useSession } from './session';
+import { IdleWatcher } from './IdleWatcher';
 import { AmbientCanvas, type AmbientSignal } from '../components/AmbientCanvas';
-import { Badge } from '../components/ui';
+import { Badge, Chevron } from '../components/ui';
 import { PageErrorBoundary } from '../components/PageErrorBoundary';
 import { LicenseBanner } from './LicenseBanner';
 import type { GlobalDashboard, Notification } from '../lib/types';
@@ -70,9 +71,12 @@ const ADMIN_SECTIONS: NavSection[] = [
     items: [{ to: '/admin', label: () => t('shell.navOverview'), glyph: '▤', admin: true }],
   },
   {
-    // Chat stands on its own: who gets it, its models and its tools.
+    // Chat and Settings stand on their own, together, under Overview.
     id: 'admin-chat',
-    items: [{ to: '/admin/chat', label: () => 'Chat', glyph: '✎', admin: true }],
+    items: [
+      { to: '/admin/chat', label: () => 'Chat', glyph: '✎', admin: true },
+      { to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true },
+    ],
   },
   {
     id: 'admin-gateway',
@@ -112,10 +116,6 @@ const ADMIN_SECTIONS: NavSection[] = [
       { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
       { to: '/admin/audit', label: () => t('shell.navAuditLog'), glyph: '❑', admin: true },
     ],
-  },
-  {
-    id: 'admin-settings',
-    items: [{ to: '/admin/settings', label: () => t('shell.navSettings'), glyph: '⚙', admin: true }],
   },
 ];
 
@@ -216,6 +216,7 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
       <a className="skip-link" href="#main">
         {t('shell.skipToContent')}
       </a>
+      <IdleWatcher idleSeconds={me?.session?.idle_timeout_seconds} />
 
       {!isMobile ? (
         <nav className="sidebar" aria-label={t('shell.primaryNav')}>
@@ -453,16 +454,14 @@ function NavSections({
                 title={current ? 'Holds the current page' : undefined}
                 onClick={() => toggle(section.id, !isOpen)}
               >
-                <span className="nav-fold-caret" aria-hidden="true">
-                  ▸
-                </span>
-                {label}
+                <span className="nav-fold-label">{label}</span>
                 <span className="nav-fold-count" aria-hidden="true">
                   {section.items.length}
                 </span>
+                <Chevron open={isOpen} className="nav-fold-chevron" />
               </button>
             ) : null}
-            <div className="nav-group" id={`nav-${section.id}`} hidden={!isOpen}>
+            <div className={`nav-group${canFold ? ' nav-group-folded' : ''}`} id={`nav-${section.id}`} hidden={!isOpen}>
               {section.items.map((item) => (
                 <NavItemLink key={item.to} item={item} collapsed={collapsed} end={item.to === '/admin'} />
               ))}

@@ -114,7 +114,7 @@ func (s *Store) assertValidFallback(ctx context.Context, targetModelID, fallback
 }
 
 // SetManagedModelFallback configures or clears (empty fallbackModelID) the
-// alias's fallback. Triggers are normalised; an empty list with a fallback set
+// alias's fallback. Triggers are normalized; an empty list with a fallback set
 // means DefaultFallbackTriggers.
 func (s *Store) SetManagedModelFallback(ctx context.Context, id, fallbackModelID string, triggers []string) error {
 	m, err := s.ManagedModelByID(ctx, id)
@@ -147,7 +147,7 @@ func (s *Store) SetManagedModelFallback(ctx context.Context, id, fallbackModelID
 		}
 		encoded = string(b)
 	}
-	res, err := s.db.ExecContext(ctx, s.rebind(
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(
 		`UPDATE managed_model SET fallback_model_id = ?, fallback_triggers = ?, updated_at = ? WHERE id = ?`),
 		fallbackModelID, encoded, FormatTime(nowUTC()), id)
 	if err != nil {
@@ -173,7 +173,7 @@ var ErrManagedModelNameTaken = errors.New("that model name is already in use")
 // resolved from the same field: two different rulesets for one namespace is
 // how you end up able to save a name that cannot be called.
 //
-// The charset deliberately matches what public model catalogues actually use —
+// The charset deliberately matches what public model catalogs actually use —
 // lowercase letters, digits, and the separators . _ - : / — so a name is
 // always safe to paste into a config file, a URL, or a shell command without
 // quoting or escaping. Uppercase input is folded to lowercase rather than
@@ -589,7 +589,7 @@ func (s *Store) UpdateManagedModel(ctx context.Context, id, name, description st
 	if err := s.assertManagedNameAvailable(ctx, name, id); err != nil {
 		return err
 	}
-	res, execErr := s.db.ExecContext(ctx, s.rebind(
+	res, execErr := s.runner(ctx).ExecContext(ctx, s.rebind(
 		`UPDATE managed_model SET name = ?, description = ?, updated_at = ? WHERE id = ?`),
 		name, strings.TrimSpace(description), FormatTime(nowUTC()), id)
 	if execErr != nil {
@@ -649,7 +649,7 @@ func (s *Store) SetManagedModelStatus(ctx context.Context, id, status string) er
 	if status != ManagedModelEnabled && status != ManagedModelDisabled {
 		return &ValidationError{Field: "status", Message: "status must be enabled or disabled"}
 	}
-	res, err := s.db.ExecContext(ctx, s.rebind(
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(
 		`UPDATE managed_model SET status = ?, updated_at = ? WHERE id = ?`),
 		status, FormatTime(nowUTC()), id)
 	if err != nil {

@@ -33,6 +33,7 @@ import { ATTACH_ACCEPT, AttachmentChips, MessageAttachments, useComposerAttachme
 import { ModelPicker, arrangeOptions, useChatCatalog } from './ModelPicker';
 import { SearchActivity, SourcesList } from './ChatTools';
 import { MadeFiles, MemoryChip } from './ChatExtras';
+import { QuestionCard, type ChatQuestion } from './ChatQuestion';
 import { ChatTray, ModeChips, TrayButton } from './ChatTray';
 import './chat.css';
 
@@ -97,6 +98,8 @@ export interface ChatMessage {
   activity?: ChatActivity[];
   /** Pages the reply cited. */
   sources?: ChatSource[];
+  /** The model asked the person this (ask_user); their next message answers it. */
+  question?: ChatQuestion;
   /** Shared by replies made side by side (Compare). */
   compare_group?: string;
 }
@@ -1361,6 +1364,14 @@ export default function ChatPage(): ReactNode {
                     {m.role === 'assistant' ? <MadeFiles attachments={m.attachments} /> : null}
                     {m.role === 'assistant' ? <SourcesList sources={m.sources} /> : null}
                     {m.role === 'assistant' ? <MemoryChip activity={m.activity} onOpen={() => setSettingsOpen(true)} /> : null}
+                    {m.role === 'assistant' && m.question && m.status === 'complete' ? (
+                      <QuestionCard
+                        key={`q-${m.id}`}
+                        question={m.question}
+                        active={isLast && m.id === conv?.current_leaf_id && !runId}
+                        onAnswer={(text) => void send({ content: text, parentId: m.id })}
+                      />
+                    ) : null}
                     {m.status === 'stopped' ? <div className="chat-stopped">Stopped</div> : null}
                     {m.role === 'assistant' && m.status !== 'streaming' ? (
                       <ReplyNotes notes={m.notes} model={m.served_model || m.model || ''} />

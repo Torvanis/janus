@@ -3,7 +3,7 @@
   "info": {
     "title": "Janus — corporate API gateway",
     "version": "1.0.0",
-    "description": "Janus is an authenticated, metered gateway between an organisation's people and its approved AI providers. It exposes three surfaces: an OpenAI-compatible proxy under /v1 (bearer token auth — point any OpenAI SDK at PUBLIC_URL/v1), a first-party application API under /api/v1 (session cookie + CSRF header), and an admin API under /api/v1/admin (admin session). This document is served by the gateway itself at /openapi.json, so it always matches the running build.",
+    "description": "Janus is an authenticated, metered gateway between an organization's people and its approved AI providers. It exposes three surfaces: an OpenAI-compatible proxy under /v1 (bearer token auth — point any OpenAI SDK at PUBLIC_URL/v1), a first-party application API under /api/v1 (session cookie + CSRF header), and an admin API under /api/v1/admin (admin session). This document is served by the gateway itself at /openapi.json, so it always matches the running build.",
     "license": {
       "name": "Proprietary — see NOTICE for third-party attributions"
     }
@@ -893,7 +893,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "List quotas with utilisation",
+        "summary": "List quotas with utilization",
         "security": [
           {
             "sessionCookie": []
@@ -2723,7 +2723,7 @@
           "admin"
         ],
         "summary": "User detail",
-        "description": "Profile, groups, teams, effective grants, tokens, quotas, recent requests, audit trail, and a per-user usage timeseries (usage_series) scoped strictly to this user for the drawer's usage-over-time graph. recent_requests honours the tokens_in_gt/tokens_in_lt/tokens_out_gt/tokens_out_lt thresholds and requests_sort, so the People drawer can narrow one user's recent traffic by token size.",
+        "description": "Profile, groups, teams, effective grants, tokens, quotas, recent requests, audit trail, and a per-user usage timeseries (usage_series) scoped strictly to this user for the drawer's usage-over-time graph. recent_requests honors the tokens_in_gt/tokens_in_lt/tokens_out_gt/tokens_out_lt thresholds and requests_sort, so the People drawer can narrow one user's recent traffic by token size.",
         "security": [
           {
             "sessionCookie": []
@@ -2938,7 +2938,7 @@
         "tags": [
           "app"
         ],
-        "summary": "Organisation-wide dashboard",
+        "summary": "Organization-wide dashboard",
         "security": [
           {
             "sessionCookie": []
@@ -2983,7 +2983,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Every quota covering the caller, with utilisation and reset times."
+            "description": "Every quota covering the caller, with utilization and reset times."
           }
         }
       }
@@ -3359,7 +3359,7 @@
           "app"
         ],
         "summary": "Granted models with pricing and health",
-        "description": "Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms — the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarised as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields.",
+        "description": "Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms — the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarized as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields.",
         "security": [
           {
             "sessionCookie": []
@@ -3482,7 +3482,7 @@
           "app"
         ],
         "summary": "Poll a pending subscription sign-in",
-        "description": "Advances the device sign-in by at most one provider call, honouring the provider's polling interval across replicas. status is pending, connected, expired, denied, or failed.",
+        "description": "Advances the device sign-in by at most one provider call, honoring the provider's polling interval across replicas. status is pending, connected, expired, denied, or failed.",
         "security": [
           {
             "sessionCookie": []
@@ -4064,7 +4064,7 @@
           "app"
         ],
         "summary": "Export own request log as CSV",
-        "description": "Honours the same filters and admin scope/user_id overrides as /api/v1/requests. Admin cross-user exports gain user_email and user_name columns; the user-scoped export's column set is unchanged.",
+        "description": "Honors the same filters and admin scope/user_id overrides as /api/v1/requests. Admin cross-user exports gain user_email and user_name columns; the user-scoped export's column set is unchanged.",
         "security": [
           {
             "sessionCookie": []
@@ -8047,7 +8047,7 @@
         ],
         "responses": {
           "200": {
-            "description": "How often the gateway polls every upstream for its model catalog (which doubles as the upstream reachability probe). effective_minutes is the cadence the scheduler honours now; default_minutes is JANUS_DISCOVERY_INTERVAL_MINUTES; override_minutes is the stored administrator override (0 = none); source is default or override; min_minutes/max_minutes are the accepted bounds (1 minute to 7 days); last_run_at and next_run_at describe the schedule.",
+            "description": "How often the gateway polls every upstream for its model catalog (which doubles as the upstream reachability probe). effective_minutes is the cadence the scheduler honors now; default_minutes is JANUS_DISCOVERY_INTERVAL_MINUTES; override_minutes is the stored administrator override (0 = none); source is default or override; min_minutes/max_minutes are the accepted bounds (1 minute to 7 days); last_run_at and next_run_at describe the schedule.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8905,6 +8905,249 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/admin/header-policies": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List header policies",
+        "description": "Every header policy with its assignments, every assignable target (default, upstreams, personal-subscription providers) with the policy in effect, and the header logging setting. Secret rule values are never returned.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a header policy",
+        "description": "Rules (remove, set, append) run in order on the caller's headers before the adapter adds credentials. Headers Janus manages (Authorization, Host, Cookie, API-key headers, transport headers) cannot be targeted. Secret values are stored encrypted.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/header-policies/assignments": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Assign a header policy",
+        "description": "Binds a policy to the default, an upstream or a personal-subscription provider. An empty policy_id removes the target's own assignment so it inherits the default.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/header-policies/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Header logging setting",
+        "description": "values (names and values, sensitive values masked), names, or off.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change header logging",
+        "description": "values, names or off. Applies to requests logged from now on.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/header-policies/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get a header policy",
+        "description": "Secret rule values are reported as has_value, never returned.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update a header policy",
+        "description": "A secret rule sent with an empty value and keep_value=true keeps its stored value.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete a header policy",
+        "description": "Targets it was assigned to fall back to the default.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/requests/{id}/headers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Request headers",
+        "description": "The headers the caller sent, the headers the provider received and what the header policy changed. Credentials, cookies, tokens and secret rule values are masked. headers is null when the request has no record.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/v1/admin/secgw/term-lists/{id}/export": {
@@ -15171,7 +15414,7 @@
         "tags": [
           "reporting"
         ],
-        "summary": "Retry failed, cancelled or expired report",
+        "summary": "Retry failed, canceled or expired report",
         "description": "Active user required; service tokens rejected. Rechecks current identity/scope. Session-cookie mutations require X-Janus-CSRF. Local-only mode redacts monetary data on every representation. Send an empty JSON object. Creates a new run/ID under requester using the old frozen definition, not a refreshed relative interval.",
         "security": [
           {
@@ -16878,6 +17121,335 @@
           }
         }
       }
+    },
+    "/api/v1/admin/certificates": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Outbound trust store: every trusted certificate by source (DoD, JANUS_CA_BUNDLE, JANUS_CA_DIR, uploaded)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "trust_store (certificates with source, read_only, subject, sha256, not_after, expires_soon, expired; dod_roots; directory; last_problem), untrusted_tls_available, expiry_warning_days."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Upload a trusted certificate (PEM, certificates only; a chain is allowed)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "pem"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "pem": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "certificate (id, name, sha256, created_by, created_at). Applies to new connections on every replica within 30 seconds (this replica at once). Audited."
+          },
+          "400": {
+            "description": "No PEM certificate, a private key, an expired certificate, or over 1 MiB / 100 certificates."
+          },
+          "409": {
+            "description": "That certificate is already trusted."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/certificates/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Stop trusting an uploaded certificate (mounted and built-in ones are managed by the deployment)",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "deleted: the id. Audited."
+          },
+          "404": {
+            "description": "No uploaded certificate with that id."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/security/policy": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Security settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "policy (saved), effective (in force; raised to the STIG values when JANUS_STIG_PROFILE is on), defaults, stig_values, stig_profile, stig_gaps (where the saved policy is weaker than the Application Security and Development STIG), dod_banner, limits (deployment caps on session minutes), smart_card_direct_available, syslog_status."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Save the security settings",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The same document as GET. 400 names an invalid field, or with the STIG profile on, each setting weaker than the STIG. Audited as security_policy_changed."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "SecurityPolicy: sessions {idle_minutes_user, idle_minutes_admin, absolute_minutes, max_per_user}, banner {enabled, title, text, button}, lockout {max_failures, window_minutes, lock_minutes (0 = until unlocked)}, passwords {min_length, require_upper, require_lower, require_digit, require_special, min_changed_chars, history, min_age_hours, max_age_days}, syslog {enabled, protocol udp|tcp|tls, address host:port, format rfc5424|cef, facility, app_name, server_name, client_cert_file, client_key_file}, smart_card {enabled, source direct|proxy, header, header_format xfcc|pem|base64, match [upn,email,edipi], provision, require_for_admins}."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/security/lockouts": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Locked sign-in names",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "lockouts: [{login, failed, locked_at, locked_until, until_unlocked}]."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/security/lockouts/unlock": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unlock a sign-in name",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "unlocked, was_locked. Audited as account_unlocked."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{login}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/security/syslog/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Send a test audit event to syslog / the SIEM",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok, message or error (the exact connection or certificate error)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{syslog?: SyslogPolicy} (default: the saved settings)"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{id}/smart-card": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set a person's smart-card identity",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "identity. A UPN or DoD ID number (EDIPI) a CAC/PIV certificate is matched by; empty clears it. 400 when another person has it."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "{identity}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/listener-tls": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The certificate Janus serves on its own listener",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listener: mode (none, mounted, self_signed), subject, names, sha256, not_before, not_after, expires_soon, expired, required (JANUS_TLS_REQUIRE), cert_path (mounted), generated_at / generated_by (self-signed), last_error."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/listener-tls/certificate.pem": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Download the served certificate (public part only) to install in a proxy as trusted",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PEM (application/x-pem-file)."
+          },
+          "404": {
+            "description": "Janus is not serving TLS itself."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/listener-tls/regenerate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Regenerate the self-signed listener certificate (served at once; every replica within a minute). Reinstall it in the proxy.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "DNS names / IP addresses; empty keeps the configured names"
+                  },
+                  "days": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1095,
+                    "description": "0 keeps the configured lifetime"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "listener (the new certificate). Audited."
+          },
+          "400": {
+            "description": "An invalid name, or over 1095 days."
+          },
+          "409": {
+            "description": "The listener is not using a self-signed certificate."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -17421,7 +17993,7 @@
         "properties": {
           "effective_minutes": {
             "type": "integer",
-            "description": "Cadence the scheduler honours right now."
+            "description": "Cadence the scheduler honors right now."
           },
           "default_minutes": {
             "type": "integer",

@@ -47,7 +47,7 @@ func (s *Server) leadTeamForEdit(r *http.Request, teamID string) (*store.Team, *
 	return team, nil
 }
 
-// leadTeamForMembers authorises a lead to manage their own team's roster.
+// leadTeamForMembers authorizes a lead to manage their own team's roster.
 //
 // Deliberately NOT gated on LeadCanEditQuotas: that flag delegates spending
 // authority, which is a different and much larger decision than deciding who

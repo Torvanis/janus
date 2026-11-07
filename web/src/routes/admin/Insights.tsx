@@ -90,7 +90,7 @@ function useCategoryNames(): (slug: string) => string {
   const cats = useCategories();
   return useMemo(() => {
     const names = new Map((cats.data?.categories ?? []).map((c) => [c.slug, c.name]));
-    return (slug: string) => names.get(slug) ?? (slug ? slug.replace(/_/g, ' ') : 'Unlabelled');
+    return (slug: string) => names.get(slug) ?? (slug ? slug.replace(/_/g, ' ') : 'Unlabeled');
   }, [cats.data]);
 }
 
@@ -248,7 +248,7 @@ function InsightsOverview(): ReactNode {
                             <td className="num">
                               {percent(c.avg_confidence)}
                               {c.low_confidence > 0 ? (
-                                <span className="small muted" title="Requests labelled with under 50% confidence">
+                                <span className="small muted" title="Requests labeled with under 50% confidence">
                                   {' '}
                                   · {formatNumber(c.low_confidence)} low
                                 </span>
@@ -305,7 +305,7 @@ function InsightsOverview(): ReactNode {
                   <Tile
                     label="Classifications"
                     value={formatNumber(h.attempts)}
-                    meta={`${formatNumber(h.ok)} labelled · ${formatNumber(h.calls ?? h.attempts)} classifier requests`}
+                    meta={`${formatNumber(h.ok)} labeled · ${formatNumber(h.calls ?? h.attempts)} classifier requests`}
                   />
                   <Tile
                     label="Average"
@@ -375,7 +375,7 @@ function ClassifierStatusBanner({ doc }: { doc?: ClassificationDocument }): Reac
     return (
       <div className="banner banner-info">
         <div className="row-between" style={{ width: '100%' }}>
-          <span>Classification is off. Choose a classifier to start labelling requests.</span>
+          <span>Classification is off. Choose a classifier to start labeling requests.</span>
           <Link className="btn btn-sm" to="/admin/insights/classifier">
             Set up classifier
           </Link>
@@ -524,7 +524,7 @@ function RecentResults({ range, name }: { range: RangeKey; name: (slug: string) 
         <div className="segmented" role="group" aria-label="Result status">
           {[
             ['', 'All'],
-            ['ok', 'Labelled'],
+            ['ok', 'Labeled'],
             ['error', 'Errors'],
             ['timeout', 'Timeouts'],
             ['dropped', 'Dropped'],
@@ -867,7 +867,7 @@ function CategoriesPanel(): ReactNode {
             <Field
               label="What belongs here"
               required
-              hint="The classifier reads this to decide. Say what belongs and, if a neighbouring category is easy to confuse, what does not."
+              hint="The classifier reads this to decide. Say what belongs and, if a neighboring category is easy to confuse, what does not."
               error={error?.field === 'description' || error?.field === 'enabled' ? error.message : undefined}
             >
               <textarea
@@ -888,8 +888,8 @@ function CategoriesPanel(): ReactNode {
         title={`Delete ${deleting?.name ?? ''}?`}
         consequence={
           deleting?.parent_slug
-            ? 'New requests will no longer be labelled with this subcategory. Requests already labelled keep their label in reports.'
-            : 'This also deletes its subcategories. New requests will no longer be labelled with it; requests already labelled keep their label in reports.'
+            ? 'New requests will no longer be labeled with this subcategory. Requests already labeled keep their label in reports.'
+            : 'This also deletes its subcategories. New requests will no longer be labeled with it; requests already labeled keep their label in reports.'
         }
         confirmLabel="Delete category"
         danger
@@ -1005,7 +1005,7 @@ function ClassifierForm({ doc }: { doc: ClassificationDocument }): ReactNode {
           hint={
             draft.mode === 'inline'
               ? 'Inline: the request waits for its label (at most the timeout) and the label is returned in the X-Janus-Category header, so the caller can act on it. Adds the classifier time to each sampled request.'
-              : 'Background: requests are labelled after they are sent on, from a queue. Adds no latency; when the queue is full a sample is skipped and counted.'
+              : 'Background: requests are labeled after they are sent on, from a queue. Adds no latency; when the queue is full a sample is skipped and counted.'
           }
         >
           <div className="segmented" role="group" aria-label="How it runs">

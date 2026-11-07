@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/torvanis/janus/internal/fipsmode"
+	"github.com/torvanis/janus/internal/revocation"
+	"github.com/torvanis/janus/internal/stigprofile"
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // LDAPConfig describes one directory (Active Directory, OpenLDAP, FreeIPA,
@@ -52,7 +56,14 @@ func (c LDAPConfig) dial(ctx context.Context) (*ldap.Conn, error) {
 	if timeout <= 0 {
 		timeout = 8 * time.Second
 	}
-	tlsCfg := &tls.Config{InsecureSkipVerify: c.SkipVerify, MinVersion: tls.VersionTLS12} //nolint:gosec // operator opt-in for self-signed labs
+	// The FIPS edition and the STIG profile never skip verification,
+	// whatever is stored (a directory row saved by the default edition may
+	// carry skip_verify).
+	skip := c.SkipVerify && stigprofile.Allowed(fipsmode.FeatureLDAPSkipVerify)
+	tlsCfg := &tls.Config{InsecureSkipVerify: skip, MinVersion: tls.VersionTLS12, RootCAs: truststore.Pool()} //nolint:gosec // operator opt-in for self-signed labs
+	// Revocation checking of the directory's certificate
+	// (JANUS_TLS_REVOCATION); a no-op when it is off or skip_verify is on.
+	tlsCfg = revocation.Wrap(tlsCfg)
 	conn, err := ldap.DialURL(c.URL, ldap.DialWithTLSConfig(tlsCfg), ldap.DialWithDialer(&net.Dialer{Timeout: timeout}))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrLDAPUnavailable, err)

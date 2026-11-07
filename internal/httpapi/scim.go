@@ -890,7 +890,7 @@ type scimActorKey struct{}
 func (s *Server) scimAudit(r *http.Request, action, kind, id string) {
 	actor, _ := r.Context().Value(scimActorKey{}).(string)
 	entry := &store.AuditEntry{Action: action, ResourceType: kind, ResourceID: id, ActorLabel: "SCIM token " + actor}
-	if err := s.Store.AppendAudit(r.Context(), entry); err != nil && s.Logger != nil {
+	if err := s.appendAudit(r.Context(), entry); err != nil && s.Logger != nil {
 		s.Logger.ErrorContext(r.Context(), "append SCIM audit entry", "action", action)
 	}
 }
@@ -917,6 +917,11 @@ func (s *Server) mountSCIMRoutes(r chi.Router) {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), scimActorKey{}, token.ID)))
 			})
 		})
+		// STIG profile: a provisioning change commits only with its audit
+		// record; a refused change answers a SCIM 500.
+		r.Use(s.failClosedAudit(func(w http.ResponseWriter, r *http.Request) {
+			scimFailure(w, http.StatusInternalServerError, "", "The change was not saved: its audit record could not be written")
+		}))
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) { scimFailure(w, 404, "", "Resource not found") })
 		r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { scimFailure(w, 405, "", "Method not supported") })
 		r.Get("/ServiceProviderConfig", s.scimProviderConfig)

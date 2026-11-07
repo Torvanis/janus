@@ -39,7 +39,7 @@ const (
 	// sees every model, the 0.0.0 sentinel is the fallback for accounts
 	// the gate answers with an empty list.
 	openaiCatalogVersions = "99.0.0,0.0.0"
-	// openaiDeviceCodeTTL is how long OpenAI honours a device code.
+	// openaiDeviceCodeTTL is how long OpenAI honors a device code.
 	openaiDeviceCodeTTL = 15 * time.Minute
 )
 

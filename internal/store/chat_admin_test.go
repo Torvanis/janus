@@ -20,7 +20,7 @@ func TestReportBillingSourceSeparatesPersonalPlans(t *testing.T) {
 	}
 }
 
-// Defaults keep pre-admin behaviour; a saved document round-trips; a
+// Defaults keep pre-admin behavior; a saved document round-trips; a
 // restriction needs someone in it.
 func TestChatAdminSettingsDefaultsAndValidation(t *testing.T) {
 	s := newTestStore(t)

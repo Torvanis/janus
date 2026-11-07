@@ -37,14 +37,14 @@ const (
 	// prompt produces an answer to different text than the user sent; that
 	// must never be silent.
 	headerRedactions = "X-Janus-Redactions"
-	// headerSecgwAction summarises the outcome (observed / redacted) on
+	// headerSecgwAction summarizes the outcome (observed / redacted) on
 	// responses that were allowed through.
 	headerSecgwAction = "X-Janus-Security-Action"
 )
 
 // ErrSecurityBlocked reports a Security Gateway refusal.
 func ErrSecurityBlocked(kind store.SecgwCheckKind, classifierFailed bool) *APIError {
-	msg := "This request was declined by your organisation's security policy. Contact a Janus administrator if you believe this is a mistake."
+	msg := "This request was declined by your organization's security policy. Contact a Janus administrator if you believe this is a mistake."
 	if classifierFailed {
 		msg = "This request could not be evaluated by the security classifier and the policy is configured to fail closed. Retry shortly, or contact a Janus administrator."
 	}
@@ -410,7 +410,7 @@ func (s *Server) writeSecgwBlock(w http.ResponseWriter, r *http.Request, event *
 // queue has been dropped by the caller; nothing held is ever written.
 func (s *Server) writeStreamSecurityError(w http.ResponseWriter, flusher http.Flusher, kind store.SecgwCheckKind, requestID string) {
 	apiErr := ErrSecurityBlocked(kind, false)
-	apiErr.Message = "This stream was stopped: the response matched your organisation's security policy."
+	apiErr.Message = "This stream was stopped: the response matched your organization's security policy."
 	apiErr.RequestID = requestID
 	payload, err := json.Marshal(map[string]any{"error": apiErr})
 	if err != nil {
@@ -469,7 +469,7 @@ func secgwCollectStreamViolations(res stream.Result, sink *[]secgw.Violation) {
 
 // secgwHoldBytes picks the effective hold window: the largest explicit
 // HoldBytes any egress check asks for, else the default. An explicit
-// value below the default is honoured — the resolver's mandatory floor
+// value below the default is honored — the resolver's mandatory floor
 // already prevents a more specific binding from lowering an org value.
 func secgwHoldBytes(eff *secgw.Effective) int {
 	hold := 0

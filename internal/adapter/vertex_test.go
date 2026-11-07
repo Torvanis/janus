@@ -197,15 +197,15 @@ func TestVertexPrepareThreadsContextAndClient(t *testing.T) {
 		}
 	}
 
-	// A cancelled request context must abort the mint before it happens.
+	// A canceled request context must abort the mint before it happens.
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	a := &Vertex{tokens: map[string]*cachedToken{}}
 	if _, err := a.Prepare(Upstream{ID: "up-ctx", APIKey: saJSON, BaseURL: srv.URL}, newReq(cancelled, srv.Client())); err == nil {
-		t.Fatal("Prepare with a cancelled request context must fail instead of minting")
+		t.Fatal("Prepare with a canceled request context must fail instead of minting")
 	}
 	if got := atomic.LoadInt32(&calls); got != 0 {
-		t.Fatalf("token endpoint hit %d times under a cancelled context, want 0", got)
+		t.Fatalf("token endpoint hit %d times under a canceled context, want 0", got)
 	}
 
 	// With a live context the mint runs through the supplied client.

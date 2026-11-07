@@ -19,6 +19,15 @@ import (
 	"unicode/utf8"
 )
 
+// Formats lists the export formats this build can produce, in the order the
+// UI offers them. PDF is absent from the FIPS edition.
+func Formats() []string {
+	if PDFAvailable {
+		return []string{"pdf", "xlsx", "csv", "json"}
+	}
+	return []string{"xlsx", "csv", "json"}
+}
+
 func ContentType(format string) string {
 	switch strings.ToLower(format) {
 	case "json":

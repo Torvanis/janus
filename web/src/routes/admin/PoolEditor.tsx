@@ -307,7 +307,7 @@ export function PoolEditor({
   );
 }
 
-/** A labelled radio group (Field is a <label>, which must wrap one control). */
+/** A labeled radio group (Field is a <label>, which must wrap one control). */
 function RadioGroup({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): ReactNode {
   return (
     <fieldset className="field" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>

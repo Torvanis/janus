@@ -24,7 +24,7 @@ func scanQuota(scan func(...any) error) (*Quota, error) {
 	return &q, nil
 }
 
-// EncodeThresholds serialises alert threshold percentages for storage as a
+// EncodeThresholds serializes alert threshold percentages for storage as a
 // comma-separated ascending list; nil/empty encodes to "" (defaults apply).
 func EncodeThresholds(ts []int) string {
 	if len(ts) == 0 {
@@ -199,7 +199,7 @@ func (s *Store) CreateQuota(ctx context.Context, q *Quota) error {
 	})
 }
 
-// UpdateQuota changes a rule's limit, window, breach behaviour, and alert
+// UpdateQuota changes a rule's limit, window, breach behavior, and alert
 // thresholds (nil/empty thresholds restore the 80/95 defaults).
 func (s *Store) UpdateQuota(ctx context.Context, id string, limit int64, window, behavior string, alertThresholds []int) error {
 	return s.modelTx(ctx, func(tx *Store) error {
@@ -321,7 +321,7 @@ func (s *Store) MarkThresholdNotified(ctx context.Context, quotaID string, windo
 // so any cutoff older than the widest window is safe: rows past it can never
 // belong to a window that is still deduplicating.
 func (s *Store) PurgeQuotaAlertState(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM quota_alert_state WHERE notified_at < ?`), FormatTime(before))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM quota_alert_state WHERE notified_at < ?`), FormatTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("purge quota alert state: %w", err)
 	}

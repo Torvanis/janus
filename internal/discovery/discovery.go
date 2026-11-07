@@ -19,7 +19,7 @@ import (
 	"github.com/torvanis/janus/internal/telemetry"
 )
 
-// Result summarises one discovery run.
+// Result summarizes one discovery run.
 type Result struct {
 	UpstreamID string `json:"upstream_id"`
 	Upstream   string `json:"upstream"`
@@ -68,7 +68,7 @@ func (s *Service) LastRun() time.Time {
 // runtime override.
 func (s *Service) DefaultInterval() time.Duration { return s.interval }
 
-// EffectiveInterval is the interval the scheduler will actually honour: the
+// EffectiveInterval is the interval the scheduler will actually honor: the
 // stored runtime override when one is set, otherwise the environment default.
 // A store read failure falls back to the default so a database blip can never
 // stall discovery; it is logged because the operator's setting is being
@@ -280,7 +280,7 @@ func (s *Service) claimUpstreamDown(ctx context.Context, id string) bool {
 }
 
 // Start runs discovery immediately and then on the configured interval until
-// the context is cancelled.
+// the context is canceled.
 func (s *Service) Start(ctx context.Context, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {

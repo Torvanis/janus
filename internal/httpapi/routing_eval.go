@@ -438,7 +438,7 @@ func (v judgeVerdict) winnerAs(pos string) string {
 
 const judgeSystem = `You are an impartial expert judge comparing two AI assistant answers to the same request.
 Judge on: correctness, completeness, following the user's instructions, and clarity without padding. Length is not quality.
-Do not favour either position. You do not know which systems wrote the answers.
+Do not favor either position. You do not know which systems wrote the answers.
 Reply with ONLY a JSON object: {"winner":"A"|"B"|"tie","score_a":1-5,"score_b":1-5,"reason":"one short sentence"}`
 
 // judgeMaxTokens caps each judge reply.
@@ -656,7 +656,8 @@ const reasoningOutputFloor = 8192
 // adjustRefusedParam reads an OpenAI-style 400 naming an unsupported
 // parameter and returns the body with that parameter fixed: max_tokens is
 // renamed to max_completion_tokens (raised to leave room for reasoning), and
-// temperature / top_p are dropped so the model default applies.
+// temperature / top_p / reasoning_effort are dropped so the model default
+// applies.
 func adjustRefusedParam(body, refusal []byte) ([]byte, bool) {
 	var e struct {
 		Error struct {
@@ -669,7 +670,7 @@ func adjustRefusedParam(body, refusal []byte) ([]byte, bool) {
 	}
 	param := e.Error.Param
 	if param == "" {
-		for _, p := range []string{"max_tokens", "temperature", "top_p"} {
+		for _, p := range []string{"max_tokens", "temperature", "top_p", "reasoning_effort"} {
 			if strings.Contains(e.Error.Message, "'"+p+"'") {
 				param = p
 				break
@@ -690,7 +691,7 @@ func adjustRefusedParam(body, refusal []byte) ([]byte, bool) {
 		_ = json.Unmarshal(raw, &v)
 		delete(m, "max_tokens")
 		m["max_completion_tokens"], _ = json.Marshal(max(v, reasoningOutputFloor))
-	case "temperature", "top_p":
+	case "temperature", "top_p", "reasoning_effort":
 		if _, ok := m[param]; !ok {
 			return nil, false
 		}

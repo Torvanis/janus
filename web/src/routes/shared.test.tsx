@@ -93,7 +93,7 @@ describe('tokenDirectionSeries', () => {
     expect(layers[0]!.values).toEqual([50, 150]);
   });
 
-  it('keeps a stable colour per direction so In/Out match their layer in the Total view', () => {
+  it('keeps a stable color per direction so In/Out match their layer in the Total view', () => {
     expect(tokenDirectionSeries(series, 'in')[0]!.color).toBe(seriesColor(0));
     expect(tokenDirectionSeries(series, 'out')[0]!.color).toBe(seriesColor(1));
     expect(tokenDirectionSeries(series, 'total').map((layer) => layer.color)).toEqual([seriesColor(0), seriesColor(1)]);

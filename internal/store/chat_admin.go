@@ -35,7 +35,7 @@ const (
 )
 
 // Chat model categories offered in the admin (free text is refused so the
-// picker groups stay tidy; "" = uncategorised, shown under the default group).
+// picker groups stay tidy; "" = uncategorized, shown under the default group).
 var ChatCategories = []string{"general", "fast", "reasoning", "coding", "vision", "local", "creative"}
 
 // Limits.
@@ -109,13 +109,18 @@ type ChatAdminSettings struct {
 	// same for videos. "" = the first one the person may use.
 	TranscribeModel string `json:"transcribe_model"`
 	DescribeModel   string `json:"describe_model"`
+	// Naming is how chats get their titles: same_model (the model that
+	// wrote the last reply; the default), model (NamingModel for every
+	// chat) or off. "" follows JANUS_CHAT_AUTO_TITLE.
+	Naming      string `json:"naming"`
+	NamingModel string `json:"naming_model"`
 	// Models curates the picker, keyed by public model name.
 	Models    map[string]ChatModelSetting `json:"models"`
 	UpdatedAt time.Time                   `json:"updated_at"`
 }
 
 // DefaultChatAdminSettings is what an instance gets before an admin saves:
-// exactly the behaviour Chat had before administration existed.
+// exactly the behavior Chat had before administration existed.
 func DefaultChatAdminSettings() ChatAdminSettings {
 	return ChatAdminSettings{
 		Enabled:           true,
@@ -130,7 +135,7 @@ func DefaultChatAdminSettings() ChatAdminSettings {
 	}
 }
 
-// Validate normalises and checks the settings.
+// Validate normalizes and checks the settings.
 func (c *ChatAdminSettings) Validate() error {
 	switch c.Access.Mode {
 	case "":
@@ -145,6 +150,16 @@ func (c *ChatAdminSettings) Validate() error {
 	c.MusicModel = strings.TrimSpace(c.MusicModel)
 	c.TranscribeModel = strings.TrimSpace(c.TranscribeModel)
 	c.DescribeModel = strings.TrimSpace(c.DescribeModel)
+	c.NamingModel = strings.TrimSpace(c.NamingModel)
+	switch c.Naming = strings.TrimSpace(c.Naming); c.Naming {
+	case "", ChatNamingSameModel, ChatNamingOff:
+	case ChatNamingModel:
+		if c.NamingModel == "" {
+			return &ValidationError{Field: "naming_model", Message: "choose the model that names chats, or name them with each chat's own model"}
+		}
+	default:
+		return &ValidationError{Field: "naming", Message: "naming must be same_model, model or off"}
+	}
 	if err := c.Search.normalize(); err != nil {
 		return err
 	}

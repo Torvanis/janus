@@ -171,7 +171,7 @@ func TestInsightsBadAnswerNeverBlocksTheRequest(t *testing.T) {
 			ClassifierModelID: m.ID, Options: json.RawMessage(`{"timeout_ms":3000}`)},
 	}})
 	// Baseline: with insights off the benign request passes the closed guard.
-	if rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarise this meeting", false)); rec.Code != http.StatusOK {
+	if rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarize this meeting", false)); rec.Code != http.StatusOK {
 		t.Fatalf("baseline without insights: %d %s", rec.Code, rec.Body.String())
 	}
 	sess := adminSession(t, h)
@@ -181,7 +181,7 @@ func TestInsightsBadAnswerNeverBlocksTheRequest(t *testing.T) {
 		t.Fatalf("save settings: %d %s", rec.Code, rec.Body.String())
 	}
 	h.server.InvalidateConfigCache()
-	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarise this meeting", false))
+	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarize this meeting", false))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("turning on Usage insights (background) made a benign request fail: %d %s", rec.Code, rec.Body.String())
 	}

@@ -42,8 +42,11 @@ func TestBusinessFeatureGatesOnCommunity(t *testing.T) {
 		t.Fatal("plain managed model gated")
 	}
 
-	// audit_export: the CSV; the list is not.
-	is402("audit export", h.do(http.MethodGet, "/api/v1/admin/audit/export", nil))
+	// audit export is never gated (TestAuditExportNeverLicenseGated); the
+	// list is not either.
+	if rec := h.do(http.MethodGet, "/api/v1/admin/audit/export", nil); rec.Code != http.StatusOK {
+		t.Fatalf("audit export gated on community: %d", rec.Code)
+	}
 	if rec := h.do(http.MethodGet, "/api/v1/admin/audit", nil); rec.Code != http.StatusOK {
 		t.Fatalf("audit list gated: %d", rec.Code)
 	}

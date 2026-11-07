@@ -39,11 +39,14 @@ const (
 	ChatToolVideo  = "create_video"
 	ChatToolMusic  = "create_music"
 	ChatToolMemory = "memory"
+	// ChatToolAsk lets the model stop and ask the person a question with
+	// choices (ask_user); the answer is their next message.
+	ChatToolAsk = "ask_user"
 )
 
 // ChatTools is every tool Chat knows, in display order.
 var ChatTools = []string{ChatToolWebSearch, ChatToolXSearch, ChatToolWebFetch, ChatToolCode, ChatToolImage,
-	ChatToolFile, ChatToolVideo, ChatToolMusic, ChatToolMemory}
+	ChatToolFile, ChatToolVideo, ChatToolMusic, ChatToolMemory, ChatToolAsk}
 
 // ValidChatTool reports a known tool id.
 func ValidChatTool(id string) bool { return slices.Contains(ChatTools, id) }
@@ -59,5 +62,5 @@ func splitToolList(v string) []string {
 	return out
 }
 
-// CleanChatTools normalises a requested list (known ids, no duplicates).
+// CleanChatTools normalizes a requested list (known ids, no duplicates).
 func CleanChatTools(ids []string) []string { return splitToolList(strings.Join(ids, ",")) }

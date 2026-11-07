@@ -10,7 +10,7 @@ describe('highlight (real shiki, JavaScript regex engine)', () => {
     expect(resolveLang('')).toBeNull();
   });
 
-  it('tokenizes with both theme colours', async () => {
+  it('tokenizes with both theme colors', async () => {
     const lines = await highlight('const x = 1;\nexport {};', 'ts');
     expect(lines).toHaveLength(2);
     const first = lines?.find(() => true) ?? [];

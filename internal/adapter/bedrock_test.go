@@ -53,7 +53,7 @@ func TestSignAWSV4SessionTokenIsSigned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
-	creds := awsCredentials{AccessKeyID: "AKID", SecretAccessKey: "SECRET", SessionToken: "SESSION"}
+	creds := awsCredentials{AccessKeyID: "AKID", SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", SessionToken: "SESSION"}
 	if err := signAWSV4(req, nil, creds, "us-east-1", "bedrock", time.Now().UTC()); err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestBedrockPrepare(t *testing.T) {
 		ID:      "up-bedrock",
 		Name:    "aws",
 		BaseURL: "https://bedrock-runtime.eu-west-1.amazonaws.com",
-		APIKey:  "AKIDEXAMPLE:SECRETKEY",
+		APIKey:  "AKIDEXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 	}
 	hdr := http.Header{}
 	hdr.Set("Authorization", "Bearer janus-downstream-token")

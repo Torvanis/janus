@@ -149,35 +149,42 @@ describe('upstream delete dialog — dependents preflight', () => {
     expect(mocked.del).not.toHaveBeenCalled();
   });
 
-  it('keeps discovery problem scope independent of the upstream table search', async () => {
+  it("shows a failing upstream's reason in its own row, with no separate problems panel", async () => {
     mockApi({});
     const get = mocked.get.getMockImplementation()!;
     mocked.get.mockImplementation((path: string) =>
       path === '/api/v1/admin/upstreams'
         ? Promise.resolve({
-            upstreams: Array.from({ length: 60 }, (_, i) => ({
-              ...upstream,
-              id: `up-${i}`,
-              name: `Provider-${i}`,
-              last_error: `failure-${i}`,
-            })),
+            upstreams: [
+              {
+                ...upstream,
+                id: 'up-ok',
+                name: 'Healthy',
+                last_error: '',
+                last_check_at: '2026-11-06T00:00:00Z',
+                last_latency_ms: 12,
+              },
+              {
+                ...upstream,
+                id: 'up-bad',
+                name: 'Broken',
+                last_error: 'reach upstream: context deadline exceeded',
+                last_check_at: '2026-11-06T00:00:00Z',
+              },
+              { ...upstream, id: 'up-off', name: 'Parked', enabled: false, last_error: 'DEV COPY: credentials omitted' },
+            ],
             adapter_types: ['anthropic'],
           })
         : get(path),
     );
     renderList();
-    const user = userEvent.setup();
-    const problems = await screen.findByRole('region', { name: 'Discovery problems' });
-    expect(within(problems).getByText('60 of 60 rows')).toBeTruthy();
-    await user.click(within(problems).getByRole('button', { name: /Next/ }));
-    expect(within(problems).getByText('failure-25')).toBeTruthy();
-    await user.type(within(problems).getByRole('searchbox'), 'failure-59');
-    expect(within(problems).getByText('failure-59')).toBeTruthy();
-    expect(within(problems).getByText('1 of 60 rows')).toBeTruthy();
-    const mainSearch = screen.getAllByRole('searchbox').find((input) => input !== within(problems).getByRole('searchbox'))!;
-    await user.type(mainSearch, 'no-upstream');
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Upstreams' })).getByText('0 of 0 rows')).toBeTruthy());
-    expect(within(problems).getByText('1 of 60 rows')).toBeTruthy();
+    const table = await screen.findByRole('region', { name: 'Upstreams' });
+    const broken = (await within(table).findByRole('button', { name: 'Broken' })).closest('tr')!;
+    expect(within(broken).getByText('reach upstream: context deadline exceeded')).toBeTruthy();
+    expect(within(broken).getByText(/checked/)).toBeTruthy();
+    const parked = within(table).getByRole('button', { name: 'Parked' }).closest('tr')!;
+    expect(within(parked).getByText('Last error: DEV COPY: credentials omitted')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Discovery problems' })).toBeNull();
   });
 
   it('with no dependent aliases, typing the name is enough and the DELETE carries no flags', async () => {

@@ -9,6 +9,8 @@ export interface PublicConfig {
   version: string;
   build: string;
   dev_auth: boolean;
+  /** "fips" for the Janus FIPS edition; absent on older servers. */
+  edition?: 'default' | 'fips';
   feature_flags: Record<string, boolean>;
   provider_label: string;
 }
@@ -38,6 +40,10 @@ export function usePublicConfig(): UseQueryResult<PublicConfig> {
   });
 }
 
+function isSignedOutError(error: unknown): boolean {
+  return error instanceof ApiError && error.isUnauthenticated;
+}
+
 export function SessionProvider({ children }: { children: ReactNode }): ReactNode {
   const config = usePublicConfig();
   const me = useQuery({
@@ -45,15 +51,20 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactNod
     queryFn: () => api.get<Me>('/api/v1/me'),
     retry: false,
     staleTime: 30_000,
-    refetchInterval: (query) => (query.state.data ? LICENSE_POLL_MS : false),
+    // Poll while signed in. React Query keeps the last good data after a
+    // failed refetch, so "has data" alone would poll a dead session forever
+    // (one audited 401 a minute per open tab); stop on a 401.
+    refetchInterval: (query) => (query.state.data && !isSignedOutError(query.state.error) ? LICENSE_POLL_MS : false),
     refetchIntervalInBackground: true,
   });
 
   // A 401 is the normal signed-out state, not an error to surface.
-  const signedOut = me.error instanceof ApiError && me.error.isUnauthenticated;
+  const signedOut = isSignedOutError(me.error);
 
   const value: SessionValue = {
-    me: me.data ?? null,
+    // A 401 after a good response means the session ended on the server: the
+    // stale person must not keep the app looking signed in.
+    me: signedOut ? null : (me.data ?? null),
     config: config.data ?? null,
     loading: me.isLoading || config.isLoading,
     error: signedOut ? null : (me.error ?? config.error),
@@ -80,6 +91,11 @@ export function useMe(): Me | null {
  * tracking is disabled, so every cost/spend/pricing surface must stay hidden.
  * Token, request, and latency metrics render exactly as usual.
  */
+/** True when the server is the Janus FIPS edition. */
+export function useFIPSEdition(): boolean {
+  return usePublicConfig().data?.edition === 'fips';
+}
+
 export function useLocalOnly(): boolean {
   return useSession().me?.local_only === true;
 }

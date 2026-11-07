@@ -676,7 +676,7 @@ func (c *Codex) NewStreamTransformer(req *Request, respHeader http.Header) Strea
 	if !isChatCompletions(req) {
 		return PassthroughStream{}
 	}
-	// The ChatGPT backend has been seen labelling its event stream
+	// The ChatGPT backend has been seen labeling its event stream
 	// "text/plain; charset=utf-8". What Janus relays is a chat.completions
 	// SSE stream, so say so: clients (Janus Chat among them) decide how to
 	// read the body from Content-Type. A JSON error body keeps its type.

@@ -15,6 +15,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/torvanis/janus/internal/fipsmode"
+	"github.com/torvanis/janus/internal/revocation"
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // DefaultDatabaseURL is the embedded-SQLite database used when
@@ -33,13 +37,30 @@ var DefaultBuildSHA = "unknown"
 // Release builds set YYYY-MM-DD for perpetual-license maintenance checks.
 var DefaultBuildDate = ""
 
+// STIGMinAuditRetentionDays is the audit retention floor and default of the
+// STIG profile (JANUS_STIG_PROFILE): 30 months.
+const STIGMinAuditRetentionDays = 913
+
 // Config is the fully validated runtime configuration for the gateway.
 type Config struct {
 	// Server
-	ListenAddr   string
-	PublicURL    string
-	TLSCertPath  string
-	TLSKeyPath   string
+	ListenAddr  string
+	PublicURL   string
+	TLSCertPath string
+	TLSKeyPath  string
+	// TLSSelfSigned (JANUS_TLS_SELF_SIGNED) serves TLS with a self-signed
+	// certificate Janus generates and keeps (encrypted) in the database:
+	// a stopgap until an issued certificate is mounted. Its names come from
+	// JANUS_TLS_SELF_SIGNED_NAMES (default: the public URL's host,
+	// localhost, 127.0.0.1); lifetime JANUS_TLS_SELF_SIGNED_DAYS (1–1095,
+	// default 365).
+	TLSSelfSigned      bool
+	TLSSelfSignedNames []string
+	TLSSelfSignedDays  int
+	// TLSRequire (JANUS_TLS_REQUIRE) refuses to start unless Janus serves
+	// TLS itself (JANUS_TLS_CERT_PATH or JANUS_TLS_SELF_SIGNED): the hop
+	// from a proxy to Janus is then encrypted too.
+	TLSRequire   bool
 	LogLevel     string
 	Environment  string
 	BuildVersion string
@@ -60,6 +81,24 @@ type Config struct {
 	UpdateCheck bool
 	// Offline asserts an air-gapped deployment: no update check, ever.
 	Offline bool
+	// STIGProfile is JANUS_STIG_PROFILE: the STIG configuration profile
+	// (internal/stigprofile). Load applies its defaults; stigprofile.Check
+	// refuses the settings it does not allow.
+	STIGProfile bool
+	// TLSRevocation is JANUS_TLS_REVOCATION: revocation checking (OCSP,
+	// then CRL) of every outbound TLS server certificate. off (default),
+	// soft or hard; the STIG profile defaults it to hard and refuses off.
+	TLSRevocation string
+	// TLSRevocationExplicit records that JANUS_TLS_REVOCATION was set.
+	TLSRevocationExplicit bool
+	// OCSPResponder (JANUS_OCSP_RESPONDER) overrides the OCSP responder URL
+	// in certificates, for an enclave's local responder.
+	OCSPResponder string
+	// UpdateCheckRequested and OfflineDisabled record an explicit
+	// JANUS_UPDATE_CHECK=true / JANUS_OFFLINE=false, which the STIG profile
+	// refuses rather than silently overriding.
+	UpdateCheckRequested bool
+	OfflineDisabled      bool
 
 	// Storage
 	DatabaseURL string
@@ -121,7 +160,7 @@ type Config struct {
 	SessionIdleTimeout time.Duration
 	CookieSecure       bool
 
-	// Proxy behaviour
+	// Proxy behavior
 	TrustedProxies []*net.IPNet
 	// UpstreamConnTimeout, UpstreamTTFBTimeout and UpstreamTotalTimeout are
 	// the per-hop upstream timeouts as loaded from the environment
@@ -148,6 +187,12 @@ type Config struct {
 	// extended with the PEM certificates from JANUS_CA_BUNDLE, and nil when
 	// the variable is unset (default verification applies).
 	CABundle *x509.CertPool
+	// CADir (JANUS_CA_DIR) is a directory of PEM certificates added to the
+	// trust store, typically Kubernetes ConfigMaps mounted by the chart.
+	CADir string
+	// TrustDoDRoots (JANUS_TRUST_DOD_ROOTS) adds the embedded DoD PKI
+	// root CAs to the trust store. Default: on in the FIPS edition.
+	TrustDoDRoots bool
 
 	// Jobs
 	DiscoveryInterval    time.Duration
@@ -276,16 +321,23 @@ func (c *Config) Redacted() map[string]any {
 		"oidc_provider_url":      c.OIDCProviderURL,
 		"oidc_client_id":         c.OIDCClientID,
 		"oidc_secret_configured": c.OIDCClientSecret != "",
-		"dev_auth_enabled":       c.DevAuthEnabled,
+		"dev_auth_enabled":       c.DevAuth(),
 		"local_only":             c.LocalOnly,
 		"performance_mode":       c.PerformanceMode,
 		"db_max_conns":           c.DBMaxConns,
 		"smtp_configured":        c.SMTPHost != "",
-		"tls_configured":         c.TLSCertPath != "",
+		"tls_configured":         c.TLSCertPath != "" || c.TLSSelfSigned,
+		"tls_self_signed":        c.TLSSelfSigned,
+		"tls_require":            c.TLSRequire,
 		"ca_bundle_configured":   c.CABundlePath != "",
+		"ca_dir":                 c.CADir,
+		"trust_dod_roots":        c.TrustDoDRoots,
 		"usage_retention_days":   c.UsageRetentionDays,
 		"audit_retention_days":   c.AuditRetentionDays,
 		"otlp_endpoint":          c.OTELEndpoint,
+		"stig_profile":           c.STIGProfile,
+		"tls_revocation":         c.TLSRevocation,
+		"offline":                c.Offline,
 		// Presence only, never the values: emails and group names identify
 		// people and internal org structure (mirrors the secret handling
 		// above).
@@ -362,6 +414,39 @@ func Load() (*Config, error) {
 	// detection; config only records whether the embedded default applied.
 	c.DatabaseURLDefaulted = strings.TrimSpace(os.Getenv("JANUS_DATABASE_URL")) == ""
 
+	// STIG profile defaults: offline (no phone-home of any kind), license
+	// sync pinned off, 30-month audit retention. An explicit setting that
+	// contradicts a default is kept as given so stigprofile.Check can
+	// refuse it by name instead of overriding it silently.
+	c.STIGProfile = envBool("JANUS_STIG_PROFILE", false)
+	auditRetentionDefault := 730
+	rawRevocation := strings.ToLower(strings.TrimSpace(os.Getenv("JANUS_TLS_REVOCATION")))
+	c.TLSRevocationExplicit = rawRevocation != ""
+	switch rawRevocation {
+	case "":
+		c.TLSRevocation = "off"
+		if c.STIGProfile {
+			c.TLSRevocation = "hard"
+		}
+	case "off", "soft", "hard":
+		c.TLSRevocation = rawRevocation
+	default:
+		return nil, fmt.Errorf("JANUS_TLS_REVOCATION must be off, soft or hard (got %q)", rawRevocation)
+	}
+	c.OCSPResponder = strings.TrimSpace(os.Getenv("JANUS_OCSP_RESPONDER"))
+	if c.OCSPResponder != "" {
+		if u, err := url.Parse(c.OCSPResponder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("JANUS_OCSP_RESPONDER must be an http:// or https:// URL")
+		}
+	}
+	if c.STIGProfile {
+		c.UpdateCheckRequested = c.UpdateCheck
+		c.UpdateCheck = false
+		c.OfflineDisabled = !c.Offline && strings.TrimSpace(os.Getenv("JANUS_OFFLINE")) != ""
+		c.Offline = true
+		auditRetentionDefault = STIGMinAuditRetentionDays
+	}
+
 	var err error
 	if raw, supplied := os.LookupEnv("JANUS_LICENSE_SYNC"); supplied {
 		v, parseErr := strconv.ParseBool(strings.TrimSpace(raw))
@@ -369,6 +454,9 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("JANUS_LICENSE_SYNC must be a boolean")
 		}
 		c.LicenseSync = &v
+	} else if c.STIGProfile {
+		off := false
+		c.LicenseSync = &off
 	}
 	c.LicenseSyncToken, c.LicenseSyncTokenSet = os.LookupEnv("JANUS_LICENSE_SYNC_TOKEN")
 	c.LicenseSyncToken = strings.TrimSpace(c.LicenseSyncToken)
@@ -387,7 +475,7 @@ func Load() (*Config, error) {
 	if c.UsageRetentionDays, err = envInt("JANUS_USAGE_RETENTION_DAYS", 365); err != nil {
 		return nil, err
 	}
-	if c.AuditRetentionDays, err = envInt("JANUS_AUDIT_RETENTION_DAYS", 730); err != nil {
+	if c.AuditRetentionDays, err = envInt("JANUS_AUDIT_RETENTION_DAYS", auditRetentionDefault); err != nil {
 		return nil, err
 	}
 	if c.SessionTTL, err = envHours("JANUS_SESSION_TTL_HOURS", 24); err != nil {
@@ -444,6 +532,23 @@ func Load() (*Config, error) {
 	if (c.TLSCertPath == "") != (c.TLSKeyPath == "") {
 		return nil, fmt.Errorf("JANUS_TLS_CERT_PATH and JANUS_TLS_KEY_PATH must be set together")
 	}
+	c.TLSSelfSigned = envBool("JANUS_TLS_SELF_SIGNED", false)
+	c.TLSRequire = envBool("JANUS_TLS_REQUIRE", false)
+	if c.TLSSelfSigned && c.TLSCertPath != "" {
+		return nil, fmt.Errorf("set either JANUS_TLS_CERT_PATH/JANUS_TLS_KEY_PATH (an issued certificate) or JANUS_TLS_SELF_SIGNED=true, not both")
+	}
+	c.TLSSelfSignedNames = strings.FieldsFunc(os.Getenv("JANUS_TLS_SELF_SIGNED_NAMES"), func(r rune) bool { return r == ',' || r == ' ' })
+	if c.TLSSelfSignedDays, err = envInt("JANUS_TLS_SELF_SIGNED_DAYS", 365); err != nil {
+		return nil, err
+	}
+	if c.TLSSelfSignedDays < 1 || c.TLSSelfSignedDays > 1095 {
+		return nil, fmt.Errorf("JANUS_TLS_SELF_SIGNED_DAYS must be between 1 and 1095 (got %d)", c.TLSSelfSignedDays)
+	}
+	if c.TLSRequire && c.TLSCertPath == "" && !c.TLSSelfSigned {
+		return nil, fmt.Errorf("JANUS_TLS_REQUIRE=true needs Janus to serve TLS itself: set JANUS_TLS_CERT_PATH and JANUS_TLS_KEY_PATH (for example a cert-manager Secret), or JANUS_TLS_SELF_SIGNED=true")
+	}
+	c.CADir = strings.TrimSpace(os.Getenv("JANUS_CA_DIR"))
+	c.TrustDoDRoots = envBool("JANUS_TRUST_DOD_ROOTS", fipsmode.IsFIPSEdition())
 	if c.CABundle, err = loadCABundle(c.CABundlePath); err != nil {
 		return nil, err
 	}
@@ -452,7 +557,7 @@ func Load() (*Config, error) {
 	// An identity provider is optional: with none configured Janus offers
 	// local accounts (first run creates the administrator). But a HALF
 	// configured one is a mistake, so all-or-nothing is enforced.
-	if !c.DevAuthEnabled && c.OIDCEnabled() {
+	if !c.DevAuth() && c.OIDCEnabled() {
 		missing := []string{}
 		if c.OIDCClientID == "" {
 			missing = append(missing, "JANUS_OIDC_CLIENT_ID")
@@ -469,11 +574,25 @@ func Load() (*Config, error) {
 	default:
 		return nil, fmt.Errorf("JANUS_LOG_LEVEL must be one of debug, info, warn, error (got %q)", c.LogLevel)
 	}
+	if c.STIGProfile {
+		// stigprofile.Check refuses JANUS_DEV_AUTH with a named error,
+		// whatever JANUS_DEV_AUTH_ALLOW_UNSAFE says.
+		return c, nil
+	}
+	if c.DevAuthEnabled && !DevAuthCompiled {
+		return nil, fmt.Errorf("JANUS_DEV_AUTH is not available in the Janus FIPS edition; use local accounts or an identity provider")
+	}
 	if err := devAuthGuard(c); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
+
+// DevAuth reports whether the JANUS_DEV_AUTH evaluation sign-in is on. It is
+// always false in the Janus FIPS edition, where DevAuthCompiled is a false
+// constant and every branch guarded by DevAuth is compiled away. Use it, not
+// the DevAuthEnabled field, in code paths.
+func (c *Config) DevAuth() bool { return DevAuthCompiled && c.DevAuthEnabled && !c.STIGProfile }
 
 // devAuthGuard refuses to boot with the JANUS_DEV_AUTH authentication bypass on
 // anything that looks production-facing. Two independent tripwires:
@@ -558,13 +677,27 @@ func loadCABundle(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// TLSClientConfig returns the tls.Config every outbound HTTP client must use,
-// or nil when no private CA bundle is configured (default verification).
+// TLSClientConfig returns a tls.Config for outbound connections, or nil
+// when nothing differs from Go's defaults. Once the trust store is
+// configured (main does it at startup) it is the trust store's config:
+// system roots, DoD roots, JANUS_CA_BUNDLE, JANUS_CA_DIR and uploads, with
+// revocation checking when that is on. Long-lived HTTP clients should use
+// truststore.Transport instead, which also follows later changes.
 func (c *Config) TLSClientConfig() *tls.Config {
-	if c.CABundle == nil {
+	if truststore.Configured() {
+		return truststore.ClientConfig()
+	}
+	if c.CABundle == nil && (c.TLSRevocation == "" || c.TLSRevocation == "off") {
 		return nil
 	}
-	return &tls.Config{RootCAs: c.CABundle}
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if c.CABundle != nil {
+		cfg.RootCAs = c.CABundle
+	}
+	if c.TLSRevocation == "soft" || c.TLSRevocation == "hard" {
+		cfg = revocation.Wrap(cfg)
+	}
+	return cfg
 }
 
 func envOr(key, def string) string {

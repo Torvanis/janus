@@ -139,7 +139,7 @@ func (h *harness) familyModel(t *testing.T, f *familyDecider) *store.Model {
 }
 
 // strictKids is a custom age range that blocks every Child Safety
-// category (the old Family safety behaviour the earlier tests pin).
+// category (the old Family safety behavior the earlier tests pin).
 func strictKids(cats ...string) []map[string]any {
 	little, kids, teens := map[string]any{"id": store.ChildProfileLittle, "name": "Little kids (8 and under)"},
 		map[string]any{"id": store.ChildProfileKids, "name": "Kids (9-12)"}, map[string]any{"id": store.ChildProfileTeens, "name": "Teens (13-17)"}
@@ -468,7 +468,7 @@ func TestFamilySafetyBlocksAStreamingReplyParagraphByParagraph(t *testing.T) {
 		t.Fatalf("stream must end with the security frame and [DONE]: %v\n%s", last, body)
 	}
 	assertKindNotice(t, body)
-	ev := h.waitForUsageEvents(1)[0]
+	ev := h.waitForReplyUsage(t)
 	if ev.SecgwAction != store.SecgwActionStreamCut || ev.ErrorCode != CodeSecurityBlocked {
 		t.Fatalf("event %+v", ev)
 	}
@@ -509,7 +509,7 @@ func TestFamilySafetyJudgesBufferedRepliesBeforeReturning(t *testing.T) {
 		t.Fatalf("buffered reply: %d %s", rec.Code, rec.Body.String())
 	}
 	assertKindNotice(t, rec.Body.String())
-	ev := h.waitForUsageEvents(1)[0]
+	ev := h.waitForReplyUsage(t)
 	if ev.SecgwAction != store.SecgwActionBlocked || ev.TokensOut != 9 {
 		t.Fatalf("blocked reply must still be metered: %+v", ev)
 	}
@@ -839,5 +839,24 @@ func TestKeepChildNote(t *testing.T) {
 	// And instructions added afterwards keep it too.
 	if got := withInstructionsNote("matched:coding;child=homework_learning", "route"); got != "matched:coding;child=homework_learning;instructions=route" {
 		t.Errorf("withInstructionsNote dropped the child note: %q", got)
+	}
+}
+
+// waitForReplyUsage returns the reply's own usage event. The safety
+// classifier's metering rows are written concurrently with it, so the first
+// event in the list is not reliably the reply.
+func (h *harness) waitForReplyUsage(t *testing.T) *store.UsageEvent {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		for _, e := range h.waitForUsageEventsNoWait() {
+			if e.ClientApp != "janus-security-gateway" {
+				return e
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no reply usage event among %d", len(h.waitForUsageEventsNoWait()))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -10,6 +10,59 @@ import { t } from '../lib/i18n';
 import { FirstRunSetup, LocalSignIn, type SignInProvider } from './LocalSignIn';
 import './login.css';
 
+export interface SignInBanner {
+  enabled: boolean;
+  title?: string;
+  text?: string;
+  button?: string;
+  acknowledged?: boolean;
+}
+
+/**
+ * The notice an administrator requires before sign-in (the DoD Notice and
+ * Consent banner on STIG deployments). It stays until acknowledged, and no
+ * sign-in method is offered before that; the server refuses a sign-in
+ * without the acknowledgment too.
+ */
+export function ConsentBanner({ banner, onAcknowledged }: { banner: SignInBanner; onAcknowledged: () => void }): ReactNode {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const paragraphs = (banner.text ?? '').split(/\n\s*\n/).filter((p) => p.trim() !== '');
+  return (
+    <section className="stack consent-banner" aria-labelledby="consent-title">
+      <h2 id="consent-title" style={{ margin: 0, fontSize: '1.05rem' }}>
+        {banner.title || 'Notice'}
+      </h2>
+      <div className="consent-text" tabIndex={0} aria-label={banner.title || 'Notice'}>
+        {paragraphs.map((p, i) => (
+          <p key={i}>{p}</p>
+        ))}
+      </div>
+      {error ? (
+        <div className="banner banner-danger" role="alert">
+          <span>{error}</span>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setError(null);
+          api
+            .post('/auth/banner/ack', {})
+            .then(onAcknowledged)
+            .catch((e: Error) => setError(e.message))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {banner.button || 'I acknowledge'}
+      </button>
+    </section>
+  );
+}
+
 interface AuthHealth {
   status: 'ok' | 'unavailable';
   provider: string;
@@ -42,6 +95,13 @@ export function LoginPage(): ReactNode {
     retry: 1,
   });
   const providerList = providers.data?.providers ?? [];
+  const banner = useQuery({
+    queryKey: ['auth-banner'],
+    queryFn: () => api.get<SignInBanner>('/auth/banner'),
+    retry: 1,
+  });
+  const [acknowledged, setAcknowledged] = useState(false);
+  const mustAcknowledge = banner.data?.enabled === true && !banner.data.acknowledged && !acknowledged;
 
   return (
     <div className="auth-page">
@@ -82,7 +142,13 @@ export function LoginPage(): ReactNode {
           </div>
         ) : null}
 
-        {health.isLoading ? (
+        {banner.isLoading ? (
+          <div className="row" style={{ justifyContent: 'center', padding: 'var(--janus-space-4)' }}>
+            <Spinner label={t('login.checkingProvider')} />
+          </div>
+        ) : mustAcknowledge && banner.data ? (
+          <ConsentBanner banner={banner.data} onAcknowledged={() => setAcknowledged(true)} />
+        ) : health.isLoading ? (
           <div className="row" style={{ justifyContent: 'center', padding: 'var(--janus-space-4)' }}>
             <Spinner label={t('login.checkingProvider')} />
           </div>

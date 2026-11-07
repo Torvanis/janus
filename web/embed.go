@@ -1,5 +1,5 @@
 // Package web embeds the built single-page application into the gateway binary
-// so a deployment is one artefact with no static-file sidecar.
+// so a deployment is one artifact with no static-file sidecar.
 package web
 
 import (

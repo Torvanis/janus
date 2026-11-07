@@ -195,7 +195,7 @@ func HasSlug(options []Option, slug string) bool {
 // CategoryQuestion asks for the top-level category. A parent's description
 // names its subcategories ("Includes: Reverse engineering, …"): the
 // classifier picks the parent first, so it must know that work belongs
-// there rather than in a neighbour it superficially resembles.
+// there rather than in a neighbor it superficially resembles.
 func (t Taxonomy) CategoryQuestion() Question {
 	opts := make([]Option, len(t.Roots))
 	for i, r := range t.Roots {

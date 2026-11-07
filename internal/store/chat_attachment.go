@@ -207,10 +207,7 @@ func (s *Store) BindChatAttachments(ctx context.Context, userID, conversationID,
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`UPDATE chat_attachment SET conversation_id = ?, message_id = ?
 		WHERE user_id = ? AND (conversation_id = '' OR conversation_id = ?) AND id IN (`+placeholders(len(ids))+`)`), args...)
 	if err != nil {
@@ -223,10 +220,7 @@ func (s *Store) BindChatAttachments(ctx context.Context, userID, conversationID,
 // DeleteChatAttachment removes one unbound attachment row of userID and
 // reports whether a row went; a row bound to a message is left alone.
 func (s *Store) DeleteChatAttachment(ctx context.Context, userID, id string) (bool, error) {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`DELETE FROM chat_attachment WHERE id = ? AND user_id = ? AND message_id = ''`), id, userID)
 	if err != nil {
 		return false, err

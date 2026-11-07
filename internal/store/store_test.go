@@ -2414,7 +2414,7 @@ func TestAdminGroupLayering(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	if len(groups) != 1 || groups[0].Name != "platform-admins" {
-		t.Fatalf("groups = %+v, want one entry normalised to lowercase", groups)
+		t.Fatalf("groups = %+v, want one entry normalized to lowercase", groups)
 	}
 
 	// Re-adding is a no-op, not an error: the desired end state is identical.

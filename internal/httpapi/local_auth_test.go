@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pquerna/otp/totp"
 	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/store"
 )
@@ -156,7 +155,7 @@ func TestLocalAuthLoginLockoutAndTOTP(t *testing.T) {
 	if r := h.withSession(http.MethodPost, "/api/v1/me/local/totp/confirm", map[string]any{"code": "000000"}, cookies); r.Code != http.StatusBadRequest {
 		t.Fatalf("bad confirm code accepted: %d", r.Code)
 	}
-	code, _ := totp.GenerateCode(secret, time.Now())
+	code := totpCode(secret)
 	confirm := h.withSession(http.MethodPost, "/api/v1/me/local/totp/confirm", map[string]any{"code": code}, cookies)
 	if confirm.Code != http.StatusOK {
 		t.Fatalf("confirm: %d %s", confirm.Code, confirm.Body.String())
@@ -179,7 +178,7 @@ func TestLocalAuthLoginLockoutAndTOTP(t *testing.T) {
 	if r := h.jsonPost("/auth/local/totp", map[string]any{"pending": pending, "code": "123456"}, nil); r.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong totp accepted: %d", r.Code)
 	}
-	code, _ = totp.GenerateCode(secret, time.Now())
+	code = totpCode(secret)
 	step2 := h.jsonPost("/auth/local/totp", map[string]any{"pending": pending, "code": code}, nil)
 	if step2.Code != http.StatusOK || len(step2.Result().Cookies()) == 0 {
 		t.Fatalf("step2: %d %s", step2.Code, step2.Body.String())

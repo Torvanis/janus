@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -660,4 +661,62 @@ func TestBodylessVideoPollWithPlanModelReachesTheProvider(t *testing.T) {
 		t.Fatalf("poll = %d %s", rec.Code, rec.Body.String())
 	}
 	_ = xai
+}
+
+// Offline networks: with JANUS_WEB_ALLOW_PRIVATE a chat model reads an
+// intranet page through the real fetch path (no stub); by default the same
+// link is refused and the model is told which setting blocks it.
+func TestChatReadsAnIntranetPageWhenAllowed(t *testing.T) {
+	var ip string
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && n.IP.IsPrivate() {
+			ip = n.IP.String()
+			break
+		}
+	}
+	if ip == "" {
+		t.Skip("no private IPv4 address on this host")
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, "0"))
+	if err != nil {
+		t.Skip(err)
+	}
+	intranet := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><title>Enclave runbook</title><body><h1>Restart</h1><p>Run the restart playbook from the bastion.</p></body></html>"))
+	})}
+	go func() { _ = intranet.Serve(ln) }()
+	t.Cleanup(func() { _ = intranet.Close() })
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	link := "http://" + ln.Addr().String() + "/runbook"
+
+	install := func(m map[string]string) {
+		p, err := websearch.ParsePagePolicy(func(k string) string { return m[k] }, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		websearch.SetPagePolicy(p)
+	}
+	t.Cleanup(func() { websearch.SetPagePolicy(nil) })
+
+	h, sess := chatHarness(t)
+	f := newFakeToolUpstream(t, h)
+	f.call = []struct{ name, args string }{{"read_page", `{"url":"` + link + `"}`}}
+	f.reply = "Run the restart playbook from the bastion."
+
+	install(map[string]string{"JANUS_WEB_ALLOW_PORTS": port})
+	toolChat(t, h, sess, map[string]any{"content": "how do I restart? " + link})
+	if last := f.lastChat(); !strings.Contains(last, "The page could not be read") || !strings.Contains(last, "JANUS_WEB_ALLOW_PRIVATE") {
+		t.Fatalf("default policy must refuse and name the setting: %s", last)
+	}
+
+	install(map[string]string{"JANUS_WEB_ALLOW_PRIVATE": "true", "JANUS_WEB_ALLOW_PORTS": port})
+	_, done := toolChat(t, h, sess, map[string]any{"content": "how do I restart? " + link})
+	if last := f.lastChat(); !strings.Contains(last, "Run the restart playbook from the bastion") {
+		t.Fatalf("intranet page text must reach the model: %s", last)
+	}
+	if srcs, _ := done["sources"].([]any); len(srcs) != 1 || srcs[0].(map[string]any)["url"] != link {
+		t.Fatalf("sources = %v", done["sources"])
+	}
 }

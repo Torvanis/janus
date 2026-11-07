@@ -528,7 +528,7 @@ function modeTone(mode: SecgwMode): Tone {
   return mode === 'block' ? 'danger' : mode === 'redact' ? 'warning' : 'info';
 }
 
-/** One glyph chip per enabled check: kind icon + mode, coloured by mode. */
+/** One glyph chip per enabled check: kind icon + mode, colored by mode. */
 function ChecksLine({ policy }: { policy: SecgwPolicy }): ReactNode {
   const live = policy.checks.filter((c) => c.enabled);
   if (live.length === 0) return <span className="muted">{t('adminSecurity.policies.noChecks')}</span>;
@@ -693,7 +693,7 @@ function PoliciesTab(): ReactNode {
 }
 
 /**
- * What a decision-model guard reads. Defaults keep the original behaviour
+ * What a decision-model guard reads. Defaults keep the original behavior
  * (the new turn, its last 12,000 characters, one call); the wider settings
  * cost latency and classifier calls in exchange for coverage.
  */
@@ -998,7 +998,7 @@ const MODE_OPTIONS: Array<[SecgwMode, MessageKey]> = [
 
 /**
  * One check as a gate: switch + mode on the head, everything else behind a
- * disclosure. The head sub-line summarises what the details currently say,
+ * disclosure. The head sub-line summarizes what the details currently say,
  * so a closed gate still reads correctly.
  */
 function CheckGate({
@@ -1519,7 +1519,7 @@ function CheckGate({
   );
 }
 
-/** A labelled block for controls that are themselves buttons (chips): a
+/** A labeled block for controls that are themselves buttons (chips): a
  *  <label> around buttons is invalid, so this is a group with a caption. */
 function GroupField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): ReactNode {
   return (

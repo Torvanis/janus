@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pquerna/otp"
-	"github.com/pquerna/otp/totp"
 	"github.com/torvanis/janus/internal/auth"
 	"github.com/torvanis/janus/internal/store"
 )
@@ -20,7 +19,7 @@ import (
 //
 // Why: trials and small deployments should not need an IdP on day one, and
 // JANUS_DEV_AUTH (anyone types any email) was never acceptable outside a
-// laptop. Local auth is a real identity source: passwords bcrypt-hashed,
+// laptop. Local auth is a real identity source: passwords PBKDF2-HMAC-SHA-512-hashed,
 // lockout after repeated failures, TOTP with recovery codes, every event
 // audited. It composes with OIDC — an admin with a password is the
 // break-glass when the IdP is down.
@@ -45,7 +44,7 @@ func unescapeQuery(v string) string {
 const (
 	pendingTTL      = 5 * time.Minute
 	totpIssuer      = "Janus Edge"
-	loginRatePerMin = 20 // per client IP; the bcrypt lockout is the real defense
+	loginRatePerMin = 20 // per client IP; the account lockout is the real defense
 )
 
 // pendingLogin remembers a password-verified user awaiting their TOTP code.
@@ -56,7 +55,7 @@ func (s *Server) localAuthEnabled(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	if has || (s.OIDC == nil && !s.Config.DevAuthEnabled) {
+	if has || (s.OIDC == nil && !s.Config.DevAuth()) {
 		return true
 	}
 	// A configured, enabled, licensed directory also uses the password form.
@@ -67,7 +66,7 @@ func (s *Server) localAuthEnabled(r *http.Request) bool {
 // needsSetup is true on a fresh install with no way to sign in at all: the
 // login page then offers "Create the first administrator".
 func (s *Server) needsSetup(r *http.Request) bool {
-	if s.OIDC != nil || s.Config.DevAuthEnabled {
+	if s.OIDC != nil || s.Config.DevAuth() {
 		return false
 	}
 	has, err := s.Store.HasLocalCredentials(r.Context())
@@ -83,8 +82,9 @@ func (s *Server) mountLocalAuthRoutes(r chi.Router) {
 
 func (s *Server) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"enabled":     s.localAuthEnabled(r),
-		"needs_setup": s.needsSetup(r),
+		"enabled":         s.localAuthEnabled(r),
+		"needs_setup":     s.needsSetup(r),
+		"password_policy": s.Store.SecurityPolicy(r.Context()).Passwords,
 	})
 }
 
@@ -111,7 +111,7 @@ func (s *Server) handleLocalSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Logger.InfoContext(r.Context(), "first administrator created", "email", u.Email)
-	_ = s.Store.AppendAudit(r.Context(), &store.AuditEntry{ActorUserID: u.ID, ActorLabel: u.Email, Action: "user_created", ResourceType: "user", ResourceID: u.ID,
+	_ = s.appendAudit(r.Context(), &store.AuditEntry{ActorUserID: u.ID, ActorLabel: u.Email, Action: "user_created", ResourceType: "user", ResourceID: u.ID,
 		NewValue: encodeAuditValue(map[string]any{"email": u.Email, "role": store.RoleAdmin, "source": "local_setup"})})
 	s.finishLocalLogin(w, r, u, "/dashboard")
 }
@@ -134,6 +134,14 @@ func (s *Server) handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("invalid JSON body"))
 		return
 	}
+	r = withSignInMethod(r, "local")
+	if !s.consentGiven(r) {
+		WriteError(w, r, newError(http.StatusForbidden, "banner_required", "auth_error", "Read and acknowledge the notice before signing in."))
+		return
+	}
+	if s.refuseIfLocked(w, r, in.Email) {
+		return
+	}
 	u, _, err := s.Store.CheckPassword(r.Context(), in.Email, in.Password)
 	switch {
 	case errors.Is(err, store.ErrTOTPRequired):
@@ -150,16 +158,15 @@ func (s *Server) handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusOK, map[string]any{"signed_in": false, "totp_required": true, "pending": tok})
 		return
 	case errors.Is(err, store.ErrLocked):
-		s.Logger.WarnContext(r.Context(), "local sign-in locked", "email", strings.ToLower(in.Email), "ip", s.clientIP(r))
-		WriteError(w, r, newError(http.StatusLocked, "locked", "auth_error", err.Error()))
+		s.refuseIfLocked(w, r, in.Email)
 		return
 	case err != nil:
 		// Not a local account (or wrong password): try the directory if one
-		// is configured. It returns the same 401 wording on a miss.
-		if s.tryDirectoryLogin(w, r, in.Email, in.Password, in.RedirectTo) {
+		// is configured. A miss there counts one failure for the attempt.
+		if s.tryDirectoryLogin(w, withSignInMethod(r, "directory"), in.Email, in.Password, in.RedirectTo) {
 			return
 		}
-		WriteError(w, r, newError(http.StatusUnauthorized, "bad_credentials", "auth_error", store.ErrBadCredentials.Error()))
+		s.signInFailed(w, r, in.Email, "bad_credentials")
 		return
 	}
 	s.finishLocalLogin(w, r, u, in.RedirectTo)
@@ -186,18 +193,34 @@ func (s *Server) handleLocalTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	valid := false
-	if secret, err := s.Store.TOTPSecret(r.Context(), s.Cipher, userID); err == nil && secret != "" {
-		valid = totp.Validate(code, secret)
+	unusable := false
+	if secret, alg, err := s.Store.TOTPSecret(r.Context(), s.Cipher, userID); err == nil && secret != "" {
+		unusable = !totpUsable(alg)
+		valid = validateTOTP(code, secret, alg)
 	}
 	if !valid && len(code) >= 8 {
 		// Recovery code path (8 chars, lower-case).
-		valid, _ = s.Store.UseRecoveryCode(r.Context(), userID, code)
+		valid, _ = s.Store.UseRecoveryCode(r.Context(), s.Cipher, userID, code)
 		if valid {
 			s.Logger.WarnContext(r.Context(), "recovery code used", "user_id", userID)
-			_ = s.Store.AppendAudit(r.Context(), &store.AuditEntry{ActorUserID: userID, ActorLabel: userID, Action: "user_recovery_code_used", ResourceType: "user", ResourceID: userID})
+			_ = s.appendAudit(r.Context(), &store.AuditEntry{ActorUserID: userID, ActorLabel: userID, Action: "user_recovery_code_used", ResourceType: "user", ResourceID: userID})
 		}
 	}
+	if !valid && unusable {
+		// FIPS edition, legacy HMAC-SHA-1 enrollment: no authenticator code
+		// can pass, so say so instead of "not valid" forever.
+		WriteError(w, r, newError(http.StatusUnauthorized, "totp_unsupported", "auth_error", "This account's authenticator uses HMAC-SHA-1, which this Janus installation does not accept (FIPS edition or STIG profile). Sign in with a recovery code and set up two-factor again, or ask an administrator to reset two-factor."))
+		return
+	}
 	if !valid {
+		r = withSignInMethod(r, "local")
+		if u, err := s.Store.UserByID(r.Context(), userID); err == nil {
+			pol := s.Store.SecurityPolicy(r.Context()).Lockout
+			if locked, _ := s.Store.RecordSignInFailure(r.Context(), u.Email, pol); locked {
+				s.authAudit(r, "account_locked", u, "", store.AuditFailure, map[string]any{"failures": pol.MaxFailures})
+			}
+			s.authAudit(r, "sign_in_failed", u, "", store.AuditFailure, map[string]any{"reason": "bad_code", "method": "local"})
+		}
 		WriteError(w, r, newError(http.StatusUnauthorized, "bad_code", "auth_error", "That code is not valid."))
 		return
 	}
@@ -207,7 +230,7 @@ func (s *Server) handleLocalTOTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	s.finishLocalLogin(w, r, u, in.RedirectTo)
+	s.finishLocalLogin(w, withSignInMethod(r, "local"), u, in.RedirectTo)
 }
 
 // finishLocalLogin runs the shared sign-in contract (seats, bootstrap admin,
@@ -230,6 +253,9 @@ func (s *Server) finishLocalLogin(w http.ResponseWriter, r *http.Request, u *sto
 	next := safeRedirect(redirectTo)
 	if cred, err := s.Store.LocalCredential(r.Context(), u.ID); err == nil && cred.MustChange {
 		next = "/settings?password=change"
+		if cred.Expired {
+			s.authAudit(r, "password_expired", u, "", store.AuditSuccess, map[string]any{"changed_at": cred.PasswordChangedAt})
+		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"signed_in": true, "redirect_to": next})
 }
@@ -274,12 +300,12 @@ func (s *Server) handleMeTOTPQR(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrNotFoundf("pending enrollment"))
 		return
 	}
-	secret, err := s.Store.TOTPSecret(r.Context(), s.Cipher, u.ID)
+	secret, alg, err := s.Store.TOTPSecret(r.Context(), s.Cipher, u.ID)
 	if err != nil || secret == "" {
 		WriteError(w, r, ErrNotFoundf("pending enrollment"))
 		return
 	}
-	key, err := otp.NewKeyFromURL("otpauth://totp/" + url.PathEscape(totpIssuer+":"+u.Email) + "?secret=" + secret + "&issuer=" + url.QueryEscape(totpIssuer) + "&algorithm=SHA1&digits=6&period=30")
+	key, err := otp.NewKeyFromURL(totpKeyURL(u.Email, secret, alg))
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -305,9 +331,17 @@ func (s *Server) handleMeLocal(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	alg := ""
+	if cred.TOTPEnabled {
+		_, alg, _ = s.Store.TOTPSecret(r.Context(), s.Cipher, u.ID)
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"has_password": true, "totp_enabled": cred.TOTPEnabled, "must_change": cred.MustChange,
 		"recovery_codes_left": cred.RecoveryCodesLeft(),
+		// totp_reenroll: the enrollment's algorithm is not usable in this
+		// edition (HMAC-SHA-1 on the FIPS edition); the UI asks the user to
+		// set two-factor up again.
+		"totp_algorithm": alg, "totp_reenroll": cred.TOTPEnabled && !totpUsable(alg),
 	})
 }
 
@@ -335,7 +369,11 @@ func (s *Server) handleMeSetPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.Store.SetPassword(r.Context(), u.ID, in.New, false); err != nil {
+	current := in.Current
+	if cred != nil && cred.MustChange {
+		current = ""
+	}
+	if err := s.Store.ChangeOwnPassword(r.Context(), u.ID, current, in.New); err != nil {
 		WriteError(w, r, ErrInvalidRequest(err.Error()))
 		return
 	}
@@ -355,16 +393,16 @@ func (s *Server) handleMeTOTPStart(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("set a password before enabling two-factor authentication"))
 		return
 	}
-	key, err := totp.Generate(totp.GenerateOpts{Issuer: totpIssuer, AccountName: u.Email, Algorithm: otp.AlgorithmSHA1, Digits: otp.DigitsSix})
+	key, alg, err := generateTOTPKey(u.Email)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	if err := s.Store.StageTOTP(r.Context(), s.Cipher, u.ID, key.Secret()); err != nil {
+	if err := s.Store.StageTOTP(r.Context(), s.Cipher, u.ID, key.Secret(), alg); err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"secret": key.Secret(), "otpauth_url": key.URL(), "issuer": totpIssuer, "account": u.Email})
+	WriteJSON(w, http.StatusOK, map[string]any{"secret": key.Secret(), "otpauth_url": key.URL(), "issuer": totpIssuer, "account": u.Email, "algorithm": alg})
 }
 
 func (s *Server) handleMeTOTPConfirm(w http.ResponseWriter, r *http.Request) {
@@ -376,16 +414,20 @@ func (s *Server) handleMeTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("invalid JSON body"))
 		return
 	}
-	secret, err := s.Store.TOTPSecret(r.Context(), s.Cipher, u.ID)
+	secret, alg, err := s.Store.TOTPSecret(r.Context(), s.Cipher, u.ID)
 	if err != nil || secret == "" {
 		WriteError(w, r, ErrInvalidRequest("start enrollment first"))
 		return
 	}
-	if !totp.Validate(strings.ReplaceAll(strings.TrimSpace(in.Code), " ", ""), secret) {
+	if !totpUsable(alg) {
+		WriteError(w, r, ErrInvalidRequest("this enrollment uses HMAC-SHA-1, which this Janus installation does not accept (FIPS edition or STIG profile); start enrollment again"))
+		return
+	}
+	if !validateTOTP(strings.ReplaceAll(strings.TrimSpace(in.Code), " ", ""), secret, alg) {
 		WriteError(w, r, newError(http.StatusBadRequest, "bad_code", "auth_error", "That code is not valid. Check the time on your device and try the next code."))
 		return
 	}
-	codes, err := s.Store.ConfirmTOTP(r.Context(), u.ID)
+	codes, err := s.Store.ConfirmTOTP(r.Context(), s.Cipher, u.ID)
 	if err != nil {
 		WriteError(w, r, err)
 		return

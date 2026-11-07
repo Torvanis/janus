@@ -351,7 +351,7 @@ func TestExportRequestsAdminScopeIncludesUserIdentity(t *testing.T) {
 }
 
 // TestRequestsTokenSizeFiltersAndSortViaHTTP proves the token-size threshold
-// parameters and token sort keys are honoured end to end by both the JSON
+// parameters and token sort keys are honored end to end by both the JSON
 // request log and the CSV export — the same filter the UI builds for the
 // list must narrow the download, or the export silently lies about the view.
 func TestRequestsTokenSizeFiltersAndSortViaHTTP(t *testing.T) {

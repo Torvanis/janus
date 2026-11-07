@@ -173,7 +173,7 @@ export const en = {
     creating: 'Creating…',
     descriptionLabel: 'Description',
     descriptionHint: '{count}/100 characters — for example “Cursor on my laptop”.',
-    descriptionRequired: 'Give the token a description so you can recognise it later.',
+    descriptionRequired: 'Give the token a description so you can recognize it later.',
     descriptionTooLong: 'Descriptions are limited to 100 characters.',
     descriptionPlaceholder: 'Cursor on my laptop',
     revealTitle: 'Copy your token now',
@@ -305,7 +305,7 @@ export const en = {
   explore: {
     title: 'Org pulse',
     subtitle:
-      'What the whole organisation is doing through Janus, aggregated and anonymous. Individual usage is never shown here unless an administrator has switched leaderboards on.',
+      'What the whole organization is doing through Janus, aggregated and anonymous. Individual usage is never shown here unless an administrator has switched leaderboards on.',
     metric: 'Metric',
     activeUsers: 'Active users',
     last15m: 'In the last 15 minutes',
@@ -320,7 +320,7 @@ export const en = {
     liveThroughput: 'Live throughput',
     liveThroughputSubtitle: 'Five-minute buckets over the last two hours. The background responds to this signal.',
     mostUsedModels: 'Most-used models',
-    noOrgUsage: 'No organisation-wide usage yet.',
+    noOrgUsage: 'No organization-wide usage yet.',
     recentlyAvailable: 'Recently available',
     noModelsEnabled: 'No models have been enabled yet.',
     onUpstream: 'on {name}',
@@ -377,6 +377,10 @@ export const en = {
     disableBody: 'Your password alone will sign you in. Enter it to confirm.',
     totpDisabled: 'Two-factor authentication disabled.',
     enrollBody: 'Scan the code with your authenticator app, then enter the 6-digit code it shows.',
+    sha256Note:
+      'This server is the Janus FIPS edition, so codes use HMAC-SHA-256. Use an authenticator app that supports SHA-256 (for example 1Password, Bitwarden, Aegis, 2FAS, FreeOTP or Yubico Authenticator). If the first code is not accepted, your app ignores the setting.',
+    reenrollBody:
+      'Your authenticator uses HMAC-SHA-1, which this server (the Janus FIPS edition) does not accept. Set up two-factor again with an app that supports SHA-256. Until then, sign in with a recovery code.',
     qrAlt: 'QR code for your authenticator app',
     manualKey: 'Or enter this key manually',
     recoveryTitle: 'Save your recovery codes',
@@ -615,7 +619,7 @@ export const en = {
     window: 'Window',
     resets: 'Resets',
     onBreach: 'On breach',
-    utilisation: 'Utilisation',
+    utilisation: 'Utilization',
     clearFilters: 'Clear filters',
     delete: 'Delete',
     enable: 'Enable',
@@ -760,7 +764,7 @@ export const en = {
     noTeamUsage: 'No team usage in this range.',
     memberContribution: 'Member contribution',
     leadView: 'Lead view',
-    anonymised: 'Anonymised',
+    anonymised: 'Anonymized',
     noActivityTitle: 'No activity yet',
     noActivityBody: 'Team usage will appear as members start making requests.',
     noMemberActivity: 'No member activity in this range.',
@@ -825,6 +829,64 @@ export const en = {
       'Comma-separated group names from this provider whose members administer Janus. Re-evaluated at every sign-in; combined with JANUS_ADMIN_GROUPS.',
     enabledLabel: 'Enabled (shown on the sign-in page)',
     create: 'Create provider',
+  },
+  adminListenerTls: {
+    title: 'Janus listener certificate',
+    none: 'Janus serves plain HTTP; a proxy or ingress in front of it terminates TLS. To encrypt the hop from the proxy to Janus too, mount an issued certificate (JANUS_TLS_CERT_PATH / JANUS_TLS_KEY_PATH) or set JANUS_TLS_SELF_SIGNED=true.',
+    selfSignedNote:
+      'Self-signed (temporary). Install the downloaded certificate in the proxy in front of Janus as trusted, and replace it with an issued certificate when you have one. Regenerating it means installing the new one in the proxy again.',
+    mode: 'Certificate',
+    modeMounted: 'Issued, mounted from files (renewals are picked up without a restart)',
+    modeSelfSigned: 'Self-signed by Janus',
+    names: 'Names',
+    expires: 'Expires',
+    download: 'Download certificate',
+    regenerate: 'Regenerate',
+    regenerateTitle: 'Regenerate the self-signed certificate?',
+    regenerateConsequence:
+      'Janus serves the new certificate at once (every replica within a minute). Until you install it in the proxy, the proxy cannot verify Janus and requests through it fail. The change is audited.',
+    regenerated: 'New certificate generated: install it in the proxy',
+    required: 'JANUS_TLS_REQUIRE is on: Janus refuses to start without serving TLS itself.',
+    notRequired:
+      'JANUS_TLS_REQUIRE is off: a TLS-terminating proxy declared in JANUS_TRUSTED_PROXIES is accepted. Set it to require TLS on the hop from the proxy to Janus as well.',
+  },
+  adminCerts: {
+    title: 'Trusted certificates',
+    intro:
+      'Every outbound TLS connection (AI providers, identity providers, LDAP, object storage, webhooks, email, OTLP) trusts the host’s certificate authorities plus the certificates listed here. Changes apply to new connections within seconds, on every replica, without a restart.',
+    sources: 'Trust sources',
+    dodOn: 'DoD PKI root CAs: included (JANUS_TRUST_DOD_ROOTS).',
+    dodOff: 'DoD PKI root CAs: not included. Set JANUS_TRUST_DOD_ROOTS=true to add them.',
+    untrustedAvailable:
+      'Upstreams may be set to Allow untrusted certificate (per upstream, audited). Prefer uploading the upstream’s CA here.',
+    untrustedRefused:
+      'Allow untrusted certificate is turned off in this edition or profile: every upstream certificate is verified.',
+    none: 'No certificates beyond the host’s own trust store.',
+    colName: 'Certificate',
+    colSource: 'Source',
+    colExpires: 'Expires',
+    colActions: 'Actions',
+    sourceDod: 'DoD PKI (built in)',
+    sourceFile: 'JANUS_CA_BUNDLE file',
+    sourceDirectory: 'JANUS_CA_DIR (mounted)',
+    sourceUploaded: 'Uploaded',
+    managedByDeployment: 'Managed by the deployment',
+    expired: 'Expired',
+    expiresSoon: 'Expires soon',
+    remove: 'Remove',
+    removeTitle: 'Stop trusting {name}?',
+    removeConsequence:
+      'New connections to servers whose certificates chain only to this one will fail. The change is audited and applies to every replica.',
+    uploadTitle: 'Add a certificate',
+    name: 'Name',
+    nameHint: 'Optional. Defaults to the certificate’s common name.',
+    pem: 'PEM certificate',
+    pemHint: 'A CA certificate, or a chain. Certificates only: a private key is refused.',
+    pemRequired: 'Paste a PEM certificate or choose a file.',
+    chooseFile: 'Choose file…',
+    add: 'Add certificate',
+    added: 'Certificate added',
+    removed: 'Certificate removed',
   },
   adminDir: {
     title: 'Directory (LDAP / Active Directory)',
@@ -1118,7 +1180,7 @@ export const en = {
     createTeam: 'Create team',
     teamName: 'Team name',
     teamLead: 'Team lead',
-    teamLeadHint: 'The lead sees per-member usage detail; other members see anonymised contribution.',
+    teamLeadHint: 'The lead sees per-member usage detail; other members see anonymized contribution.',
     noLeadYet: 'No lead yet',
     deleteTeamTitle: 'Delete “{name}”?',
     deleteTeamConsequence:
@@ -1464,6 +1526,31 @@ export const en = {
       never: 'Never',
     },
     deployment: 'Deployment',
+    crypto: {
+      title: 'Cryptography',
+      edition: 'Edition',
+      defaultEdition: 'Janus (default edition)',
+      fipsEdition: 'Janus FIPS edition',
+      module: 'Go Cryptographic Module',
+      validated: 'FIPS 140-3 validated, CMVP certificate {cert}',
+      mode: 'FIPS 140-3 mode',
+      modeOn: 'On (approved mode)',
+      modeOnly: 'On, strict (only approved algorithms; test mode)',
+      modeOff: 'Off',
+      restricted: 'Not available in this edition',
+      stigProfile: 'STIG profile',
+      revocation: 'Certificate revocation checks',
+      revocationOff: 'Off',
+      revocationSoft: 'Soft: revoked certificates fail; unknown status is allowed',
+      revocationHard: 'Hard: revoked or unknown status fails the connection',
+      revocationCounts: '{count} good, {revoked} revoked, {failed} unavailable since start',
+      revocationLastError: 'Last lookup problem: {error}',
+      stigOn: 'On (JANUS_STIG_PROFILE)',
+      license: 'Edition license',
+      licenseOk: 'Business requirement met ({name}, {value})',
+      legacy:
+        '{passwords} local account(s) still have a password stored by an older release, and {totp} use an HMAC-SHA-1 authenticator. Neither works in the FIPS edition: reset those passwords, and ask those people to set up two-factor again.',
+    },
     version: 'Version',
     started: 'Started',
     uptime: 'Uptime',
@@ -1561,7 +1648,7 @@ export const en = {
       // Copy for the spend_emphasis flag (spend vs usage emphasis): drives
       // the default metric on Explore, Dashboard, admin Overview, and Team.
       // Rendered by flagCopy() in web/src/routes/admin/System.tsx.
-      spendEmphasisLabel: 'Emphasise spend',
+      spendEmphasisLabel: 'Emphasize spend',
       spendEmphasisDescription:
         'Dashboard graphs open on the Spend metric instead of Tokens. Viewers can still switch metrics per graph, and links with an explicit metric keep it.',
       spendEmphasisConsequence:
@@ -1999,7 +2086,7 @@ export const en = {
       allowCount: '{count} allowed',
       firstStep: 'Add the first list',
       emptyTitle: 'No term lists',
-      emptyBody: 'Term lists hold project code names, customer names, and other words that must not leave the organisation.',
+      emptyBody: 'Term lists hold project code names, customer names, and other words that must not leave the organization.',
       colName: 'Name',
       colMode: 'Mode',
       colSeverity: 'Severity',
@@ -2392,7 +2479,7 @@ export const en = {
     editDescription: 'Repointing takes effect on the next request. Callers keep using the same name.',
     repointWarningTitle: 'Repoint {name}?',
     repointWarningBody:
-      'Every caller using {name} moves from {from} to {to} on their next request, with no change on their side. Cost, context window, and behaviour may differ. Past usage keeps reporting the model that actually ran.',
+      'Every caller using {name} moves from {from} to {to} on their next request, with no change on their side. Cost, context window, and behavior may differ. Past usage keeps reporting the model that actually ran.',
     repointConfirm: 'Repoint alias',
     enable: 'Enable',
     disable: 'Disable',
@@ -2492,7 +2579,7 @@ export const en = {
     choosePerson: 'Choose a person…',
     allUsersTitle: 'Grant to every authenticated user?',
     allUsersConsequence:
-      'Everyone who can sign in will be able to call {count} model(s), and their usage will be billed to your organisation. This is a single grant, not one per person, so it also applies to people who join later.',
+      'Everyone who can sign in will be able to call {count} model(s), and their usage will be billed to your organization. This is a single grant, not one per person, so it also applies to people who join later.',
     allUsersConfirm: 'Grant to all users',
     allServiceTokensTitle: 'Grant to every service token?',
     allServiceTokensConsequence:
@@ -2541,8 +2628,8 @@ export const en = {
   },
   adminOverview: {
     title: 'Administration',
-    subtitle: 'Organisation-wide spend, model curation, and the limits closest to breaching.',
-    subtitleLocalOnly: 'Organisation-wide usage, model curation, and the limits closest to breaching.',
+    subtitle: 'Organization-wide spend, model curation, and the limits closest to breaching.',
+    subtitleLocalOnly: 'Organization-wide usage, model curation, and the limits closest to breaching.',
     pendingBanner: '{count} model(s) await review.',
     pendingBannerBody: 'Newly discovered models stay disabled until you price and enable them.',
     pendingBannerBodyLocalOnly: 'Newly discovered models stay disabled until you enable them.',
@@ -2554,7 +2641,7 @@ export const en = {
     failedCount: '{count} failed',
     activeUsers: 'Active users',
     last15m: 'Last 15 minutes',
-    orgTrend: 'Organisation trend',
+    orgTrend: 'Organization trend',
     topSpenders: 'Top users',
     allPeople: 'All people',
     noAttributedSpend: 'No attributed usage in this range.',
@@ -2628,7 +2715,6 @@ export const en = {
     resource: 'Resource',
     allResources: 'All resources',
     export: 'Download CSV',
-    exportUpsell: 'CSV export is a Business feature.',
     emptyTitle: 'Nothing recorded yet',
     emptyBody: 'Administrative changes — grants, quotas, upstreams, role changes — are written here as they happen.',
     noMatchTitle: 'No entries match those filters',
@@ -2644,6 +2730,11 @@ export const en = {
     resourceRemoved: 'The resource was removed.',
   },
   adminUpstreams: {
+    untrustedSwitch: 'Allow untrusted certificate',
+    untrustedHint:
+      'Skips certificate verification for this upstream only. Use it for a lab or a server whose CA you cannot get; otherwise add the CA under Settings → Certificates. Audited.',
+    untrustedRefused:
+      'This edition or profile does not allow unverified upstreams: the saved setting is ignored. Turn it off and add the CA under Settings → Certificates.',
     title: 'Upstreams',
     subtitle:
       'Each upstream is a provider endpoint plus an encrypted credential. Janus polls it for models, which stay disabled until you price and enable them.',

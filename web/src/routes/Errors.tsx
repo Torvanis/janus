@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { t } from '../lib/i18n';
 
 /**
- * 403 and 404 are deliberately distinct pages. Telling an authorisation failure
+ * 403 and 404 are deliberately distinct pages. Telling an authorization failure
  * apart from missing data is what stops "why can't I see this?" support tickets.
  */
 export function ForbiddenPage({ requiredRole, detail }: { requiredRole?: string; detail?: string }): ReactNode {

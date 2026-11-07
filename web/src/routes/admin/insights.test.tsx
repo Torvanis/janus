@@ -303,7 +303,7 @@ describe('Usage insights', () => {
     mockGets();
     const user = userEvent.setup();
     renderAt('/admin/insights/overview');
-    expect(await screen.findByText('Classification is off. Choose a classifier to start labelling requests.')).toBeTruthy();
+    expect(await screen.findByText('Classification is off. Choose a classifier to start labeling requests.')).toBeTruthy();
     const table = (await screen.findByRole('button', { name: /Coding/ })).closest('table') as HTMLElement;
     expect(within(table).getByText('70%')).toBeTruthy();
     expect(within(table).getByText('Rust (5)')).toBeTruthy();

@@ -23,16 +23,17 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.10.5
+## Release 2026.11.1
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.10.5`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.11.1`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.10.5` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.10.5): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.11.1` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.11.1): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus-helm-chart/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 0.2.2](https://github.com/Torvanis/janus/releases/download/v2026.10.5/janus-helm-chart-0.2.2.tgz)
-- Offline container images for air-gapped installs: `janus-container-image-2026.10.5-linux-amd64.tar` and `janus-container-image-2026.10.5-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.10.5) (`docker load -i` or `podman load -i`).
+- [Download Helm chart 2026.11.1](https://github.com/Torvanis/janus/releases/download/v2026.11.1/janus-helm-chart-2026.11.1.tgz)
+- Offline container images for air-gapped installs: `janus-container-image-2026.11.1-linux-amd64.tar` and `janus-container-image-2026.11.1-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.11.1) (`docker load -i` or `podman load -i`).
+- **Janus FIPS edition** (Business): `ghcr.io/torvanis/janus:2026.11.1-fips`, plus `janus-fips_2026.11.1_linux_<arch>.tar.gz` and `janus-fips-container-image-2026.11.1-linux-<arch>.tar` on the release page. See [FIPS edition and STIG profile](#fips-edition-and-stig-profile).
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -43,7 +44,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.10.5/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.11.1/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -61,11 +62,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.10.5` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.11.1` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.10.5 .
+docker build -t janus:2026.11.1 .
 ```
 
 This starts a **local evaluation** instance;
@@ -84,7 +85,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.10.5
+  janus:2026.11.1
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -125,6 +126,13 @@ Janus reads configuration from environment variables. Common settings:
 | `JANUS_STORAGE_MODE` | `database` or `s3` fixes where chat files and troubleshooting captures are kept; unset lets Administration → Settings → General → File storage decide. |
 | `JANUS_S3_ENDPOINT`, `JANUS_S3_BUCKET`, `JANUS_S3_ACCESS_KEY_ID`, `JANUS_S3_SECRET_ACCESS_KEY` | Required with `JANUS_STORAGE_MODE=s3`. Optional: `JANUS_S3_REGION` (default `us-east-1`), `JANUS_S3_PATH_STYLE`, `JANUS_S3_PREFIX`, `JANUS_S3_CA_FILE`. Files are encrypted by Janus before upload. |
 | `JANUS_STORAGE_MAX_OBJECT_BYTES` | Largest stored file; defaults to 25 MiB. |
+| `JANUS_STIG_PROFILE` | Business: `true` puts Janus into its documented configuration for the DISA Application Security and Development STIG and refuses unsafe settings at startup (see below). |
+| `JANUS_TLS_CERT_PATH`, `JANUS_TLS_KEY_PATH` | Serve TLS directly with an issued certificate; reloaded when the files change. |
+| `JANUS_TLS_SELF_SIGNED`, `JANUS_TLS_REQUIRE` | Generate a self-signed listener certificate shared by every replica; refuse to start unless Janus serves TLS itself. |
+| `JANUS_TRUSTED_PROXIES` | Comma-separated addresses or CIDR blocks of proxies whose `X-Forwarded-For` (and smart-card certificate header) Janus trusts. |
+| `JANUS_CA_BUNDLE`, `JANUS_CA_DIR`, `JANUS_TRUST_DOD_ROOTS` | Extra certificate authorities for every outbound TLS connection: one PEM file, a directory rescanned every 30 seconds, and the built-in DoD PKI roots (on by default in the FIPS edition). |
+| `JANUS_TLS_REVOCATION`, `JANUS_OCSP_RESPONDER` | `soft` or `hard` OCSP/CRL revocation checking of outbound certificates (hard in the STIG profile), and an enclave OCSP responder. |
+| `JANUS_WEB_ALLOW_PRIVATE`, `JANUS_WEB_ALLOW_DOMAINS`, `JANUS_WEB_DENY_DOMAINS`, `JANUS_WEB_PROXY`, `JANUS_WEB_TLS_TRUST` | Which web pages chat models may open (all off by default): private networks for offline sites, domain allow/deny lists, a forward proxy for every read, and which certificate authorities those reads trust. |
 
 See the built-in documentation for additional identity, policy, retention,
 notification, and operational settings. Never place credentials in source
@@ -138,6 +146,32 @@ can lose about the last 0.5 s of usage records, and a replica killed without a
 graceful shutdown up to 100 ms of them. Graceful shutdowns and rollouts lose
 nothing. It needs a valid Business or Enterprise license (otherwise the
 gateway logs why and runs normally) and is shown on Administration → Settings → System status.
+
+## FIPS edition and STIG profile
+
+The **Janus FIPS edition** is the same source built with the Go Cryptographic
+Module v1.0.0 (CMVP certificate #5247) in FIPS 140-3 approved mode. It refuses
+to start unless that module is linked with FIPS mode on; `janus --fips-status`
+prints the edition, the module and the features it restricts. It needs a
+Business, Enterprise or trial license and PostgreSQL (it refuses SQLite).
+
+```bash
+docker run --rm ghcr.io/torvanis/janus:2026.11.1-fips --fips-status
+make build-fips            # from source: GOFIPS140=v1.0.0, -tags fips
+```
+
+With Helm: `--set image.tag=2026.11.1-fips --set image.digest=` (or that
+image's digest).
+
+`JANUS_STIG_PROFILE=true` (either edition, Business) applies the documented
+configuration for the DISA Application Security and Development STIG: offline,
+913-day audit retention, hard revocation checking, the STIG security settings
+as a floor, and administrative changes that fail closed when their audit record
+cannot be written. Plain HTTP, SQLite, the evaluation sign-in, LDAP
+skip-verify, untrusted upstream TLS, phoning home and a shorter audit retention
+stop startup with a named error. It is designed to support your ATO; it is a
+configuration, not a certification. The in-product documentation
+(`/docs`, Administration → FIPS edition and STIG profile) lists every setting.
 
 ## Production deployment
 
@@ -171,7 +205,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.10.5
+git checkout v2026.11.1
 make web-deps
 make verify
 make build

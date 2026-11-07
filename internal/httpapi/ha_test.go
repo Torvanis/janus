@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pquerna/otp/totp"
 	"github.com/torvanis/janus/internal/auth"
 	"github.com/torvanis/janus/internal/jobs"
 	"github.com/torvanis/janus/internal/quota"
@@ -47,10 +46,10 @@ func TestHATOTPStepSpansReplicas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.store.StageTOTP(ctx, a.server.Cipher, u.ID, "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"); err != nil {
+	if err := a.store.StageTOTP(ctx, a.server.Cipher, u.ID, "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", totpEnrollAlgorithm()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.store.ConfirmTOTP(ctx, u.ID); err != nil {
+	if _, err := a.store.ConfirmTOTP(ctx, a.server.Cipher, u.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,7 +64,7 @@ func TestHATOTPStepSpansReplicas(t *testing.T) {
 	if r := b.jsonPost("/auth/local/totp", map[string]any{"pending": pending, "code": "000000"}, nil); r.Code != http.StatusUnauthorized {
 		t.Fatalf("wrong code on B: %d %s", r.Code, r.Body)
 	}
-	code, _ := totp.GenerateCode("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", time.Now())
+	code := totpCode("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
 	step2 := b.jsonPost("/auth/local/totp", map[string]any{"pending": pending, "code": code, "redirect_to": "/models"}, nil)
 	if step2.Code != 200 || decode(t, step2)["signed_in"] != true {
 		t.Fatalf("step2 on B: %d %s", step2.Code, step2.Body)
@@ -74,7 +73,7 @@ func TestHATOTPStepSpansReplicas(t *testing.T) {
 	if len(cookies) == 0 {
 		t.Fatal("no session cookie from B")
 	}
-	// …and the session B issued is honoured by A (DB-backed sessions).
+	// …and the session B issued is honored by A (DB-backed sessions).
 	if r := a.withSession(http.MethodGet, "/api/v1/me", nil, cookies); r.Code != 200 || decode(t, r)["email"] != "alice@example.com" {
 		t.Fatalf("session from B on A: %d %s", r.Code, r.Body)
 	}

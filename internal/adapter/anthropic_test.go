@@ -117,7 +117,7 @@ func TestAnthropicExtractUsage(t *testing.T) {
 // total maps exclusively to the 5m bucket, a present breakdown wins over the
 // legacy total (summing both would double-bill), and responses without any
 // cache fields report zero for both — byte-identical to pre-cache-write
-// behaviour.
+// behavior.
 func TestAnthropicCacheWriteExtraction(t *testing.T) {
 	a := &Anthropic{}
 	tests := []struct {

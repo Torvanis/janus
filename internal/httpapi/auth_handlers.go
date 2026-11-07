@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
@@ -26,7 +28,7 @@ const auditReasonAdminGroup = "admin_group_membership"
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	redirectTo := safeRedirect(r.URL.Query().Get("redirect_uri"))
 
-	if s.Config.DevAuthEnabled {
+	if s.Config.DevAuth() {
 		email := strings.TrimSpace(r.URL.Query().Get("email"))
 		if email == "" {
 			http.Redirect(w, r, "/auth/signed-out?reason=missing_email", http.StatusFound)
@@ -40,12 +42,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if g := r.URL.Query().Get("groups"); g != "" {
 			groups = strings.Split(g, ",")
 		}
-		s.completeSignIn(w, r, auth.DevIdentity(email, name, groups), redirectTo)
+		s.completeSignIn(w, withSignInMethod(r, "dev"), auth.DevIdentity(email, name, groups), redirectTo)
 		return
 	}
 
 	if s.OIDC == nil {
 		s.renderLoginError(w, r, "Sign-in is not configured. Set JANUS_OIDC_PROVIDER_URL, JANUS_OIDC_CLIENT_ID, and JANUS_OIDC_CLIENT_SECRET.")
+		return
+	}
+	if !s.requireConsent(w, r) {
 		return
 	}
 	target, err := s.OIDC.AuthCodeURL(r.Context(), redirectTo)
@@ -94,6 +99,14 @@ func (s *Server) completeSignIn(w http.ResponseWriter, r *http.Request, identity
 // an admin-configured OIDC provider), OR-ed with the global ones.
 func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, identity *auth.Identity, redirectTo string, providerAdminGroups []string) {
 	ctx := r.Context()
+	method := signInMethod(ctx)
+	// The notice and consent banner must be acknowledged before any
+	// sign-in completes, whatever the method (STIG APSC-DV-000520/530).
+	if !s.consentGiven(r) {
+		s.authAudit(r, "sign_in_failed", nil, strings.ToLower(identity.Email), store.AuditFailure, map[string]any{"reason": "banner_not_acknowledged", "method": method})
+		s.renderLoginError(w, r, "Read and acknowledge the notice on the sign-in page, then sign in again.")
+		return
+	}
 	// Administrator capability composes from three independent sources (OR):
 	// the bootstrap email list (sticky role promotion), an explicit grant from
 	// the admin UI (sticky role), and IdP admin-group membership (re-evaluated
@@ -152,12 +165,17 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 		s.renderLoginError(w, r, "Your account has been disabled. Contact a Janus administrator to restore access.")
 		return
 	}
+	if user.IsAdmin() && method != "smart_card" && method != "dev" && s.Store.SecurityPolicy(ctx).SmartCard.Enabled && s.Store.SecurityPolicy(ctx).SmartCard.RequireForAdmins {
+		s.authAudit(r, "sign_in_failed", user, "", store.AuditFailure, map[string]any{"reason": "smart_card_required", "method": method})
+		s.renderLoginError(w, r, "Administrators must sign in with a smart card (CAC/PIV).")
+		return
+	}
 	// IdP groups are replaced wholesale on every sign-in; in-app groups are left
 	// untouched so admin-curated membership survives.
 	covered := s.childCoveredNow(ctx)
 	if err := s.Store.ReplaceIDPGroupsForUser(ctx, user.ID, identity.Groups); err != nil {
-		s.Logger.ErrorContext(ctx, "synchronise identity-provider groups", "error", err.Error())
-		s.renderLoginError(w, r, "Your directory groups could not be synchronised. Try signing in again; if this continues, contact a Janus administrator.")
+		s.Logger.ErrorContext(ctx, "synchronize identity-provider groups", "error", err.Error())
+		s.renderLoginError(w, r, "Your directory groups could not be synchronized. Try signing in again; if this continues, contact a Janus administrator.")
 		return
 	}
 	s.childCoverageLost(ctx, covered, "their sign-in groups from the identity provider changed")
@@ -165,7 +183,7 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 	case created:
 		// First login: one entry records the account and the capability it
 		// arrived with, including a first-login group promotion.
-		if err := s.Store.AppendAudit(ctx, &store.AuditEntry{
+		if err := s.appendAudit(ctx, &store.AuditEntry{
 			ActorUserID: user.ID, ActorLabel: user.Email, Action: "user_created",
 			ResourceType: "user", ResourceID: user.ID,
 			NewValue: encodeAuditValue(map[string]any{
@@ -178,7 +196,7 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 		// The group signal flipped AND it changed what the user can actually
 		// do (an explicit role=admin grant or a bootstrap promotion absorbs
 		// the flip without any capability change — no entry then).
-		if err := s.Store.AppendAudit(ctx, &store.AuditEntry{
+		if err := s.appendAudit(ctx, &store.AuditEntry{
 			ActorUserID: auditSystemActor, ActorLabel: auditSystemActor,
 			Action: "user_role_changed", ResourceType: "user", ResourceID: user.ID,
 			OldValue: encodeAuditValue(map[string]any{"role": effectiveRole(before)}),
@@ -193,7 +211,26 @@ func (s *Server) completeSignInWith(w http.ResponseWriter, r *http.Request, iden
 		return
 	}
 	auth.SetSessionCookies(w, session, s.Config.CookieSecure, s.Config.SessionTTL)
+	clearConsent(w, s.Config.CookieSecure)
+	_ = s.Store.ClearSignInFailures(ctx, user.Email)
+	detail := map[string]any{"method": method, "session": sessionRef(session.ID), "user_agent": truncate(r.UserAgent(), 200)}
+	for k, v := range cardDetail(ctx) {
+		detail[k] = v
+	}
+	if n, err := s.Sessions.Count(ctx, user.ID); err == nil && n > 1 {
+		// STIG APSC-DV-000830: concurrent sign-ins are recorded.
+		detail["concurrent_sessions"] = n
+	}
+	s.authAudit(r, "sign_in", user, "", store.AuditSuccess, detail)
+	s.enforceSessionCap(r, user, session.ID)
 	http.Redirect(w, r, safeRedirect(redirectTo), http.StatusFound)
+}
+
+// sessionRef is a non-secret reference to a session for audit records: the
+// first characters of the SHA-256 of its id (the id itself is a credential).
+func sessionRef(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:6])
 }
 
 func (s *Server) isBootstrapAdmin(email string) bool {
@@ -261,6 +298,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		if err := s.Sessions.Delete(r.Context(), session.ID); err != nil {
 			s.Logger.WarnContext(r.Context(), "delete session", "error", err.Error())
 		}
+		s.authAudit(r, "sign_out", UserFrom(r.Context()), "", store.AuditSuccess, map[string]any{"session": sessionRef(session.ID)})
 	}
 	auth.ClearSessionCookies(w, s.Config.CookieSecure)
 	WriteJSON(w, http.StatusOK, map[string]any{"signed_out": true})
@@ -271,7 +309,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthHealth(w http.ResponseWriter, r *http.Request) {
 	local := s.localAuthEnabled(r)
 	setup := s.needsSetup(r)
-	if s.Config.DevAuthEnabled {
+	if s.Config.DevAuth() {
 		WriteJSON(w, http.StatusOK, map[string]any{
 			"status": "ok", "provider": "Local evaluation sign-in", "dev_auth": true, "local_auth": local, "needs_setup": false,
 		})
@@ -334,7 +372,7 @@ func deriveName(email string) string {
 }
 
 // principalContext returns the caller's identity plus their group and team ids,
-// which nearly every authorisation decision needs.
+// which nearly every authorization decision needs.
 func (s *Server) principalContext(ctx context.Context, user *store.User) (groupIDs []string, teamIDs []string, err error) {
 	groupIDs, err = s.Store.GroupIDsForUser(ctx, user.ID)
 	if err != nil {

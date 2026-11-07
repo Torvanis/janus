@@ -22,7 +22,7 @@ type ServerMetrics struct {
 	// used to report the pool's cache hit rate.
 	PrefixHits    float64
 	PrefixQueries float64
-	// Found reports that at least one recognised load metric was present.
+	// Found reports that at least one recognized load metric was present.
 	Found bool
 }
 

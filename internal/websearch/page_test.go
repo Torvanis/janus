@@ -51,7 +51,7 @@ func TestFetchPageChecksTheDialledAddress(t *testing.T) {
 	// loopback server by dialling its address directly.
 	c := pageClient()
 	req, _ := http.NewRequest(http.MethodGet, inside.URL, nil)
-	if _, err := c.Do(req); err == nil || !strings.Contains(err.Error(), ErrBlockedAddress.Error()) {
+	if _, err := c.Do(req); err == nil || !strings.Contains(err.Error(), errBlockedThisHost.Error()) {
 		t.Fatalf("loopback dial allowed: %v", err)
 	}
 	// A redirect to an internal address is refused.

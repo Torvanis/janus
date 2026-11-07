@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 	"time"
 )
 
-// Identity is the normalised result of a successful sign-in.
+// Identity is the normalized result of a successful sign-in.
 type Identity struct {
 	Subject       string
 	Email         string
@@ -510,7 +511,7 @@ func (p *OIDCProvider) Exchange(ctx context.Context, code, state string) (*Ident
 	if tokens.IDToken == "" {
 		return nil, "", fmt.Errorf("the identity provider did not return an ID token; check that the 'openid' scope is granted to this client")
 	}
-	// Defence in depth: the token arrived over the client-authenticated
+	// Defense in depth: the token arrived over the client-authenticated
 	// back-channel, and its signature must ALSO verify against the provider's
 	// published JWKS keys.
 	if err := p.jwks.verifyIDTokenSignature(ctx, tokens.IDToken); err != nil {
@@ -557,7 +558,7 @@ func (p *OIDCProvider) validateClaims(claims map[string]any, nonce string) error
 	if got == "" {
 		return fmt.Errorf("the ID token carries no nonce claim; Janus always sends one with the sign-in request")
 	}
-	if got != nonce {
+	if subtle.ConstantTimeCompare([]byte(got), []byte(nonce)) != 1 {
 		return fmt.Errorf("the ID token nonce does not match the sign-in request")
 	}
 	return nil
@@ -636,7 +637,7 @@ func (p *OIDCProvider) enrichFromUserInfo(ctx context.Context, accessToken strin
 }
 
 // ExtractGroups reads group memberships from a claim set, accepting both the
-// configured claim and the common `memberOf` fallback, and normalising LDAP
+// configured claim and the common `memberOf` fallback, and normalizing LDAP
 // distinguished names down to their common name.
 func ExtractGroups(claims map[string]any, claimName string) []string {
 	raw, ok := claims[claimName]

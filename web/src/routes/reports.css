@@ -12,7 +12,7 @@
   flex-wrap: wrap;
   gap: 8px;
   padding-block: 8px;
-  border-bottom: 1px solid var(--janus-color-border);
+  border-bottom: 1px solid var(--janus-color-border-default);
 }
 .report-grid {
   display: grid;
@@ -21,7 +21,7 @@
 }
 .report-template {
   padding: 20px;
-  border: 1px solid var(--janus-color-border);
+  border: 1px solid var(--janus-color-border-default);
   border-radius: 12px;
 }
 .report-form-grid {
@@ -36,7 +36,7 @@
   align-items: center;
   gap: 16px;
   padding: 16px 0;
-  border-bottom: 1px solid var(--janus-color-border);
+  border-bottom: 1px solid var(--janus-color-border-default);
 }
 .reports-workspace select[multiple] {
   min-height: 130px;
@@ -70,7 +70,7 @@
 }
 .reports-workspace .report-reader-meta {
   padding-block: 8px;
-  border-bottom: 1px solid var(--janus-color-border);
+  border-bottom: 1px solid var(--janus-color-border-default);
   font-size: 0.875rem;
 }
 .reports-workspace .report-reader-meta p {
@@ -101,7 +101,7 @@
   overflow-wrap: anywhere;
 }
 .reports-workspace .report-customize {
-  border-top: 1px solid var(--janus-color-border);
+  border-top: 1px solid var(--janus-color-border-default);
 }
 .reports-workspace .report-customize > summary {
   padding-block: 16px;
@@ -112,7 +112,7 @@
 }
 .reports-workspace .report-customize-body > h3:not(:first-child) {
   padding-top: 16px;
-  border-top: 1px solid var(--janus-color-border);
+  border-top: 1px solid var(--janus-color-border-default);
 }
 .reports-workspace .report-template > .btn {
   margin-top: auto;

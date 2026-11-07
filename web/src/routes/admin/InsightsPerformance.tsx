@@ -707,7 +707,7 @@ function BenchmarkView({ run }: { run: ClassifierBenchmark }): ReactNode {
       ) : null}
       {background ? (
         <p className="small muted" style={{ margin: 0 }}>
-          Background labelling does not delay requests, but each label still takes classifier time; if it is slower than requests
+          Background labeling does not delay requests, but each label still takes classifier time; if it is slower than requests
           arrive, the queue grows and samples are skipped.
         </p>
       ) : null}

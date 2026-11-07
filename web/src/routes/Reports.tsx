@@ -53,7 +53,7 @@ const runStatus: Record<ReportRun['status'], string> = {
   running: 'Generating',
   complete: 'Ready',
   failed: 'Failed',
-  cancelled: 'Cancelled',
+  cancelled: 'Canceled',
   expired: 'Expired',
 };
 function readableDate(value?: string) {

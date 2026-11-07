@@ -112,7 +112,7 @@ func TestServiceTokenNamesMustBeUnique(t *testing.T) {
 // TestServiceTokenJSONOmitsZeroTimestamps locks the wire contract that cost the
 // user-token type a bug once already: Go's zero time encodes as a truthy
 // string, so clients badge active credentials as revoked. Both optional
-// timestamps must serialise as "".
+// timestamps must serialize as "".
 func TestServiceTokenJSONOmitsZeroTimestamps(t *testing.T) {
 	tok := ServiceToken{ID: "id", Name: "svc"}
 	raw, err := json.Marshal(tok)
@@ -275,7 +275,7 @@ func TestServiceTokenUsageExcludedFromUserReports(t *testing.T) {
 		t.Errorf("top-users tokens_out = %d, want 100 (service-token traffic must be excluded)", humanTotal)
 	}
 
-	// The service-token breakdown shows it, labelled by name.
+	// The service-token breakdown shows it, labeled by name.
 	bySvc, err := s.BreakdownUsage(ctx, UsageScope{}, "service_token")
 	if err != nil {
 		t.Fatalf("service token breakdown: %v", err)

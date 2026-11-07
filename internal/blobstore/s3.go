@@ -3,7 +3,6 @@ package blobstore
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -20,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // DefaultRegion is used when an S3 configuration names none; most
@@ -107,14 +107,16 @@ func NewS3(cfg S3Config) (*S3, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// The shared trust store (system, DoD, JANUS_CA_BUNDLE/JANUS_CA_DIR,
+	// uploads) plus this endpoint's own CA bundle, with revocation
+	// checking when that is on.
+	transport := &truststore.Transport{}
 	if strings.TrimSpace(cfg.CABundle) != "" {
-		pool, err := x509.SystemCertPool()
-		if err != nil || pool == nil {
-			pool = x509.NewCertPool()
+		extra, err := truststore.ParsePEM([]byte(cfg.CABundle))
+		if err != nil {
+			return nil, fmt.Errorf("object storage CA bundle: %w", err)
 		}
-		pool.AppendCertsFromPEM([]byte(cfg.CABundle))
-		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+		transport.Extra = extra
 	}
 	httpClient := &http.Client{Transport: transport, Timeout: 2 * time.Minute}
 	client := s3.New(s3.Options{

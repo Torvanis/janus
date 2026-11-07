@@ -31,8 +31,8 @@ def archive(source, destination, epoch):
 
 
 def main():
-    version = os.environ.get("VERSION", "2026.10.5")
-    date = os.environ.get("BUILD_DATE", "2026-10-30")
+    version = os.environ.get("VERSION", "2026.11.1")
+    date = os.environ.get("BUILD_DATE", "2026-11-07")
     if not re.fullmatch(r"[0-9]{4}\.([1-9]|1[0-2])\.[1-9][0-9]*", version):
         raise SystemExit("Invalid YEAR.MONTH.RELEASE_NUMBER")
     epoch = int(datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc).timestamp())
@@ -44,10 +44,12 @@ def main():
     subprocess.run(["make", "web"], cwd=ROOT, check=True)
     assets = []
     with tempfile.TemporaryDirectory(prefix="janus-release-") as temp:
-        for arch in ("amd64", "arm64"):
-            stage = Path(temp) / f"janus_{version}_linux_{arch}"
+        for edition, prefix in (("default", "janus"), ("fips", "janus-fips")):
+          for arch in ("amd64", "arm64"):
+            stage = Path(temp) / f"{prefix}_{version}_linux_{arch}"
             stage.mkdir()
-            env = dict(os.environ, GOOS="linux", GOARCH=arch, VERSION=version, BUILD_DATE=date, OUTPUT=str(stage / "janus"))
+            env = dict(os.environ, GOOS="linux", GOARCH=arch, VERSION=version, BUILD_DATE=date, OUTPUT=str(stage / "janus"),
+                       EDITION=edition)
             subprocess.run(["bash", "scripts/build.sh"], cwd=ROOT, env=env, check=True)
             for name in LEGAL:
                 shutil.copyfile(ROOT / name, stage / name)
@@ -60,7 +62,7 @@ def main():
                 shutil.copyfile(ROOT / "deploy" / name, stage / "deploy" / name)
             (stage / "scripts").mkdir()
             shutil.copyfile(ROOT / "scripts/init-env.py", stage / "scripts/init-env.py")
-            (stage / "BUILD").write_text(f"version={version}\nbuild_date={date}\nos=linux\narch={arch}\n")
+            (stage / "BUILD").write_text(f"version={version}\nbuild_date={date}\nos=linux\narch={arch}\nedition={edition}\n")
             artifact = out / (stage.name + ".tar.gz")
             archive(stage, artifact, epoch)
             assets.append(artifact)

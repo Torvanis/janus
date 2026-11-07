@@ -1,7 +1,7 @@
 /**
  * Family safety verdict, ranked once so the card, the Overview summary and
  * the tests agree: green Protecting, red Not protecting with the reasons,
- * grey Off.
+ * gray Off.
  */
 import type { FamilyReason, FamilyState } from './types';
 import type { MessageKey } from './i18n';

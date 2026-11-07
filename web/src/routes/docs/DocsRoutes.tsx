@@ -137,7 +137,7 @@ function DocsHome(): ReactNode {
     <article className="docs-article">
       <h1>Janus documentation</h1>
       <p className="secondary">
-        Janus is an authenticated, metered gateway between your people and the AI providers your organisation approves. It speaks
+        Janus is an authenticated, metered gateway between your people and the AI providers your organization approves. It speaks
         the OpenAI API, so any compatible tool works unchanged.
       </p>
 

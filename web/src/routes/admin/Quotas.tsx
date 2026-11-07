@@ -46,7 +46,7 @@ export function AdminQuotasPage(): ReactNode {
   });
 
   const matched = (quotas.data?.quotas ?? []).filter((quota) => !subjectFilter || quota.subject_type === subjectFilter);
-  // Utilisation descending is the default: the quota about to bite someone
+  // Utilization descending is the default: the quota about to bite someone
   // should be the first row, not buried alphabetically.
   const filtered = sortCollection(
     matched,

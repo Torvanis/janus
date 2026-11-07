@@ -57,7 +57,7 @@ describe('deriveSignal', () => {
 
     const signal = deriveSignal(data);
 
-    // Legacy behaviour: sum(tokens_in + tokens_out) / (buckets × 5 min).
+    // Legacy behavior: sum(tokens_in + tokens_out) / (buckets × 5 min).
     expect(signal.tokensPerMinute).toBeCloseTo((1200 + 300 + 450 + 50) / 10);
   });
 

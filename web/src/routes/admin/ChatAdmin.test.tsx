@@ -120,6 +120,24 @@ describe('Administration → Chat', () => {
     expect((mocked.put.mock.calls[0]?.[1] as ChatAdminDoc).tools_off).toEqual(['x_search']);
   });
 
+  it('chat names: own model by default; one model for every chat explains what it sees, and saves', async () => {
+    mockGets({ ...baseDoc, naming: 'same_model' });
+    mocked.put.mockImplementation(async (_p: string, body: unknown) => body as never);
+    const user = userEvent.setup();
+    renderAt('/admin/chat/tools');
+    const mode = (await screen.findByLabelText('Name chats with')) as HTMLSelectElement;
+    expect(mode.value).toBe('same_model');
+    expect(screen.getByText(/nothing goes anywhere/)).toBeTruthy();
+    await user.selectOptions(mode, 'model');
+    expect(screen.getByText(/never replies, files or/)).toBeTruthy();
+    expect(screen.getByText(/Security Gateway had any finding/)).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText('Naming model'), 'qwen-27b');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocked.put).toHaveBeenCalled());
+    const sent = mocked.put.mock.calls[0]?.[1] as ChatAdminDoc;
+    expect([sent.naming, sent.naming_model]).toEqual(['model', 'qwen-27b']);
+  });
+
   it('web search for other models: off by default, key links, key never shown, test first', async () => {
     mockGets({
       ...baseDoc,

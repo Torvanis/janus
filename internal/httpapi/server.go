@@ -23,7 +23,9 @@ import (
 	"github.com/torvanis/janus/internal/config"
 	"github.com/torvanis/janus/internal/crypto"
 	"github.com/torvanis/janus/internal/discovery"
+	"github.com/torvanis/janus/internal/fipsmode"
 	"github.com/torvanis/janus/internal/license"
+	"github.com/torvanis/janus/internal/listenertls"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/telemetry"
@@ -65,7 +67,12 @@ type Server struct {
 	// S3-compatible) shared by chat attachments and troubleshooting
 	// captures. Optional: built lazily from Store, Cipher and Config
 	// (storage.go) when nil.
-	Blobs                 *blobstore.Manager
+	Blobs *blobstore.Manager
+	// ListenerTLS is the certificate Janus serves on its own listener (nil
+	// or mode none when a proxy terminates TLS).
+	ListenerTLS *listenertls.Provider
+	// AuditForwarder is the syslog/SIEM forwarder (nil: not available).
+	AuditForwarder        AuditForwarding
 	blobsOnce             sync.Once
 	troubleshootBlobsOnce sync.Once
 
@@ -108,7 +115,7 @@ type Server struct {
 	// the currently effective timeouts (environment defaults merged with the
 	// administrator's stored overrides) on each request and rebuilds the
 	// client when they differ, so a runtime timeout change applies to the
-	// next request without a restart. upstreamClientMu serialises rebuilds;
+	// next request without a restart. upstreamClientMu serializes rebuilds;
 	// the pointer itself is lock-free on the hot path.
 	upstreamClientMu sync.Mutex
 	upstreamClient   atomic.Pointer[upstreamClientState]
@@ -193,13 +200,21 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/auth/callback/{slug}", s.handleProviderCallback)
 	r.Get("/auth/health", s.handleAuthHealth)
 	r.Post("/auth/logout", s.handleLogout)
+	// Notice and consent banner (before any sign-in) and smart cards.
+	r.Get("/auth/banner", s.handleBanner)
+	r.Post("/auth/banner/ack", s.handleBannerAck)
+	r.Get("/auth/pki", s.handleSmartCardLogin)
 	// Local accounts (email + password, optional TOTP). JSON endpoints; the
 	// SPA sign-in page drives them. See local_auth.go.
 	s.mountLocalAuthRoutes(r)
 
 	// Application API (browser sessions and bearer tokens both work).
 	r.Route("/api/v1", func(api chi.Router) {
+		api.Use(s.auditAccessDenied)
 		api.Use(CSRFGuard)
+		// STIG profile: an administrative change commits only together with
+		// its audit record (audit_failclosed.go). Inert otherwise.
+		api.Use(s.failClosedAudit(func(w http.ResponseWriter, r *http.Request) { WriteError(w, r, ErrAuditWriteFailed()) }))
 		api.Get("/config", s.handlePublicConfig)
 		api.Post("/docs/feedback", s.handleDocsFeedback)
 
@@ -323,10 +338,21 @@ func (s *Server) resolvePrincipal(next http.Handler) http.Handler {
 		}
 
 		if cookie, err := r.Cookie(auth.SessionCookie); err == nil && cookie.Value != "" {
-			if session, err := s.Sessions.Get(ctx, cookie.Value); err == nil {
+			sctx := ctx
+			if r.Header.Get(auth.ActivityHeader) == "background" {
+				// The app polling by itself is not the person being active.
+				sctx = auth.WithBackground(ctx)
+			}
+			session, err := s.Sessions.Get(sctx, cookie.Value)
+			if err == nil {
 				if user, err := s.Store.UserByID(ctx, session.UserID); err == nil {
 					ctx = context.WithValue(ctx, ctxUser, user)
 					ctx = context.WithValue(ctx, ctxSession, session)
+				}
+			} else {
+				s.sessionEnded(r, err)
+				if te := (*auth.TimeoutError)(nil); errors.As(err, &te) {
+					w.Header().Set("X-Janus-Session-Ended", te.Reason)
 				}
 			}
 		}
@@ -546,7 +572,7 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	} else {
 		checks["database"] = map[string]any{"ok": true}
 	}
-	if s.Config.DevAuthEnabled {
+	if s.Config.DevAuth() {
 		checks["identity_provider"] = map[string]any{"ok": true, "detail": "local evaluation sign-in"}
 	} else if s.OIDC == nil {
 		// No IdP is a supported shape since local accounts exist: people
@@ -580,14 +606,15 @@ func (s *Server) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 		"public_url":     s.Config.PublicURL,
 		"version":        s.Config.BuildVersion,
 		"build":          s.Config.BuildSHA,
-		"dev_auth":       s.Config.DevAuthEnabled,
+		"dev_auth":       s.Config.DevAuth(),
+		"edition":        fipsmode.Edition(),
 		"feature_flags":  flags,
 		"provider_label": s.providerLabel(),
 	})
 }
 
 func (s *Server) providerLabel() string {
-	if s.Config.DevAuthEnabled {
+	if s.Config.DevAuth() {
 		return "Local evaluation sign-in"
 	}
 	if s.OIDC != nil {

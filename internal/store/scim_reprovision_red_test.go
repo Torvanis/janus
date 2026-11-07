@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Behaviour-only form of TestSCIMDeleteThenReprovisionRestores (compiles
+// Behavior-only form of TestSCIMDeleteThenReprovisionRestores (compiles
 // against the code before the hold existed): a directory DELETE followed
 // by re-provisioning the same userName returns the same account, active,
 // with its content.

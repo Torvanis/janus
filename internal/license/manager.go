@@ -96,6 +96,34 @@ func (s State) Has(feature string) bool {
 	return false
 }
 
+// TrialURL is where an operator starts a free trial or buys a key.
+const TrialURL = "https://janusedge.com/pricing"
+
+// RequireBusinessEdition reports whether st is a signature-verified key of
+// the business or enterprise edition: what the Janus FIPS edition and the
+// STIG profile need to start. It gates on the key's EDITION, not on its
+// feature list, so Business keys issued before the fips_edition and
+// stig_profile feature names existed still qualify. Status is ignored on
+// purpose: an expired key (even past grace) keeps a running deployment
+// running (RULING: expiry never disrupts work). The error explains what is
+// wrong in a clause that fits after "but".
+func RequireBusinessEdition(st State) error {
+	switch {
+	case !st.Installed:
+		return errors.New("no license key is installed")
+	case st.Status == StatusInvalid || st.Claims == nil:
+		reason := st.Error
+		if reason == "" {
+			reason = "it failed verification"
+		}
+		return fmt.Errorf("the installed key is not valid (%s)", reason)
+	case st.Claims.Edition == EditionBusiness || st.Claims.Edition == EditionEnterprise:
+		return nil
+	default:
+		return fmt.Errorf("the installed key is a %s edition key", st.Claims.Edition)
+	}
+}
+
 // StatusInvalid is a gateway-side status for keys that fail verification.
 // The shared contract only derives valid/expiring/grace/expired from claims.
 const StatusInvalid Status = "invalid"

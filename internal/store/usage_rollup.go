@@ -53,7 +53,7 @@ const (
 	// rollupReconcileSpan is how many hours behind the watermark a
 	// reconcile pass re-checks.
 	rollupReconcileSpan = 3 * time.Hour
-	// rollupLockKey serialises rollup writers across replicas ("janus_ro").
+	// rollupLockKey serializes rollup writers across replicas ("janus_ro").
 	rollupLockKey int64 = 0x6a616e75735f726f
 )
 

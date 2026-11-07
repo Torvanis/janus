@@ -71,7 +71,7 @@ func (s *Store) CountWebSessions(ctx context.Context, userID string, now time.Ti
 
 // PurgeExpiredWebSessions removes sessions past their absolute end.
 func (s *Store) PurgeExpiredWebSessions(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM web_session WHERE absolute_ends <= ?`), FormatTime(now))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM web_session WHERE absolute_ends <= ?`), FormatTime(now))
 	if err != nil {
 		return 0, fmt.Errorf("purge sessions: %w", err)
 	}
@@ -124,10 +124,28 @@ func (s *Store) ConsumeOIDCState(ctx context.Context, state string, now time.Tim
 
 // PurgeExpiredOIDCStates removes abandoned sign-ins.
 func (s *Store) PurgeExpiredOIDCStates(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM oidc_state WHERE expires_at <= ?`), FormatTime(now))
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM oidc_state WHERE expires_at <= ?`), FormatTime(now))
 	if err != nil {
 		return 0, fmt.Errorf("purge oidc states: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+// OldestWebSessions returns a user's live session ids, oldest first.
+func (s *Store) OldestWebSessions(ctx context.Context, userID string, now time.Time) ([]string, error) {
+	rows, err := s.query(ctx, `SELECT id FROM web_session WHERE user_id = ? AND absolute_ends > ? ORDER BY created_at, id`, userID, FormatTime(now))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }

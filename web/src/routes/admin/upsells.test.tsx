@@ -1,7 +1,7 @@
 /**
  * Business-feature upsells in the SPA: with a known-Community session the
  * enabling control is disabled and says why; with Business it works; with
- * no license info yet (loading / older gateway) nothing is greyed out —
+ * no license info yet (loading / older gateway) nothing is grayed out —
  * the API's 402 is the authority.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,7 +97,7 @@ describe('Business upsells', () => {
     expect((within(modes).getByRole('button', { name: 'Block' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('does not grey anything out while the license is unknown', async () => {
+  it('does not gray anything out while the license is unknown', async () => {
     license = undefined;
     renderAt('/admin/security/policies', <SecurityPage />);
     const user = userEvent.setup();
@@ -108,11 +108,12 @@ describe('Business upsells', () => {
     expect((within(modes).getByRole('button', { name: 'Block' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('audit CSV download: disabled with the upsell on Community, a real link on Business', async () => {
+  it('audit CSV download: a real link on every edition, never an upsell', async () => {
     license = community;
     const first = renderAt('/admin/audit', <AuditPage />);
-    await screen.findByText('CSV export is a Business feature.');
-    expect((screen.getByRole('button', { name: 'Download CSV' }) as HTMLButtonElement).disabled).toBe(true);
+    const communityLink = (await screen.findByRole('link', { name: 'Download CSV' })) as HTMLAnchorElement;
+    expect(communityLink.getAttribute('href')).toBe('/api/v1/admin/audit/export');
+    expect(screen.queryByText(/Business feature/)).toBeNull();
     first.unmount();
 
     license = business;

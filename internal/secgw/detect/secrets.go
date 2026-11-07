@@ -515,7 +515,7 @@ func parseTOMLValue(s string) (tomlValue, error) {
 	}
 	f, err := strconv.ParseFloat(strings.ReplaceAll(s, "_", ""), 64)
 	if err != nil {
-		return tomlValue{}, fmt.Errorf("unrecognised value %q", s)
+		return tomlValue{}, fmt.Errorf("unrecognized value %q", s)
 	}
 	return tomlValue{kind: 'n', num: f}, nil
 }

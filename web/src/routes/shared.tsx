@@ -129,7 +129,7 @@ export function SearchInput({
   );
 }
 
-/** Labelled select used for every list filter. */
+/** Labeled select used for every list filter. */
 export function FilterSelect({
   label,
   value,
@@ -186,7 +186,7 @@ export function tokenSizeOptions(anyLabel: string): Array<{ value: string; label
 }
 
 /**
- * Labelled select that narrows a request list to rows whose token count in
+ * Labeled select that narrows a request list to rows whose token count in
  * one direction is greater or smaller than a fixed threshold. Both request
  * pages and the admin user drawer render one per direction so "show me the
  * big prompts" and "show me the long completions" are each a single pick.
@@ -275,7 +275,7 @@ export function useTableSort<T>(
   return { sorted, sort, setSort };
 }
 
-/** Small labelled value used inside detail drawers. */
+/** Small labeled value used inside detail drawers. */
 export function DetailRow({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
     <div className="row-between" style={{ alignItems: 'flex-start', gap: 'var(--janus-space-4)' }}>
@@ -393,7 +393,7 @@ export function RequestDetail({
           {/* Local-only mode (JANUS_LOCAL_ONLY) has no billing relationship,
               so the cost row is hidden here rather than at each call site —
               this component backs both the user Requests drawer and the admin
-              log viewer, and both must honour the mode. */}
+              log viewer, and both must honor the mode. */}
           {localOnly ? null : <DetailRow label={t('tables.cost')}>{formatUSD(event.cost_nanousd)}</DetailRow>}
           <DetailRow label={t('requests.countingMethod')}>
             <AccountingBadge method={event.token_accounting_method} />

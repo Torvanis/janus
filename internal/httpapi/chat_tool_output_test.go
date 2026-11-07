@@ -46,7 +46,7 @@ func TestChildSafetyJudgesToolOutputAsContentShownNotTheChildsWords(t *testing.T
 	f.call = []struct{ name, args string }{{"read_page", `{"url":"https://example.com/chem"}`}}
 	f.reply = "That page could not be used, sorry."
 
-	_, done := toolChat(t, h, sess, map[string]any{"content": "summarise https://example.com/chem for me"})
+	_, done := toolChat(t, h, sess, map[string]any{"content": "summarize https://example.com/chem for me"})
 	if done["status"] != store.ChatStatusComplete || done["content"] != f.reply {
 		t.Fatalf("the child's reply must complete: %v", done)
 	}

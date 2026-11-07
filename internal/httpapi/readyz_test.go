@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/config"
 )
 
 // readyzIdP is a controllable OIDC discovery endpoint for readiness tests:
@@ -187,6 +188,9 @@ func TestReadyzFailsOnSustainedIdPOutageAndRecovers(t *testing.T) {
 
 // TestReadyzDevAuthUnchanged: dev-auth mode never consults an IdP.
 func TestReadyzDevAuthUnchanged(t *testing.T) {
+	if !config.DevAuthCompiled {
+		t.Skip("dev auth is not compiled into the Janus FIPS edition")
+	}
 	h := newHarness(t)
 	rec := h.get("/readyz")
 	if rec.Code != http.StatusOK {

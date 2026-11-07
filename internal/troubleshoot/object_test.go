@@ -25,7 +25,7 @@ func TestCaptureObjectBackend(t *testing.T) {
 	s := newStore(t)
 	// JANUS_LIVE_S3_* runs the same test against a real S3-compatible
 	// server (see internal/blobstore/live_test.go); otherwise a fake.
-	endpoint, bucket, ak, sk := os.Getenv("JANUS_LIVE_S3_ENDPOINT"), "janus-files", "ak", "sk"
+	endpoint, bucket, ak, sk := os.Getenv("JANUS_LIVE_S3_ENDPOINT"), "janus-files", "ak", "fake-s3-secret-access-key-0123456789"
 	var objects func() map[string][]byte
 	if endpoint == "" {
 		fake := blobstoretest.NewFakeS3(t)

@@ -444,7 +444,7 @@ export interface RoutingHealth {
  * One verdict for the Auto-routing overview: green when routers are live and
  * deciding, amber when an admin should look (shadow only, slow or failing
  * classifier, a losing route, a configuration problem), red when live routers
- * cannot decide at all, grey when nothing is set up.
+ * cannot decide at all, gray when nothing is set up.
  */
 export function routingHealth(doc: RoutingDocument, routers: Router[]): RoutingHealth {
   const live = routers.filter((r) => r.status === 'live');
@@ -655,7 +655,7 @@ export const ROUTER_TEMPLATES: RouterTemplate[] = [
   },
 ];
 
-/** Demo prompts for the Try box, one per behaviour worth showing. */
+/** Demo prompts for the Try box, one per behavior worth showing. */
 export const DEMO_PROMPTS: Array<{ label: string; text: string }> = [
   {
     label: 'Contract clause',

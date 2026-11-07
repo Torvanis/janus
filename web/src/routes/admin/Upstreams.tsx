@@ -139,9 +139,14 @@ export function UpstreamsPage(): ReactNode {
           <h1 className="page-title">{t('adminUpstreams.title')}</h1>
           <p className="page-subtitle">{t(localOnly ? 'adminUpstreams.subtitleLocalOnly' : 'adminUpstreams.subtitle')}</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
-          {t('adminUpstreams.add')}
-        </button>
+        <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
+          <Link to="/admin/rules/headers" className="btn">
+            Header policies
+          </Link>
+          <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+            {t('adminUpstreams.add')}
+          </button>
+        </div>
       </header>
 
       <div className="row wrap">
@@ -215,19 +220,7 @@ export function UpstreamsPage(): ReactNode {
                           </td>
                           <td className="mono small muted">{upstream.api_key_mask || t('adminUpstreams.credentialNone')}</td>
                           <td>
-                            {!upstream.enabled ? (
-                              <Badge tone="neutral">{t('tables.disabled')}</Badge>
-                            ) : upstream.last_error ? (
-                              <Badge tone="danger" dot>
-                                {t('adminUpstreams.unreachable')}
-                              </Badge>
-                            ) : upstream.last_check_at ? (
-                              <Badge tone="success" dot>
-                                {upstream.last_latency_ms} ms
-                              </Badge>
-                            ) : (
-                              <Badge tone="neutral">{t('adminUpstreams.notChecked')}</Badge>
-                            )}
+                            <UpstreamHealth upstream={upstream} />
                           </td>
                           <td className="num small">{upstream.model_count}</td>
                           <td>
@@ -257,30 +250,6 @@ export function UpstreamsPage(): ReactNode {
           )}
         </AsyncSection>
       </section>
-
-      {(upstreams.data?.upstreams ?? []).some((upstream) => upstream.last_error) ? (
-        <div className="banner banner-danger">
-          <div>
-            <strong>{t('adminUpstreams.lastCheckErrors')}</strong>
-            <p className="small">All upstreams with discovery problems, independent of the upstream table search.</p>
-            <Collection
-              name="Discovery problems"
-              rows={(upstreams.data?.upstreams ?? []).filter((upstream) => upstream.last_error)}
-              rowKey={(upstream) => upstream.id}
-              columns={[
-                { id: 'name', label: 'Upstream', value: (u) => u.name, render: (u) => u.name },
-                { id: 'error', label: 'Problem', value: (u) => u.last_error, render: (u) => u.last_error },
-                {
-                  id: 'time',
-                  label: 'Last check',
-                  value: (u) => u.last_check_at,
-                  render: (u) => formatRelative(u.last_check_at),
-                },
-              ]}
-            />
-          </div>
-        </div>
-      ) : null}
 
       <UpstreamDrawer
         value={editing}
@@ -342,7 +311,7 @@ function DeleteUpstreamDialog({
   onConfirm: (options: { force: boolean; purgeGrants: boolean }) => void;
   busy: boolean;
 }): ReactNode {
-  // The caller keys this component by upstream id, so the acknowledgements
+  // The caller keys this component by upstream id, so the acknowledgments
   // below start unticked for every upstream — a "force" ticked for one never
   // carries over to the next.
   const [force, setForce] = useState(false);
@@ -490,7 +459,16 @@ function UpstreamDrawer({
   const [baseURL, setBaseURL] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [enabled, setEnabled] = useState(true);
+  const [untrusted, setUntrusted] = useState(false);
   const [touched, setTouched] = useState(false);
+  // Whether this edition/profile offers "Allow untrusted certificate".
+  const trust = useQuery({
+    queryKey: ['admin', 'certificates'],
+    queryFn: () => api.get<{ untrusted_tls_available: boolean }>('/api/v1/admin/certificates'),
+    enabled: Boolean(value),
+    staleTime: 60_000,
+  });
+  const untrustedAvailable = trust.data?.untrusted_tls_available ?? false;
   const [initialised, setInitialised] = useState<string | null>(null);
 
   // Reset the form whenever a different upstream is opened.
@@ -504,6 +482,7 @@ function UpstreamDrawer({
     setBaseURL(existing?.base_url ?? first?.baseURL ?? '');
     setApiKey('');
     setEnabled(existing?.enabled ?? true);
+    setUntrusted(existing?.allow_untrusted_tls ?? false);
     setTouched(false);
   }
 
@@ -529,7 +508,10 @@ function UpstreamDrawer({
     Boolean(value) &&
     (isNew
       ? apiKey !== '' || name !== (preset?.name ?? '') || baseURL !== (preset?.baseURL ?? '')
-      : name !== (existing?.name ?? '') || baseURL !== (existing?.base_url ?? '') || apiKey !== '');
+      : name !== (existing?.name ?? '') ||
+        baseURL !== (existing?.base_url ?? '') ||
+        apiKey !== '' ||
+        untrusted !== (existing?.allow_untrusted_tls ?? false));
   useUnsavedGuard(dirty);
 
   const nameError = touched && !name.trim() ? t('adminUpstreams.nameError') : undefined;
@@ -544,12 +526,14 @@ function UpstreamDrawer({
             adapter_type: adapterType,
             base_url: baseURL.trim(),
             api_key: apiKey,
+            ...(untrusted ? { allow_untrusted_tls: true } : {}),
           })
         : api.put(`/api/v1/admin/upstreams/${existing?.id}`, {
             name: name.trim(),
             base_url: baseURL.trim(),
             api_key: apiKey,
             enabled,
+            ...(untrustedAvailable || existing?.allow_untrusted_tls ? { allow_untrusted_tls: untrusted } : {}),
           }),
     onSuccess: () => {
       toast(isNew ? t('adminUpstreams.createdToast') : t('adminUpstreams.updatedToast'));
@@ -662,6 +646,18 @@ function UpstreamDrawer({
         </label>
       ) : null}
 
+      {(untrustedAvailable || existing?.allow_untrusted_tls) && baseURL.trim().startsWith('https://') ? (
+        <div className="stack" style={{ gap: 'var(--janus-space-1)' }}>
+          <label className="switch">
+            <input type="checkbox" checked={untrusted} onChange={(event) => setUntrusted(event.target.checked)} />
+            <span>{t('adminUpstreams.untrustedSwitch')}</span>
+          </label>
+          <span className="small muted">
+            {untrustedAvailable ? t('adminUpstreams.untrustedHint') : t('adminUpstreams.untrustedRefused')}
+          </span>
+        </div>
+      ) : null}
+
       <div className="row" style={{ marginTop: 'var(--janus-space-4)' }}>
         <button
           type="button"
@@ -738,4 +734,52 @@ function UpstreamDrawer({
       ) : null}
     </Drawer>
   );
+}
+
+/**
+ * Health cell: the state, and for a failing upstream the reason and when it
+ * was last checked, right in its row. A disabled upstream is not checked, so
+ * its old error is history, not a problem; it shows as a muted note only.
+ */
+function UpstreamHealth({ upstream }: { upstream: Upstream }): ReactNode {
+  if (!upstream.enabled) {
+    return (
+      <div className="upstream-health">
+        <Badge tone="neutral">{t('tables.disabled')}</Badge>
+        {upstream.last_error ? (
+          <span className="small muted upstream-health-reason" title={upstream.last_error}>
+            Last error: {upstream.last_error}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  if (upstream.last_error) {
+    return (
+      <div className="upstream-health">
+        <Badge tone="danger" dot>
+          {t('adminUpstreams.unreachable')}
+        </Badge>
+        <span className="small upstream-health-reason upstream-health-error" title={upstream.last_error}>
+          {upstream.last_error}
+        </span>
+        <span className="small muted">checked {formatRelative(notAfterNow(upstream.last_check_at))}</span>
+      </div>
+    );
+  }
+  if (upstream.last_check_at) {
+    return (
+      <Badge tone="success" dot>
+        {upstream.last_latency_ms} ms
+      </Badge>
+    );
+  }
+  return <Badge tone="neutral">{t('adminUpstreams.notChecked')}</Badge>;
+}
+
+/** A check time a few seconds ahead of this computer's clock reads as now, not "in 32 seconds". */
+function notAfterNow(value: string | undefined): string | undefined {
+  if (!value) return value;
+  const at = new Date(value).getTime();
+  return Number.isFinite(at) && at > Date.now() ? new Date().toISOString() : value;
 }

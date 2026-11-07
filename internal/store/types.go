@@ -124,7 +124,7 @@ func (t *Token) Revoked() bool { return !t.RevokedAt.IsZero() }
 // time.Time's default encoding renders the zero value as
 // "0001-01-01T00:00:00Z" — a non-empty (truthy) string that API consumers
 // misread as a real revocation timestamp, badging active tokens as revoked.
-// Serialising the zero value as "" mirrors the schema intent
+// Serializing the zero value as "" mirrors the schema intent
 // (revoked_at TEXT NOT NULL DEFAULT ”: empty until revoked) so clients can
 // treat the field as falsy for active tokens and as an RFC 3339 timestamp
 // for revoked ones.
@@ -155,6 +155,9 @@ type Upstream struct {
 	LastLatencyMs int       `json:"last_latency_ms"`
 	ModelCount    int       `json:"model_count"`
 	CreatedAt     time.Time `json:"created_at"`
+	// AllowUntrustedTLS skips TLS certificate verification for this
+	// upstream's host. Refused by the FIPS edition and the STIG profile.
+	AllowUntrustedTLS bool `json:"allow_untrusted_tls"`
 
 	encryptedKey string
 }
@@ -390,7 +393,7 @@ var ErrNegativeRate = errors.New("rates must be zero or positive")
 // GranteeAllUsers covers every authenticated *human* principal and
 // deliberately does NOT reach service tokens: granting "everyone" a model
 // must never silently hand that model to every unattended integration in the
-// organisation. Service tokens are reached only by the two explicit grantee
+// organization. Service tokens are reached only by the two explicit grantee
 // types below.
 const (
 	GranteeUser     = "user"
@@ -445,7 +448,7 @@ const ServiceTokenPrefix = "janus_svc_"
 //
 // Service tokens reach the OpenAI-compatible proxy surface (/v1/*) and nothing
 // else: an unattended credential embedded in a website or agent must not be
-// able to read dashboards or enumerate the organisation.
+// able to read dashboards or enumerate the organization.
 type ServiceToken struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -558,7 +561,7 @@ const (
 	FallbackTriggerPoolExhausted = "pool_exhausted"
 )
 
-// AllFallbackTriggers is every recognised trigger, in display order.
+// AllFallbackTriggers is every recognized trigger, in display order.
 var AllFallbackTriggers = []string{
 	FallbackTriggerTargetUnavailable,
 	FallbackTriggerUpstreamUnreachable,
@@ -791,7 +794,7 @@ type UsageEvent struct {
 	// plugin, or app — when it identifies itself via an attribution header.
 	// User-Agent only ever reveals the SDK, so this is the only way to tell
 	// two different agents apart. Caller-supplied and untrusted: a reporting
-	// label, never an authorisation input.
+	// label, never an authorization input.
 	ClientApp      string `json:"client_app"`
 	ErrorCode      string `json:"error_code"`
 	QuotaViolated  bool   `json:"quota_violated"`
@@ -854,7 +857,7 @@ type UsageEvent struct {
 	// to classification_result, and joined onto the request log by
 	// request_id.
 	Classification string `json:"classification,omitempty"`
-	// SecgwAction summarises what the Security Gateway did to this
+	// SecgwAction summarizes what the Security Gateway did to this
 	// request ('' = no policy applied / nothing matched; observed,
 	// redacted, blocked, stream_cut). SecgwViolations counts the matched
 	// checks. Both exist so the request log can show the outcome without a
@@ -876,7 +879,7 @@ type UsageEvent struct {
 	// by troubleshooting mode, so the admin request log can offer a
 	// download. Resolved at read time by the API layer; never persisted.
 	HasCapture bool `json:"has_capture,omitempty"`
-	// ClassificationTag is how Usage insights labelled the request (admin
+	// ClassificationTag is how Usage insights labeled the request (admin
 	// log only; attached on read, not stored on the event).
 	ClassificationTag *ClassificationTag `json:"classification_tag,omitempty"`
 	// AfterInsert, when set, runs on the goroutine that inserted the row,
@@ -884,10 +887,18 @@ type UsageEvent struct {
 	// dependent rows (Security Gateway violations) without a second
 	// goroutine reading the event concurrently. Never persisted.
 	AfterInsert func(ctx context.Context) `json:"-"`
+	// AfterInsertHeaders writes the request's header log. Separate from
+	// AfterInsert because Security Gateway hooks REPLACE AfterInsert (each
+	// carries the cumulative violation list) and must not drop it.
+	AfterInsertHeaders func(ctx context.Context) `json:"-"`
 }
 
-// RunAfterInsert invokes AfterInsert once, if set.
+// RunAfterInsert invokes AfterInsert and AfterInsertHeaders once, if set.
 func (e *UsageEvent) RunAfterInsert(ctx context.Context) {
+	if h := e.AfterInsertHeaders; h != nil {
+		e.AfterInsertHeaders = nil
+		h(ctx)
+	}
 	if e.AfterInsert != nil {
 		f := e.AfterInsert
 		e.AfterInsert = nil
@@ -897,15 +908,20 @@ func (e *UsageEvent) RunAfterInsert(ctx context.Context) {
 
 // AuditEntry records one administrative change. The table is append-only.
 type AuditEntry struct {
-	ID           string    `json:"id"`
-	ActorUserID  string    `json:"actor_user_id"`
-	ActorLabel   string    `json:"actor_label"`
-	Action       string    `json:"action"`
-	ResourceType string    `json:"resource_type"`
-	ResourceID   string    `json:"resource_id"`
-	OldValue     string    `json:"old_value"`
-	NewValue     string    `json:"new_value"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string `json:"id"`
+	ActorUserID  string `json:"actor_user_id"`
+	ActorLabel   string `json:"actor_label"`
+	Action       string `json:"action"`
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+	OldValue     string `json:"old_value"`
+	NewValue     string `json:"new_value"`
+	// SourceIP is the client address (authentication and access events,
+	// and administrative changes made over HTTP).
+	SourceIP string `json:"source_ip,omitempty"`
+	// Outcome is success or failure ("" for older rows: success).
+	Outcome   string    `json:"outcome,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // BlockingRule is a composable policy control. Every signal except the bearer

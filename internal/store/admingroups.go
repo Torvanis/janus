@@ -11,7 +11,7 @@ import (
 // administrator on sign-in.
 //
 // Admin capability composes from three independent sources, OR'd together and
-// deliberately layered so no single removal can lock an organisation out:
+// deliberately layered so no single removal can lock an organization out:
 //
 //  1. The bootstrap email list (JANUS_BOOTSTRAP_ADMIN_EMAILS) — the failsafe
 //     path. It is environment configuration, so it survives any database

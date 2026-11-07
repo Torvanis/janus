@@ -16,8 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/torvanis/janus/internal/revocation"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/telemetry"
+	"github.com/torvanis/janus/internal/truststore"
 )
 
 // Event is one alert-worthy occurrence.
@@ -312,7 +314,7 @@ func sendMailWithDeadline(addr string, cfg SMTPConfig, auth smtp.Auth, to []stri
 	}
 	defer func() { _ = c.Close() }()
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
+		if err := c.StartTLS(revocation.Wrap(&tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12, RootCAs: truststore.Pool()})); err != nil {
 			return err
 		}
 	}

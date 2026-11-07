@@ -28,6 +28,8 @@ export default function AdminRoutes(): ReactNode {
     <Routes>
       <Route index element={<AdminOverview />} />
       <Route path="upstreams" element={<UpstreamsPage />} />
+      {/* Header policies moved to a tab of Policy rules. */}
+      <Route path="header-policies" element={<Navigate to="/admin/rules/headers" replace />} />
       <Route path="upstreams/:id" element={<UpstreamsPage />} />
       <Route path="models" element={<AdminModelsPage />} />
       <Route path="managed-models" element={<ManagedModelsPage />} />
@@ -46,6 +48,7 @@ export default function AdminRoutes(): ReactNode {
       <Route path="users/:id" element={<PeoplePage />} />
       <Route path="quotas" element={<AdminQuotasPage />} />
       <Route path="rules" element={<RulesPage />} />
+      <Route path="rules/:tab" element={<RulesPage />} />
       <Route path="routing" element={<RoutingPage />} />
       <Route path="routing/:tab" element={<RoutingPage />} />
       <Route path="routing/:tab/:id" element={<RoutingPage />} />

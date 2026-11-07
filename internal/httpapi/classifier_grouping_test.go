@@ -164,7 +164,7 @@ func TestDecisionModelSeparateStyleAsksEachQuestionAloneInParallel(t *testing.T)
 	h.decisionGuard(t, f, "nimble", "llama_cpp") // self-hosted: separate by default
 
 	start := time.Now()
-	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarise this meeting", false))
+	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarize this meeting", false))
 	took := time.Since(start)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
@@ -227,7 +227,7 @@ func TestUsageInsightsRidesOnTheGuardCallAndTagsTheRequestLog(t *testing.T) {
 	}
 	none := h.doAsSession(sess, http.MethodGet, "/api/v1/requests?scope=all&classified=-", nil)
 	if !strings.Contains(none.Body.String(), `"total_count":0`) {
-		t.Fatalf("classified=- must exclude the labelled request: %s", none.Body.String())
+		t.Fatalf("classified=- must exclude the labeled request: %s", none.Body.String())
 	}
 }
 

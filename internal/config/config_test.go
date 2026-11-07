@@ -60,6 +60,17 @@ func TestBuildMetadataDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+// setDevAuth turns on the JANUS_DEV_AUTH evaluation sign-in these tests have
+// always booted with. The FIPS edition does not compile dev auth in and
+// refuses the variable (TestDevAuthRefusedInFIPSEdition), so there the
+// tests boot without it: no IdP is a valid shape (local accounts).
+func setDevAuth(t *testing.T) {
+	t.Helper()
+	if DevAuthCompiled {
+		t.Setenv("JANUS_DEV_AUTH", "true")
+	}
+}
+
 // TestConfigDatabaseURLDefaulting locks the embedded-SQLite default
 // (replaces the old "JANUS_DATABASE_URL is required" hard-fail contract):
 // unset means sqlite:///data/janus.db with the defaulted flag set so main can
@@ -68,7 +79,7 @@ func TestBuildMetadataDefaultsAndOverrides(t *testing.T) {
 func TestConfigDatabaseURLDefaulting(t *testing.T) {
 	t.Run("unset defaults to embedded sqlite and flags it", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_DATABASE_URL", "")
 		c, err := Load()
@@ -85,7 +96,7 @@ func TestConfigDatabaseURLDefaulting(t *testing.T) {
 
 	t.Run("whitespace-only counts as unset", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_DATABASE_URL", "   ")
 		c, err := Load()
@@ -99,7 +110,7 @@ func TestConfigDatabaseURLDefaulting(t *testing.T) {
 
 	t.Run("explicit postgres URL is taken verbatim with no warning flag", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		const dsn = "postgresql://janus:s3cret@db.example.test:5432/janus?sslmode=require"
 		t.Setenv("JANUS_DATABASE_URL", dsn)
@@ -117,7 +128,7 @@ func TestConfigDatabaseURLDefaulting(t *testing.T) {
 
 	t.Run("explicit sqlite URL is taken verbatim with no warning flag", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		const dsn = "sqlite:///var/lib/janus/custom.db"
 		t.Setenv("JANUS_DATABASE_URL", dsn)
@@ -139,7 +150,7 @@ func TestConfigDatabaseURLDefaulting(t *testing.T) {
 func TestConfigCacheTTL(t *testing.T) {
 	t.Run("defaults to 5 seconds", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		c, err := Load()
 		if err != nil {
@@ -152,7 +163,7 @@ func TestConfigCacheTTL(t *testing.T) {
 
 	t.Run("configurable", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_CONFIG_CACHE_TTL_SECONDS", "2")
 		c, err := Load()
@@ -179,9 +190,12 @@ func TestConfigCacheTTL(t *testing.T) {
 // authentication bypass (regression: Load accepted DevAuthEnabled in any
 // environment; the only defense was a log warning).
 func TestDevAuthGuard(t *testing.T) {
+	if !DevAuthCompiled {
+		t.Skip("dev auth is not compiled into the Janus FIPS edition; see TestDevAuthRefusedInFIPSEdition")
+	}
 	t.Run("loopback evaluation deployment boots", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		if _, err := Load(); err != nil {
 			t.Fatalf("loopback dev-auth quick start must boot, got: %v", err)
@@ -190,7 +204,7 @@ func TestDevAuthGuard(t *testing.T) {
 
 	t.Run("localhost hostname boots", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://localhost:8080")
 		if _, err := Load(); err != nil {
 			t.Fatalf("localhost dev-auth must boot, got: %v", err)
@@ -199,7 +213,7 @@ func TestDevAuthGuard(t *testing.T) {
 
 	t.Run("explicit production environment is refused", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_ENV", "production")
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JANUS_DEV_AUTH") {
@@ -209,7 +223,7 @@ func TestDevAuthGuard(t *testing.T) {
 
 	t.Run("non-loopback public URL is refused", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "https://janus.corp.example.com")
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "not loopback") {
 			t.Fatalf("dev auth on a reachable URL must refuse to start, got: %v", err)
@@ -218,7 +232,7 @@ func TestDevAuthGuard(t *testing.T) {
 
 	t.Run("explicit unsafe override boots", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "https://demo.example.com")
 		t.Setenv("JANUS_ENV", "production")
 		t.Setenv("JANUS_DEV_AUTH_ALLOW_UNSAFE", "true")
@@ -247,7 +261,7 @@ func TestDevAuthGuard(t *testing.T) {
 func TestCABundleLoading(t *testing.T) {
 	t.Run("unset means default verification", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_CA_BUNDLE", "")
 		cfg, err := Load()
 		if err != nil {
@@ -263,7 +277,7 @@ func TestCABundleLoading(t *testing.T) {
 
 	t.Run("unreadable path fails fast naming the variable", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_CA_BUNDLE", filepath.Join(t.TempDir(), "does-not-exist.pem"))
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "JANUS_CA_BUNDLE") {
 			t.Fatalf("an unreadable bundle must fail startup with a JANUS_CA_BUNDLE error, got: %v", err)
@@ -272,7 +286,7 @@ func TestCABundleLoading(t *testing.T) {
 
 	t.Run("file without PEM certificates fails fast", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		path := filepath.Join(t.TempDir(), "garbage.pem")
 		if err := os.WriteFile(path, []byte("not a certificate"), 0o600); err != nil {
 			t.Fatalf("write file: %v", err)
@@ -285,7 +299,7 @@ func TestCABundleLoading(t *testing.T) {
 
 	t.Run("valid bundle produces a trust store and client TLS config", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		path := filepath.Join(t.TempDir(), "ca.pem")
 		if err := os.WriteFile(path, selfSignedCAPEM(t), 0o600); err != nil {
 			t.Fatalf("write bundle: %v", err)
@@ -355,7 +369,7 @@ func TestAdminGroupsParsing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			setBaseline(t)
-			t.Setenv("JANUS_DEV_AUTH", "true")
+			setDevAuth(t)
 			t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 			if tc.set {
 				t.Setenv("JANUS_ADMIN_GROUPS", tc.value)
@@ -386,7 +400,7 @@ func TestAdminGroupsParsing(t *testing.T) {
 // admin emails, never the values themselves.
 func TestRedactedNeverLeaksAdminIdentifiers(t *testing.T) {
 	setBaseline(t)
-	t.Setenv("JANUS_DEV_AUTH", "true")
+	setDevAuth(t)
 	t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 	t.Setenv("JANUS_ADMIN_GROUPS", "LLM-Admins, platform-ops llm-admins")
 	t.Setenv("JANUS_BOOTSTRAP_ADMIN_EMAILS", "root@example.com")
@@ -410,7 +424,7 @@ func TestRedactedNeverLeaksAdminIdentifiers(t *testing.T) {
 
 	t.Run("zero counts when unset", func(t *testing.T) {
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_ADMIN_GROUPS", "")
 		t.Setenv("JANUS_BOOTSTRAP_ADMIN_EMAILS", "")
@@ -457,7 +471,7 @@ func TestLocalOnlyMode(t *testing.T) {
 	load := func(t *testing.T, value string) *Config {
 		t.Helper()
 		setBaseline(t)
-		t.Setenv("JANUS_DEV_AUTH", "true")
+		setDevAuth(t)
 		t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 		t.Setenv("JANUS_LOCAL_ONLY", value)
 		c, err := Load()
@@ -501,4 +515,28 @@ func TestLocalOnlyMode(t *testing.T) {
 			t.Fatalf("Redacted()[local_only] = %v, want true", got)
 		}
 	})
+}
+
+// TestDevAuthRefusedInFIPSEdition: the FIPS edition refuses JANUS_DEV_AUTH at
+// boot, even with the unsafe override, and DevAuth() is a constant false; the
+// default edition reports what was configured.
+func TestDevAuthRefusedInFIPSEdition(t *testing.T) {
+	setBaseline(t)
+	t.Setenv("JANUS_DEV_AUTH", "true")
+	t.Setenv("JANUS_DEV_AUTH_ALLOW_UNSAFE", "true")
+	t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
+	c, err := Load()
+	if DevAuthCompiled {
+		if err != nil || !c.DevAuth() {
+			t.Fatalf("default edition: dev auth on loopback must boot: %v", err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "FIPS edition") {
+		t.Fatalf("FIPS edition accepted JANUS_DEV_AUTH: %v", err)
+	}
+	forced := &Config{DevAuthEnabled: true}
+	if forced.DevAuth() {
+		t.Fatal("DevAuth() true in the FIPS edition")
+	}
 }

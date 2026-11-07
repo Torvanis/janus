@@ -9,6 +9,9 @@ import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../
 import { IconButton, RowActions } from '../../components/IconButton';
 import { PolicyCaveat, SortHeader } from '../shared';
 import { useUrlState } from '../../lib/hooks';
+import { useParams } from 'react-router-dom';
+import { RetainedPanel, RouteTopNav } from '../../components/RouteTopNav';
+import { HeaderPoliciesPanel } from './HeaderPolicies';
 import { t, type MessageKey } from '../../lib/i18n';
 
 interface RulesResponse {
@@ -51,7 +54,8 @@ function sortRules(rules: BlockingRule[], sort: string): BlockingRule[] {
   return sortCollection(rules, accessor, ascending);
 }
 
-export function RulesPage(): ReactNode {
+/** Blocking rules: the first tab of Policy rules. */
+function BlockingRulesPanel(): ReactNode {
   const queryClient = useQueryClient();
   const toast = useToast();
   // Sort lives in the URL so a sorted view is a shareable link.
@@ -76,12 +80,11 @@ export function RulesPage(): ReactNode {
   });
 
   return (
-    <div className="page">
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">{t('adminRules.title')}</h1>
-          <p className="page-subtitle">{t('adminRules.subtitle')}</p>
-        </div>
+    <div className="stack">
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--janus-space-3)' }}>
+        <p className="small muted" style={{ margin: 0, maxWidth: '72ch' }}>
+          {t('adminRules.subtitle')}
+        </p>
         <div className="row">
           <button type="button" className="btn" onClick={() => setTesterOpen(true)}>
             {t('adminRules.testRequest')}
@@ -90,7 +93,7 @@ export function RulesPage(): ReactNode {
             {t('adminRules.newRule')}
           </button>
         </div>
-      </header>
+      </div>
 
       <PolicyCaveat />
 
@@ -448,5 +451,36 @@ function TesterDrawer({ open, onClose }: { open: boolean; onClose: () => void })
         </div>
       ) : null}
     </Drawer>
+  );
+}
+
+const RULE_TABS = [
+  { id: 'blocking', label: 'Blocking rules', to: '/admin/rules' },
+  { id: 'headers', label: 'Header policies', to: '/admin/rules/headers' },
+] as const;
+
+/**
+ * Policy rules: what Janus does to a request before it reaches a provider.
+ * Blocking rules stop it; header policies shape the headers it carries.
+ */
+export function RulesPage(): ReactNode {
+  const { tab } = useParams<{ tab?: string }>();
+  const active = tab === 'headers' ? 'headers' : 'blocking';
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">{t('adminRules.title')}</h1>
+          <p className="page-subtitle">What Janus does to a request before it reaches a provider.</p>
+        </div>
+      </header>
+      <RouteTopNav label={t('adminRules.title')} active={active} items={RULE_TABS} />
+      <RetainedPanel active={active === 'blocking'}>
+        <BlockingRulesPanel />
+      </RetainedPanel>
+      <RetainedPanel active={active === 'headers'}>
+        <HeaderPoliciesPanel />
+      </RetainedPanel>
+    </div>
   );
 }

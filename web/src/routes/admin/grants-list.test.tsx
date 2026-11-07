@@ -141,7 +141,7 @@ describe('GrantsPage — scalable list', () => {
 
     await user.click(within(first).getByRole('button', { name: 'Show model-01 grants' }));
     expect(within(first).getAllByRole('button', { name: 'Revoke' })).toHaveLength(5);
-    // Every grantee kind is labelled for what it is.
+    // Every grantee kind is labeled for what it is.
     expect(within(first).getByText('Service token')).toBeTruthy();
     expect(within(first).getAllByText('All users').length).toBeGreaterThanOrEqual(1);
     expect(within(first).getByText('Group')).toBeTruthy();

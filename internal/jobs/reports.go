@@ -55,7 +55,7 @@ func (w *ReportWorker) RunOnce(ctx context.Context) (bool, error) {
 	defer cancel()
 	// Cancellation is a DB state, not an in-memory signal tied to one replica.
 	// The monitor requests query cancellation; the final CAS also rejects any
-	// cancelled run even when the query finishes before the monitor observes it.
+	// canceled run even when the query finishes before the monitor observes it.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

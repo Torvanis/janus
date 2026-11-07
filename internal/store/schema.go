@@ -529,7 +529,7 @@ var migrations = []migration{
 		// capability, after the bootstrap email list and an explicit
 		// per-user grant. It lives in the database rather than the
 		// environment so a bootstrap admin can manage it from the UI without
-		// a redeploy; JANUS_ADMIN_GROUPS is still honoured and unioned in, so
+		// a redeploy; JANUS_ADMIN_GROUPS is still honored and unioned in, so
 		// an existing deployment keeps working unchanged.
 		name: "0018_admin_group",
 		stmt: []string{
@@ -675,7 +675,7 @@ var migrations = []migration{
 		// never form) served when the primary target is unavailable;
 		// fallback_triggers is a JSON array of the failure modes that count
 		// as "unavailable" (see FallbackTrigger* in types.go). Empty
-		// fallback_model_id means no fallback — today's behaviour.
+		// fallback_model_id means no fallback — today's behavior.
 		name: "0022_managed_model_fallback",
 		stmt: []string{
 			`ALTER TABLE managed_model ADD COLUMN fallback_model_id TEXT NOT NULL DEFAULT ''`,
@@ -862,15 +862,19 @@ var migrations = []migration{
 	classificationContextMigration,
 	usageChatMessageMigration,
 	userDeleteHoldMigration,
+	headerPolicyMigration,
+	trustStoreMigration,
+	securityPolicyMigration,
+	chatNamingMigration,
 }
 
-// migrationAdvisoryLockKey is the pg_advisory_lock key that serialises
+// migrationAdvisoryLockKey is the pg_advisory_lock key that serializes
 // Migrate across replicas. Arbitrary but fixed: any two Janus processes
 // pointed at the same database must agree on it forever.
 const migrationAdvisoryLockKey int64 = 0x6a616e75735f6d69 // "janus_mi"
 
 // Migrate applies every outstanding migration. It is safe to run on every
-// boot and on every replica: on PostgreSQL, application is serialised by a
+// boot and on every replica: on PostgreSQL, application is serialized by a
 // session-scoped advisory lock held for the duration of the run, so replicas
 // booting concurrently (the Helm default is replicaCount 2) apply migrations
 // one at a time and the losers find them already recorded in the ledger.

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -210,7 +211,7 @@ func (s *Server) reportRuns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if v.Status != "failed" && v.Status != "cancelled" && v.Status != "expired" {
-			reportHTTPError(w, 409, "Only failed, cancelled or expired runs can be retried")
+			reportHTTPError(w, 409, "Only failed, canceled or expired runs can be retried")
 			return
 		}
 		s.reportEnqueue(w, r, u, v.ReportID, v.Definition)
@@ -228,10 +229,12 @@ func (s *Server) reportDownload(w http.ResponseWriter, r *http.Request, v store.
 		return
 	}
 	format := r.URL.Query().Get("format")
-	switch format {
-	case "csv", "xlsx", "pdf", "json":
-	default:
-		reportHTTPError(w, 400, "Choose csv, xlsx, pdf or json")
+	if format == "pdf" && !reporting.PDFAvailable {
+		reportHTTPError(w, 400, "PDF export is not available in the Janus FIPS edition; choose xlsx, csv or json")
+		return
+	}
+	if !slices.Contains(reporting.Formats(), format) {
+		reportHTTPError(w, 400, "Choose "+strings.Join(reporting.Formats(), ", "))
 		return
 	}
 	v = s.reportRunView(v)

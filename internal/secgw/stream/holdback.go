@@ -24,7 +24,7 @@ type Match struct {
 	Replacement    string
 	Block          bool // true → cut the stream; false → redact in place
 	Observe        bool // true → report only; the text is neither cut nor rewritten
-	// Tag carries whatever the scanner needs to recognise this match when
+	// Tag carries whatever the scanner needs to recognize this match when
 	// it comes back in FeedResult.Matches (the engine keeps the violation).
 	Tag any
 }

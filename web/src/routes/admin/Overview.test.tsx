@@ -1,5 +1,5 @@
 /**
- * Route-level behavior tests for the admin Overview's Organisation-trend
+ * Route-level behavior tests for the admin Overview's Organization-trend
  * chart, focused on the token-direction picker: it appears only when the
  * Tokens metric is active, defaults to Total (the stacked in/out split whose
  * footer equals the combined totals), In/Out plot only that direction, and
@@ -94,7 +94,7 @@ describe('Most popular teams', () => {
   it.each([undefined, []])('hides the entire card for missing or empty teams (%s)', async (topTeams) => {
     mocked.get.mockResolvedValue({ ...overviewData(), top_teams: topTeams });
     renderOverview();
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
     expect(screen.queryByRole('heading', { name: 'Most popular teams' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Team reports' })).toBeNull();
   });
@@ -121,11 +121,11 @@ describe('Most popular teams', () => {
   });
 });
 
-describe('Organisation trend — token direction picker', () => {
+describe('Organization trend — token direction picker', () => {
   it('is absent for the Spend metric, which stays single-series', async () => {
     const { container } = renderOverview('/admin?metric=cost');
 
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
 
     expect(screen.queryByRole('group', { name: 'Token direction' })).toBeNull();
     expect(screen.queryByRole('list', { name: 'Chart series' })).toBeNull();
@@ -135,7 +135,7 @@ describe('Organisation trend — token direction picker', () => {
   it('is absent for the requests metric', async () => {
     renderOverview('/admin?metric=requests');
 
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
 
     expect(screen.queryByRole('group', { name: 'Token direction' })).toBeNull();
     // Single-series footer reflects request counts: peak 7, total 12.
@@ -146,7 +146,7 @@ describe('Organisation trend — token direction picker', () => {
   it('appears when metric=tokens and defaults to the stacked Total view', async () => {
     const { container } = renderOverview('/admin?metric=tokens');
 
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
 
     const picker = screen.getByRole('group', { name: 'Token direction' });
     const buttons = within(picker).getAllByRole('button');
@@ -168,7 +168,7 @@ describe('Organisation trend — token direction picker', () => {
     const user = userEvent.setup();
     const { container } = renderOverview('/admin?metric=tokens');
 
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
     await user.click(screen.getByRole('button', { name: 'In' }));
 
     // tokens_in = [100, 200] → peak 200, total 300.
@@ -193,7 +193,7 @@ describe('Organisation trend — token direction picker', () => {
   it('restores the direction from the URL on load', async () => {
     const { container } = renderOverview('/admin?metric=tokens&direction=in');
 
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
 
     expect(screen.getByRole('button', { name: 'In' }).getAttribute('aria-pressed')).toBe('true');
     expect(Array.from(container.querySelectorAll('path[data-series]')).map((path) => path.getAttribute('data-series'))).toEqual([
@@ -282,7 +282,7 @@ describe('Model performance charts', () => {
     cleanup();
     mocked.get.mockResolvedValue(overviewData());
     renderOverview();
-    await screen.findByText('Organisation trend');
+    await screen.findByText('Organization trend');
     expect(screen.queryByTestId('model-performance')).toBeNull();
   });
 });

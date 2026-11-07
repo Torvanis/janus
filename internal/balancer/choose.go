@@ -141,7 +141,7 @@ func Choose(cfg Config, members []Member, key string, rr uint64, rnd *rand.Rand)
 		return Pick{}
 	}
 	// Failover: only the best priority tier is eligible; lower tiers are
-	// retry candidates. Other policies also honour priority tiers, balancing
+	// retry candidates. Other policies also honor priority tiers, balancing
 	// within the best tier and failing over tier by tier.
 	tiers := priorityTiers(healthy)
 	best := tiers[0]

@@ -267,7 +267,7 @@ func TestManagedModelFallbackExhausted(t *testing.T) {
 // change, and refuses invalid selections with 400.
 func TestManagedModelFallbackAdminAPI(t *testing.T) {
 	h := newHarness(t)
-	bizLicense(t, h) // enforcing/fallback/capture behaviour is Business
+	bizLicense(t, h) // enforcing/fallback/capture behavior is Business
 	ctx := context.Background()
 	session, err := h.server.Sessions.Create(ctx, h.user.ID)
 	if err != nil {

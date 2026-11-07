@@ -1,9 +1,11 @@
 /**
  * Typed client for the Janus application API.
  *
- * Every failure is normalised into ApiError so views can render the gateway's
+ * Every failure is normalized into ApiError so views can render the gateway's
  * human-readable message and error code instead of a raw status or stack trace.
  */
+
+import { markForegroundRequest, personActive } from './activity';
 
 export interface ApiErrorPayload {
   message: string;
@@ -64,6 +66,12 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     // Double-submit CSRF: the cookie is readable, the header is not forgeable
     // cross-origin. Bearer-token callers do not need this.
     Object.assign(headers, csrfHeaders());
+  }
+  if (method === 'GET' && !personActive()) {
+    // The app refreshing by itself: not activity for the idle sign-out.
+    headers['X-Janus-Activity'] = 'background';
+  } else {
+    markForegroundRequest();
   }
 
   let response: Response;

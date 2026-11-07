@@ -31,8 +31,8 @@ const prompts = [
   {
     id: 'p1',
     name: 'summarise',
-    title: 'Summarise for a reader',
-    body: 'Summarise for {{audience}}:\n\n{{text}}',
+    title: 'Summarize for a reader',
+    body: 'Summarize for {{audience}}:\n\n{{text}}',
     updated_at: '',
   },
   { id: 'p2', name: 'polite', title: 'Make it polite', body: 'Rewrite this politely.', updated_at: '' },
@@ -223,7 +223,7 @@ describe('saved prompts in the composer', () => {
     const dialog = await screen.findByRole('dialog', { name: '/summarise' });
     await user.type(within(dialog).getByLabelText('audience'), 'a ten-year-old');
     await user.click(within(dialog).getByRole('button', { name: 'Insert' }));
-    expect(box.value).toBe('Summarise for a ten-year-old:\n\n{{text}}');
+    expect(box.value).toBe('Summarize for a ten-year-old:\n\n{{text}}');
   });
 
   it('saves a sent message as a prompt', async () => {

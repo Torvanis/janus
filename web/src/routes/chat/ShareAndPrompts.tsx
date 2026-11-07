@@ -442,7 +442,7 @@ export function PromptsDrawer({
               aria-label="Title"
               value={title}
               maxLength={120}
-              placeholder="Summarise for a reader"
+              placeholder="Summarize for a reader"
               onChange={(e) => setTitle(e.target.value)}
             />
           </label>
@@ -453,7 +453,7 @@ export function PromptsDrawer({
               aria-label="Prompt"
               rows={8}
               value={body}
-              placeholder={'Summarise the text below for {{audience}} in five bullet points.\n\n{{text}}'}
+              placeholder={'Summarize the text below for {{audience}} in five bullet points.\n\n{{text}}'}
               onChange={(e) => setBody(e.target.value)}
             />
           </label>

@@ -13,6 +13,7 @@ import (
 	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/subscription"
+	"github.com/torvanis/janus/internal/websearch"
 )
 
 // Janus Chat administration (Admin → Chat) and the per-user gate.
@@ -23,7 +24,7 @@ import (
 // existing Business key carries it without reissuing. An expired or missing
 // Business key never locks people out: a saved restriction simply stops
 // applying (fail open to "everyone"), matching the "expiry never disrupts
-// work" rule — turning Chat OFF for the instance is always honoured.
+// work" rule — turning Chat OFF for the instance is always honored.
 
 // chatSettingsCache keeps one read of the admin settings per few seconds:
 // every chat request consults them.
@@ -219,6 +220,9 @@ func (s *Server) handleChatCatalog(w http.ResponseWriter, r *http.Request) {
 		if assist.ReadPage && !s.chatModelTools(ctx, name)[store.ChatToolWebFetch] {
 			t = append(t, store.ChatToolWebFetch)
 		}
+		if assist.Ask {
+			t = append(t, store.ChatToolAsk)
+		}
 		return t
 	}
 	// Child Safety: models that make what this child's age range may not
@@ -298,6 +302,9 @@ type chatAdminView struct {
 	// SearchKeysSet reports which search services have a stored key (the
 	// keys themselves are never sent). Read-only.
 	SearchKeysSet map[string]bool `json:"search_keys_set"`
+	// WebPagePolicy is what read_page may open (JANUS_WEB_*, startup
+	// only). Read-only.
+	WebPagePolicy map[string]any `json:"web_page_policy"`
 	// SearchKey sets (non-empty) the API key of search.provider on PUT;
 	// SearchKeyClear removes it. Write-only.
 	SearchKey      string `json:"search_key,omitempty"`
@@ -313,7 +320,15 @@ func (s *Server) adminChatView(cfg store.ChatAdminSettings) chatAdminView {
 		}
 	}
 	cfg.Search.Keys = nil
-	return chatAdminView{ChatAdminSettings: cfg, AccessLicensed: s.chatAccessLicensed(), PreviewOn: s.chatEnabled(), SearchKeysSet: set}
+	// An unset naming choice shows what applies (JANUS_CHAT_AUTO_TITLE).
+	if cfg.Naming == "" {
+		cfg.Naming = store.ChatNamingSameModel
+		if !s.chatAutoTitleEnabled() {
+			cfg.Naming = store.ChatNamingOff
+		}
+	}
+	return chatAdminView{ChatAdminSettings: cfg, AccessLicensed: s.chatAccessLicensed(), PreviewOn: s.chatEnabled(), SearchKeysSet: set,
+		WebPagePolicy: websearch.CurrentPagePolicy().Summary()}
 }
 
 func (s *Server) handleAdminChatGet(w http.ResponseWriter, r *http.Request) {

@@ -17,7 +17,7 @@ import (
 	"github.com/torvanis/janus/internal/subscription"
 )
 
-// Provider quirks for catalog upstreams (organisation-paid providers).
+// Provider quirks for catalog upstreams (organization-paid providers).
 //
 // Open WebUI and other OpenAI-shaped clients send one set of settings to
 // every model: a reasoning effort typed by the user ("minimal", "xhigh"), a

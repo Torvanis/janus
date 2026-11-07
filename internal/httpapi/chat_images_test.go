@@ -199,7 +199,7 @@ func TestChatGeneratesImages(t *testing.T) {
 	var found bool
 	for _, m := range last.Messages {
 		c, _ := m["content"].(string)
-		if m["role"] == "assistant" && strings.Contains(c, "generated 1 image(s)") && strings.Contains(c, "A tidy red square") {
+		if m["role"] == "assistant" && strings.Contains(c, "made 1 image:") && strings.Contains(c, "A tidy red square") {
 			found = true
 		}
 		if strings.Contains(c, "data:image") {

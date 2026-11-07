@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/fipsmode"
+	"github.com/torvanis/janus/internal/stigprofile"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -112,6 +114,9 @@ func (b directoryBody) validate() (store.Directory, *APIError) {
 	}
 	if b.GroupsAttr == "" && strings.TrimSpace(b.GroupFilter) != "" && !strings.Contains(b.GroupFilter, "{dn}") {
 		return store.Directory{}, ErrInvalidRequest("group_filter must contain {dn}")
+	}
+	if b.SkipVerify && !stigprofile.Allowed(fipsmode.FeatureLDAPSkipVerify) {
+		return store.Directory{}, ErrInvalidRequest("skip_verify is not available in the Janus FIPS edition or the STIG profile; trust the directory's CA through JANUS_CA_BUNDLE")
 	}
 	enabled := true
 	if b.Enabled != nil {

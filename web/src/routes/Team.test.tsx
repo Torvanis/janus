@@ -181,7 +181,7 @@ describe('usage-first team navigation', () => {
 });
 
 describe('team charts follow the instance-wide emphasis setting', () => {
-  it('shows token values (in + out) when usage is emphasised (spend_emphasis off)', async () => {
+  it('shows token values (in + out) when usage is emphasized (spend_emphasis off)', async () => {
     renderTeamWithFlags({ spend_emphasis: false });
 
     // Model mix: 3,000 in + 1,200 out.

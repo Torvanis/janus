@@ -18,6 +18,7 @@ import (
 )
 
 func TestPDFComparisonWarningsAreProseNotJSON(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.ComparisonWarnings = []string{"Prior interval is incomplete"}
 	text := exportText(t, r, "pdf")
@@ -30,6 +31,7 @@ func TestPDFComparisonWarningsAreProseNotJSON(t *testing.T) {
 }
 
 func TestPDFSmallSectionsFlowWithoutBlankPages(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	for i := 0; i < 6; i++ {
@@ -46,6 +48,7 @@ func TestPDFSmallSectionsFlowWithoutBlankPages(t *testing.T) {
 }
 
 func TestPDFEmbedsNativeUnicodeFonts(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Definition.Name = "Équipe — usage"
 	var b bytes.Buffer
@@ -142,6 +145,7 @@ func pdfVisibleText(t *testing.T, raw []byte) string {
 }
 
 func TestPDFWideRecordCardsPaginateLongField(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Columns, r.Rows, r.Sections = nil, nil, nil
 	row := Row{Dimensions: map[string]string{}}
@@ -217,6 +221,7 @@ print('PyMuPDF verified %d detail pages: all 120 lines exactly once, neighboring
 }
 
 func TestPDFRankingPrefersPairedDisplayLabel(t *testing.T) {
+	requirePDF(t)
 	row := Row{Dimensions: map[string]string{"model": "opaque-id-123", "model_label": "Équipe model"}, Values: map[string]*float64{"requests": ptr(1)}}
 	got := pdfRowLabel([]Column{{"model", "Model", ""}, {"model_label", "Model name", ""}}, row, 0)
 	if got != "Équipe model" {
@@ -224,6 +229,7 @@ func TestPDFRankingPrefersPairedDisplayLabel(t *testing.T) {
 	}
 }
 func TestPDFChartSelectionDoesNotDependOnSectionOrder(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Rows = nil
 	r.Sections = []Section{
@@ -237,6 +243,7 @@ func TestPDFChartSelectionDoesNotDependOnSectionOrder(t *testing.T) {
 }
 
 func TestPDFPartialClockBoundariesKeepInRangeTimeline(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Start = r.Start.Add(10 * time.Hour)
 	r.End = r.End.Add(10 * time.Hour)
@@ -253,6 +260,7 @@ func TestPDFPartialClockBoundariesKeepInRangeTimeline(t *testing.T) {
 }
 
 func TestPDFTimeChartRejectsAmbiguousAxes(t *testing.T) {
+	requirePDF(t)
 	for _, kind := range []string{"nonUTC", "multidimensional"} {
 		t.Run(kind, func(t *testing.T) {
 			r := fixture()
@@ -275,6 +283,7 @@ func TestPDFTimeChartRejectsAmbiguousAxes(t *testing.T) {
 }
 
 func TestPDFWeeklyDateDimension(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	r.Columns = []Column{{"week", "Week", ""}, {"requests", "Requests", "count"}}
@@ -285,6 +294,7 @@ func TestPDFWeeklyDateDimension(t *testing.T) {
 }
 
 func TestPDFCountChartUsesWholeNumberTicks(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	r.Columns = []Column{{"day", "Day", ""}, {"requests", "Requests", "count"}}
@@ -296,6 +306,7 @@ func TestPDFCountChartUsesWholeNumberTicks(t *testing.T) {
 }
 
 func TestPDFFullPeriodCalendarObservations(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	r.Rows = nil
@@ -331,6 +342,7 @@ func TestPDFFullPeriodCalendarObservations(t *testing.T) {
 // production Python dependency. REPORTING_PREVIEW_DIR retains PDF + PNG files.
 // REPORTING_FROZEN_JSON optionally renders a real frozen result for inspection.
 func TestPDFIndependentNativeLayout(t *testing.T) {
+	requirePDF(t)
 	python := os.Getenv("REPORTING_PDF_PYTHON")
 	if python == "" {
 		t.Skip("set REPORTING_PDF_PYTHON for independent reader")
@@ -406,6 +418,7 @@ print('PyMuPDF verified %d pages: Unicode, page counts, vector geometry, no clip
 // Rolling periods start mid-day. The first day's bucket overlaps the period and
 // must be drawn, with the partial boundary disclosed rather than hidden.
 func TestPDFRollingPeriodKeepsFirstDayAndDisclosesPartialBoundary(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	r.Start = r.Start.Add(2 * time.Hour)
@@ -424,6 +437,7 @@ func TestPDFRollingPeriodKeepsFirstDayAndDisclosesPartialBoundary(t *testing.T) 
 }
 
 func TestPDFReaderPresentation(t *testing.T) {
+	requirePDF(t)
 	r := fixture()
 	r.Sections = nil
 	r.Columns = []Column{{"model", "model", ""}, {"model_label", "model name (current)", ""}, {"requests", "Requests", "count"}, {"cost_usd", "Recorded cost (USD)", "USD"}}

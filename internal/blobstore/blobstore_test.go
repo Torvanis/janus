@@ -160,7 +160,7 @@ func TestManagerSettingAndLimit(t *testing.T) {
 func TestManagerEnvWins(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)
-	m := NewManager(s, testCipher(t), EnvConfig{Mode: "S3", S3: S3Config{Endpoint: "http://seaweed:8333", Bucket: "janus", AccessKeyID: "a", SecretAccessKey: "b", PathStyle: true}}, 0)
+	m := NewManager(s, testCipher(t), EnvConfig{Mode: "S3", S3: S3Config{Endpoint: "http://seaweed:8333", Bucket: "janus", AccessKeyID: "a", SecretAccessKey: "fake-s3-secret-access-key", PathStyle: true}}, 0)
 	if !m.EnvManaged() || m.MaxObjectBytes() != DefaultMaxObjectBytes {
 		t.Fatal("env config not applied")
 	}
@@ -171,7 +171,7 @@ func TestManagerEnvWins(t *testing.T) {
 }
 
 func TestS3ConfigValidate(t *testing.T) {
-	good := S3Config{Endpoint: "https://s3.example.com", Bucket: "janus-files", AccessKeyID: "a", SecretAccessKey: "b"}
+	good := S3Config{Endpoint: "https://s3.example.com", Bucket: "janus-files", AccessKeyID: "a", SecretAccessKey: "fake-s3-secret-access-key"}
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestProbeDatabase(t *testing.T) {
 func TestS3BackendAgainstFake(t *testing.T) {
 	ctx := context.Background()
 	fake := blobstoretest.NewFakeS3(t)
-	raw, err := NewS3(S3Config{Endpoint: fake.URL, Bucket: "janus-files", PathStyle: true, Prefix: "/tenant-a/", AccessKeyID: "a", SecretAccessKey: "b"})
+	raw, err := NewS3(S3Config{Endpoint: fake.URL, Bucket: "janus-files", PathStyle: true, Prefix: "/tenant-a/", AccessKeyID: "a", SecretAccessKey: "fake-s3-secret-access-key"})
 	if err != nil {
 		t.Fatal(err)
 	}

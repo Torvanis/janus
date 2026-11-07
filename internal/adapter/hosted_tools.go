@@ -48,7 +48,7 @@ func HostedTools(body []byte) []string {
 	return out
 }
 
-// genericHostedType normalises a tool type to its generic hosted name
+// genericHostedType normalizes a tool type to its generic hosted name
 // (code_interpreter is the OpenAI/xAI name for code_execution).
 func genericHostedType(t string) string {
 	if t == "code_interpreter" {

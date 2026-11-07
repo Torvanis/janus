@@ -25,7 +25,7 @@ import (
 // The model's own chat template injects the hazard taxonomy; the gateway
 // sends the conversation and nothing else. Unlike an encoder classifier
 // this is judged per CONVERSATION TURN, not per text chunk: the last
-// message is the one under judgement and the earlier ones are its context
+// message is the one under judgment and the earlier ones are its context
 // (Llama Guard moderates an assistant reply differently when it can see
 // the user prompt it answers). Chunking therefore does not apply.
 //
@@ -45,7 +45,7 @@ type Turn struct {
 }
 
 // ConversationGuard judges a conversation whose LAST turn is the one under
-// judgement. Verdict.Categories is empty when the turn is safe.
+// judgment. Verdict.Categories is empty when the turn is safe.
 //
 // It is a second, narrower interface rather than a widening of Classifier
 // because the two backends genuinely take different inputs (a bag of

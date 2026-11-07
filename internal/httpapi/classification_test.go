@@ -153,7 +153,7 @@ func TestAsyncClassificationAddsNoLatencyAndStoresLabelsOnly(t *testing.T) {
 	}
 	seen := f.seen()
 	// The default is the latest message with the earlier conversation as
-	// context (a follow-up is labelled by what the conversation is about),
+	// context (a follow-up is labeled by what the conversation is about),
 	// still without the system prompt.
 	want := "Earlier in this conversation (context only):\nUser: earlier turn\nAssistant: ok\n\nThe latest message, which is the request to judge:\nUser: why does the borrow checker reject this"
 	if len(seen) != 1 || seen[0] != want {
@@ -188,7 +188,7 @@ func TestInlineClassificationLabelsTheResponseWithinBudget(t *testing.T) {
 		t.Fatalf("result = %+v", rows[0])
 	}
 
-	// A classifier slower than the budget: the request proceeds unlabelled
+	// A classifier slower than the budget: the request proceeds unlabeled
 	// after the timeout, and the miss is recorded.
 	f.mu.Lock()
 	f.delay = 2 * time.Second

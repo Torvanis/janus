@@ -95,7 +95,7 @@ func TestServiceTokenCanProxyAndIsMeteredSeparately(t *testing.T) {
 
 // TestServiceTokenIsProxyOnly locks the scope decision: an unattended
 // credential embedded in a website must not be able to read dashboards or
-// enumerate the organisation.
+// enumerate the organization.
 func TestServiceTokenIsProxyOnly(t *testing.T) {
 	h := newHarness(t)
 	_, plaintext := h.newServiceToken(t, "scoped-bot", true)
@@ -476,7 +476,7 @@ func TestManagedModelBrokenTargetGivesConfigError(t *testing.T) {
 }
 
 // TestDisablingModelWithDependentAliasIsRefused covers the blast-radius guard:
-// an admin cannot silently break "current-best" for the whole organisation.
+// an admin cannot silently break "current-best" for the whole organization.
 func TestDisablingModelWithDependentAliasIsRefused(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

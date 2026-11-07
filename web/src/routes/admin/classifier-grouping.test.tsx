@@ -1,7 +1,7 @@
 /**
  * Classifier grouping in the admin UI: the request log shows how each
  * request was classified (column, filter, drawer with the classifier wait
- * and background labelling), troubleshooting captures list the classifier
+ * and background labeling), troubleshooting captures list the classifier
  * calls, the Performance tab starts a benchmark and reads its result, and
  * the call profile saves an override.
  */
@@ -173,7 +173,7 @@ describe('request log — classification', () => {
     });
   });
 
-  it('explains inline vs background labelling and the wait in the drawer, with captured classifier calls', async () => {
+  it('explains inline vs background labeling and the wait in the drawer, with captured classifier calls', async () => {
     mockRequestsApi();
     const user = userEvent.setup();
     renderRequests();
@@ -190,7 +190,7 @@ describe('request log — classification', () => {
     expect(within(drawer).getByText('context deadline exceeded')).toBeTruthy();
   });
 
-  it('shows background labelling as not delaying the request', async () => {
+  it('shows background labeling as not delaying the request', async () => {
     mockRequestsApi();
     const user = userEvent.setup();
     renderRequests();

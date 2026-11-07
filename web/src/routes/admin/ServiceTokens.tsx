@@ -410,7 +410,7 @@ function IssueTokenModal({ open, onClose }: { open: boolean; onClose: () => void
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
             padding: 'var(--janus-space-3)',
-            background: 'var(--janus-surface-2)',
+            background: 'var(--janus-color-bg-surface-raised)',
             borderRadius: 'var(--janus-radius-md)',
           }}
         >

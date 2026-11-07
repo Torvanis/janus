@@ -37,7 +37,7 @@ const (
 var BusinessFeatures = []string{
 	"scim", "ldap", "multi_oidc", "ha", "guardrails_enforce",
 	"reports_scheduled", "captures", "audit_export", "model_fallbacks", "email_alerts",
-	"load_balancing",
+	"load_balancing", "fips_edition", "stig_profile",
 }
 
 var EnterpriseFeatures = append(append([]string{}, BusinessFeatures...),

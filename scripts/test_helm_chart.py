@@ -276,15 +276,15 @@ class ChartTest(unittest.TestCase):
         self.assertTrue(labelled)
         for doc in labelled:
             self.assertEqual(doc["metadata"]["labels"]["app.kubernetes.io/name"], "janus")
-            self.assertEqual(doc["metadata"]["labels"]["helm.sh/chart"], "janus-helm-chart-0.2.2")
+            self.assertEqual(doc["metadata"]["labels"]["helm.sh/chart"], "janus-helm-chart-2026.11.1")
         for work in (d for d in docs if d["kind"] in ["Deployment", "StatefulSet"]):
             self.assertEqual(work["spec"]["selector"]["matchLabels"]["app.kubernetes.io/name"], "janus")
 
     def test_image_digest_and_tag(self):
         image = deployment(self.render())["spec"]["template"]["spec"]["containers"][0]["image"]
         self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:ab2e159beb8a75b49c0b1d241945c830a44b0440f986bbc3e46cb5554aae6e6a")
-        image = deployment(self.render({"image": {"digest": "", "tag": "2026.10.5"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
-        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.10.5")
+        image = deployment(self.render({"image": {"digest": "", "tag": "2026.11.1"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
+        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.11.1")
 
     def test_lint_variants(self):
         for value in [{}, {"database": {"type": "sqlite"}, "postgresql": {"enabled": False}},
@@ -299,7 +299,7 @@ class ChartTest(unittest.TestCase):
             result = subprocess.run([HELM, "package", str(CHART), "--destination", temp],
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            package = Path(temp) / "janus-helm-chart-0.2.2.tgz"
+            package = Path(temp) / "janus-helm-chart-2026.11.1.tgz"
             self.assertTrue(package.exists())
             self.assertEqual(self.render(), self.render(chart=package))
             if ARTIFACTS:

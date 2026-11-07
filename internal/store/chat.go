@@ -133,6 +133,9 @@ type ChatConversation struct {
 	// ImageModel is the model this chat makes images with ("" = the
 	// default: the plan's own image model, else the admin's choice).
 	ImageModel string `json:"image_model"`
+	// TitleNamedAt is when the chat was named (automatically or by a
+	// person); "" = not yet, so automatic naming may still name it.
+	TitleNamedAt string `json:"-"`
 }
 
 // ChatMessage is one message. ContentEnc/ReasoningEnc are Cipher envelopes.
@@ -214,7 +217,7 @@ func (s *Store) ChatToken(ctx context.Context, userID, teamID string) (*Token, e
 }
 
 const chatConversationColumns = `id, user_id, team_id, title, model_name, current_leaf_id, created_at, updated_at,
-	pinned, temporary, instructions_enc, reasoning_effort, tools_off, image_model`
+	pinned, temporary, instructions_enc, reasoning_effort, tools_off, image_model, title_named_at`
 
 func scanChatConversation(scan func(...any) error) (*ChatConversation, error) {
 	var c ChatConversation
@@ -222,7 +225,7 @@ func scanChatConversation(scan func(...any) error) (*ChatConversation, error) {
 	var pinned, temporary int
 	var toolsOff string
 	if err := scan(&c.ID, &c.UserID, &c.TeamID, &c.Title, &c.ModelName, &c.CurrentLeafID, &created, &updated,
-		&pinned, &temporary, &c.InstructionsEnc, &c.ReasoningEffort, &toolsOff, &c.ImageModel); err != nil {
+		&pinned, &temporary, &c.InstructionsEnc, &c.ReasoningEffort, &toolsOff, &c.ImageModel, &c.TitleNamedAt); err != nil {
 		return nil, err
 	}
 	c.ToolsOff = splitToolList(toolsOff)
@@ -239,9 +242,9 @@ func (s *Store) CreateChatConversation(ctx context.Context, c *ChatConversation)
 	now := nowUTC()
 	c.CreatedAt, c.UpdatedAt = now, now
 	return s.exec(ctx, `INSERT INTO chat_conversation (id, user_id, team_id, title, model_name, current_leaf_id, created_at, updated_at, deleted_at,
-		pinned, temporary, instructions_enc, reasoning_effort, tools_off, image_model)
-		VALUES (?,?,?,?,?,?,?,?,'',?,?,?,?,?,?)`, c.ID, c.UserID, c.TeamID, c.Title, c.ModelName, c.CurrentLeafID, FormatTime(now), FormatTime(now),
-		boolInt(c.Pinned), boolInt(c.Temporary), c.InstructionsEnc, c.ReasoningEffort, strings.Join(c.ToolsOff, ","), c.ImageModel)
+		pinned, temporary, instructions_enc, reasoning_effort, tools_off, image_model, title_named_at)
+		VALUES (?,?,?,?,?,?,?,?,'',?,?,?,?,?,?,?)`, c.ID, c.UserID, c.TeamID, c.Title, c.ModelName, c.CurrentLeafID, FormatTime(now), FormatTime(now),
+		boolInt(c.Pinned), boolInt(c.Temporary), c.InstructionsEnc, c.ReasoningEffort, strings.Join(c.ToolsOff, ","), c.ImageModel, c.TitleNamedAt)
 }
 
 // ChatConversation loads one live thread owned by userID.

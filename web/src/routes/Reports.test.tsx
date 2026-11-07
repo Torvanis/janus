@@ -13,6 +13,7 @@ let localOnly = false;
 let role = 'user';
 vi.mock('../app/session', () => ({
   useLocalOnly: () => localOnly,
+  useFIPSEdition: () => false,
   useMe: () => ({
     id: 'me',
     role,

@@ -28,6 +28,9 @@ import (
 func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/overview", s.handleAdminOverview)
 	r.Get("/admin/system/status", s.handleSystemStatus)
+	s.mountTrustStoreRoutes(r)
+	s.mountListenerTLSRoutes(r)
+	s.mountSecurityRoutes(r)
 	r.Get("/admin/system/license", s.handleGetLicense)
 	r.Put("/admin/system/license", s.handlePutLicense)
 	r.Delete("/admin/system/license", s.handleDeleteLicense)
@@ -124,11 +127,15 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Delete("/admin/alerts/{id}", s.handleDeleteAlert)
 
 	r.Get("/admin/audit", s.handleListAudit)
-	r.Get("/admin/audit/export", s.gateFeature("audit_export", s.handleExportAudit))
+	// Never license-gated (owner ruling): whatever the license state —
+	// expired, invalid, over seats or no key — an administrator can always
+	// take the audit trail out. RequireAdmin still applies.
+	r.Get("/admin/audit/export", s.handleExportAudit)
 
 	// Troubleshooting mode: on-demand capture of request/response payloads
 	// for requests matching an admin-defined filter. See troubleshoot.go.
 	s.mountSecgwRoutes(r)
+	s.mountHeaderPolicyRoutes(r)
 	r.Get("/admin/troubleshooting", s.handleGetTroubleshooting)
 	r.Put("/admin/troubleshooting", s.handlePutTroubleshooting)
 	r.Delete("/admin/troubleshooting", s.handleDeleteTroubleshooting)
@@ -152,19 +159,23 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Post("/admin/docs-feedback/{id}/resolve", s.handleResolveFeedback)
 }
 
-// audit records an administrative change. Failure to write the audit trail is
-// logged loudly but never hides the change that was made.
+// audit records an administrative change. By default a failure to write the
+// audit trail is logged loudly but never hides the change that was made. In
+// the STIG profile the request runs in a transaction (failClosedAudit) and a
+// failed audit write rolls the change back and answers 500
+// audit.write_failed.
 func (s *Server) audit(r *http.Request, action, resourceType, resourceID string, oldValue, newValue any) {
 	actor := UserFrom(r.Context())
-	entry := &store.AuditEntry{Action: action, ResourceType: resourceType, ResourceID: resourceID}
+	// Every administrative record carries where the change came from.
+	entry := &store.AuditEntry{Action: action, ResourceType: resourceType, ResourceID: resourceID, SourceIP: s.clientIP(r)}
 	if actor != nil {
 		entry.ActorUserID = actor.ID
 		entry.ActorLabel = actor.Email
 	}
 	entry.OldValue = encodeAuditValue(oldValue)
 	entry.NewValue = encodeAuditValue(newValue)
-	if err := s.Store.AppendAudit(r.Context(), entry); err != nil {
-		s.Logger.ErrorContext(r.Context(), "append audit entry", "error", err.Error(), "action", action)
+	if err := s.appendAudit(r.Context(), entry); err != nil {
+		s.Logger.ErrorContext(r.Context(), "append audit entry", "error", err.Error(), "action", action, "fail_closed", auditStateFrom(r.Context()) != nil)
 	}
 }
 
@@ -475,6 +486,9 @@ type upstreamPayload struct {
 	BaseURL     string `json:"base_url"`
 	APIKey      string `json:"api_key"`
 	Enabled     *bool  `json:"enabled"`
+	// AllowUntrustedTLS skips certificate verification for this upstream
+	// (refused by the FIPS edition and the STIG profile).
+	AllowUntrustedTLS *bool `json:"allow_untrusted_tls"`
 }
 
 func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
@@ -495,6 +509,13 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest(err.Error()).WithParam("base_url"))
 		return
 	}
+	if body.AllowUntrustedTLS != nil && *body.AllowUntrustedTLS {
+		// Refuse before creating anything (same rules as on update).
+		if apiErr := untrustedTLSRefusal(body.BaseURL); apiErr != nil {
+			WriteError(w, r, apiErr)
+			return
+		}
+	}
 	encrypted, err := s.Cipher.Encrypt(body.APIKey)
 	if err != nil {
 		WriteError(w, r, err)
@@ -509,16 +530,23 @@ func (s *Server) handleCreateUpstream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest("That upstream could not be created: "+err.Error()))
 		return
 	}
+	if apiErr := s.applyUpstreamUntrustedTLS(r, up, up.BaseURL, body.AllowUntrustedTLS); apiErr != nil {
+		WriteError(w, r, apiErr)
+		return
+	}
 	s.InvalidateConfigCache()
 	s.audit(r, "upstream_created", "upstream", up.ID, nil, map[string]any{"name": up.Name, "adapter_type": up.AdapterType, "base_url": up.BaseURL})
 
-	// Discover immediately so the admin sees models without waiting for the poll.
-	go func(u *store.Upstream) {
-		// Background context: this discovery run outlives the HTTP request.
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		s.Discovery.RunFor(ctx, u)
-	}(up)
+	// Discover immediately so the admin sees models without waiting for the
+	// poll (after the commit in the STIG profile, so discovery sees the row).
+	s.afterCommit(r.Context(), func() {
+		go func(u *store.Upstream) {
+			// Background context: this discovery run outlives the HTTP request.
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			s.Discovery.RunFor(ctx, u)
+		}(up)
+	})
 
 	WriteJSON(w, http.StatusCreated, map[string]any{"upstream": up})
 }
@@ -561,6 +589,13 @@ func (s *Server) handleUpdateUpstream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrInvalidRequest(err.Error()).WithParam("base_url"))
 		return
 	}
+	// Refuse an untrusted-TLS change before writing anything.
+	if body.AllowUntrustedTLS != nil && *body.AllowUntrustedTLS {
+		if apiErr := untrustedTLSRefusal(body.BaseURL); apiErr != nil {
+			WriteError(w, r, apiErr)
+			return
+		}
+	}
 	enabled := existing.Enabled
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -592,6 +627,14 @@ func (s *Server) handleUpdateUpstream(w http.ResponseWriter, r *http.Request) {
 	if err := s.Store.UpdateUpstream(r.Context(), id, body.BaseURL, enabled, encrypted, mask); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	if apiErr := s.applyUpstreamUntrustedTLS(r, existing, body.BaseURL, body.AllowUntrustedTLS); apiErr != nil {
+		WriteError(w, r, apiErr)
+		return
+	}
+	if existing.AllowUntrustedTLS && body.BaseURL != existing.BaseURL {
+		// The unverified host follows the upstream's new address.
+		s.afterCommit(r.Context(), func() { s.reloadTrustStore(context.WithoutCancel(r.Context())) })
 	}
 	s.InvalidateConfigCache()
 	s.audit(r, "upstream_updated", "upstream", id,
@@ -745,6 +788,9 @@ func (s *Server) handleDeleteUpstream(w http.ResponseWriter, r *http.Request) {
 	brokenAliases := make([]string, 0, len(deps.ManagedModels))
 	for _, mm := range deps.ManagedModels {
 		brokenAliases = append(brokenAliases, mm.Name)
+	}
+	if existing.AllowUntrustedTLS {
+		s.afterCommit(r.Context(), func() { s.reloadTrustStore(context.WithoutCancel(r.Context())) })
 	}
 	s.audit(r, "upstream_deleted", "upstream", id, map[string]any{
 		"name":                   existing.Name,
@@ -1178,6 +1224,7 @@ func (s *Server) handleAdminUserDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	cardID, _ := s.Store.PKIIdentity(r.Context(), user.ID)
 	teams, err := s.Store.TeamsForUser(r.Context(), user.ID)
 	if err != nil {
 		WriteError(w, r, err)
@@ -1210,7 +1257,7 @@ func (s *Server) handleAdminUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"user": user, "groups": groups, "teams": teams, "effective_grants": effective,
+		"user": user, "groups": groups, "teams": teams, "effective_grants": effective, "smart_card_identity": cardID,
 		"tokens": tokens, "quotas": quotaPayload, "recent_requests": recent, "audit": auditEntries,
 		"usage_range": label, "usage_series": series, "usage_totals": usageTotals,
 	})
@@ -1685,7 +1732,7 @@ func (s *Server) quotaWindowRetentionError(window string, subjectType ...string)
 		quota.WindowLabel(window), days, s.Config.UsageRetentionDays)).WithParam("window")
 }
 
-// resolveAlertThresholds validates and normalises a submitted threshold list,
+// resolveAlertThresholds validates and normalizes a submitted threshold list,
 // falling back to the existing value when the field was omitted. Values must be
 // whole percentages in 1–100; duplicates collapse; the result is ascending.
 func resolveAlertThresholds(submitted *[]int, existing []int) ([]int, *APIError) {
@@ -1887,7 +1934,7 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" {
-		WriteError(w, r, ErrInvalidRequest("Give the rule a name so it can be recognised in the audit log.").WithParam("name"))
+		WriteError(w, r, ErrInvalidRequest("Give the rule a name so it can be recognized in the audit log.").WithParam("name"))
 		return
 	}
 	if len(body.Clauses) == 0 {
@@ -1949,7 +1996,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" {
-		WriteError(w, r, ErrInvalidRequest("Give the rule a name so it can be recognised in the audit log.").WithParam("name"))
+		WriteError(w, r, ErrInvalidRequest("Give the rule a name so it can be recognized in the audit log.").WithParam("name"))
 		return
 	}
 	if len(body.Clauses) == 0 {
@@ -1998,7 +2045,7 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTestRule evaluates the stored rule set against a sample request so an
-// admin can confirm behaviour before real traffic is affected.
+// admin can confirm behavior before real traffic is affected.
 func (s *Server) handleTestRule(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		UserAgent    string            `json:"user_agent"`
@@ -2226,11 +2273,9 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 			end = t
 		}
 	}
-	entries, total, err := s.Store.ListAudit(r.Context(), store.AuditFilter{
-		Actor: r.URL.Query().Get("actor"), Action: r.URL.Query().Get("action"),
-		ResourceType: r.URL.Query().Get("resource_type"), Start: start, End: end,
-		Limit: queryInt(r, "limit", 50), Offset: queryInt(r, "offset", 0),
-	})
+	f := auditFilterFrom(r, start, end)
+	f.Limit, f.Offset = queryInt(r, "limit", 50), queryInt(r, "offset", 0)
+	entries, total, err := s.Store.ListAudit(r.Context(), f)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -2333,8 +2378,9 @@ func (s *Server) requireEmailChannelLicensed(channels []string) error {
 	return nil
 }
 
-// handleExportAudit streams the filtered audit log as CSV (Business:
-// audit_export). Same filters as the list; no paging — the whole range.
+// handleExportAudit streams the filtered audit log as CSV. Every edition,
+// every license state: it is never gated. Same filters as the list; no
+// paging — the whole range.
 func (s *Server) handleExportAudit(w http.ResponseWriter, r *http.Request) {
 	start, end := time.Time{}, time.Time{}
 	if v := r.URL.Query().Get("start"); v != "" {
@@ -2347,14 +2393,12 @@ func (s *Server) handleExportAudit(w http.ResponseWriter, r *http.Request) {
 			end = t
 		}
 	}
-	filter := store.AuditFilter{
-		Actor: r.URL.Query().Get("actor"), Action: r.URL.Query().Get("action"),
-		ResourceType: r.URL.Query().Get("resource_type"), Start: start, End: end, Limit: 1000,
-	}
+	filter := auditFilterFrom(r, start, end)
+	filter.Limit = 1000
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"janus-audit-"+time.Now().UTC().Format("20060102-150405")+".csv\"")
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"created_at", "actor", "actor_user_id", "action", "resource_type", "resource_id", "old_value", "new_value"})
+	_ = cw.Write([]string{"created_at", "actor", "actor_user_id", "action", "outcome", "source_ip", "resource_type", "resource_id", "old_value", "new_value"})
 	for {
 		entries, _, err := s.Store.ListAudit(r.Context(), filter)
 		if err != nil {
@@ -2362,7 +2406,7 @@ func (s *Server) handleExportAudit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, e := range entries {
-			_ = cw.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), e.ActorLabel, e.ActorUserID, e.Action, e.ResourceType, e.ResourceID, e.OldValue, e.NewValue})
+			_ = cw.Write([]string{e.CreatedAt.UTC().Format(time.RFC3339), csvSafe(e.ActorLabel), e.ActorUserID, e.Action, firstNonEmptyStr(e.Outcome, store.AuditSuccess), e.SourceIP, e.ResourceType, csvSafe(e.ResourceID), csvSafe(e.OldValue), csvSafe(e.NewValue)})
 		}
 		if len(entries) < filter.Limit {
 			break
@@ -2371,4 +2415,23 @@ func (s *Server) handleExportAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	cw.Flush()
 	s.audit(r, "audit.export", "audit", "csv", nil, map[string]any{"action": filter.Action, "resource_type": filter.ResourceType})
+}
+
+// auditFilterFrom reads the audit page's filters from the query string.
+func auditFilterFrom(r *http.Request, start, end time.Time) store.AuditFilter {
+	q := r.URL.Query()
+	return store.AuditFilter{
+		Actor: q.Get("actor"), Action: q.Get("action"), ResourceType: q.Get("resource_type"),
+		Category: q.Get("category"), Outcome: q.Get("outcome"), IP: strings.TrimSpace(q.Get("ip")), Query: q.Get("q"),
+		Start: start, End: end, Sort: q.Get("sort"), Asc: q.Get("dir") == "asc",
+	}
+}
+
+// csvSafe keeps a spreadsheet from running a value as a formula (sign-in
+// names and failed logins are attacker-controlled text in the audit log).
+func csvSafe(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
 }

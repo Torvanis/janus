@@ -6,6 +6,7 @@ import type {
   DiscoveryInterval,
   DiscoveryIntervalPatch,
   MeteringHealth,
+  SystemCryptography,
   SystemStatus,
   UpstreamTimeoutValues,
   UpstreamTimeouts,
@@ -272,6 +273,7 @@ export function SystemPage({
                   <DetailRow label={t('adminSystem.adapters')}>{data.adapters.join(', ')}</DetailRow>
                 </div>
               </section>
+              {data.cryptography ? <CryptographyCard crypto={data.cryptography} /> : null}
             </RetainedPanel>
 
             <RetainedPanel active={visible('general')}>
@@ -360,6 +362,93 @@ export function SystemPage({
  * only the sanitized `backend`/`location` fields; a raw DSN never reaches the
  * DOM because the component never touches one.
  */
+/**
+ * Which Janus edition is running and what that means for cryptography. The
+ * FIPS edition names the validated module and its certificate, lists the
+ * features it switches off, and counts accounts that need attention.
+ */
+function CryptographyCard({ crypto }: { crypto: SystemCryptography }): ReactNode {
+  const fips = crypto.edition === 'fips';
+  const legacy = crypto.legacy_credentials;
+  const legacyTotal = legacy ? legacy.bcrypt_passwords + legacy.sha1_totp : 0;
+  return (
+    <section className="card" id="cryptography" aria-labelledby="cryptography-heading">
+      <div className="card-header">
+        <h2 id="cryptography-heading">{t('adminSystem.crypto.title')}</h2>
+      </div>
+      <div className="stack">
+        <DetailRow label={t('adminSystem.crypto.edition')}>
+          {fips ? t('adminSystem.crypto.fipsEdition') : t('adminSystem.crypto.defaultEdition')}
+        </DetailRow>
+        <DetailRow label={t('adminSystem.crypto.module')}>
+          <span className="mono">{crypto.module_version}</span>
+          {crypto.validated_module && crypto.cmvp_certificate
+            ? ` · ${t('adminSystem.crypto.validated', { cert: crypto.cmvp_certificate })}`
+            : ''}
+        </DetailRow>
+        <DetailRow label={t('adminSystem.crypto.mode')}>
+          {crypto.fips140_enforced
+            ? t('adminSystem.crypto.modeOnly')
+            : crypto.fips140_enabled
+              ? t('adminSystem.crypto.modeOn')
+              : t('adminSystem.crypto.modeOff')}
+        </DetailRow>
+        {crypto.tls_revocation ? (
+          <DetailRow label={t('adminSystem.crypto.revocation')}>
+            {crypto.tls_revocation.mode === 'hard'
+              ? t('adminSystem.crypto.revocationHard')
+              : crypto.tls_revocation.mode === 'soft'
+                ? t('adminSystem.crypto.revocationSoft')
+                : t('adminSystem.crypto.revocationOff')}
+            {crypto.tls_revocation.mode !== 'off' ? (
+              <div className="small muted">
+                {t('adminSystem.crypto.revocationCounts', {
+                  count: crypto.tls_revocation.good,
+                  revoked: crypto.tls_revocation.revoked,
+                  failed: crypto.tls_revocation.unavailable,
+                })}
+                {crypto.tls_revocation.last_error
+                  ? ` · ${t('adminSystem.crypto.revocationLastError', { error: crypto.tls_revocation.last_error })}`
+                  : ''}
+              </div>
+            ) : null}
+          </DetailRow>
+        ) : null}
+        {crypto.stig_profile ? (
+          <DetailRow label={t('adminSystem.crypto.stigProfile')}>{t('adminSystem.crypto.stigOn')}</DetailRow>
+        ) : null}
+        {crypto.edition_license ? (
+          <DetailRow label={t('adminSystem.crypto.license')}>
+            {t('adminSystem.crypto.licenseOk', {
+              name: crypto.edition_license.edition,
+              value: crypto.edition_license.status,
+            })}
+          </DetailRow>
+        ) : null}
+        {fips && legacy && legacyTotal > 0 ? (
+          <div className="banner banner-warning" role="alert">
+            <span className="small">
+              {t('adminSystem.crypto.legacy', { passwords: legacy.bcrypt_passwords, totp: legacy.sha1_totp })}
+            </span>
+          </div>
+        ) : null}
+        {crypto.restricted_features.length > 0 ? (
+          <div className="stack" style={{ gap: 'var(--janus-space-2)' }}>
+            <strong className="small">{t('adminSystem.crypto.restricted')}</strong>
+            <ul className="small" style={{ margin: 0, paddingLeft: '1.2em' }}>
+              {crypto.restricted_features.map((r) => (
+                <li key={r.feature}>
+                  {r.description} <span className="muted">{r.alternative}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function DatabaseTile({ database }: { database: SystemStatus['database'] }): ReactNode {
   const sqlite = database.backend === 'sqlite';
   const backendLabel = sqlite ? t('adminSystem.backendSqlite') : t('adminSystem.backendPostgres');

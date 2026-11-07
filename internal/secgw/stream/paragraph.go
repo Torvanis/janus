@@ -47,7 +47,7 @@ type gateChannel struct {
 	cleared int
 }
 
-// Gate defaults: one judgement per paragraph, bounded so a reply with no
+// Gate defaults: one judgment per paragraph, bounded so a reply with no
 // paragraph breaks is still judged (and released) in pieces.
 const (
 	DefaultSoftBytes = 600
@@ -63,7 +63,7 @@ func NewParagraphGate(judge func(channel, prior, chunk string) (bool, any)) *Par
 type GateResult struct {
 	Release [][]byte
 	Cut     bool
-	// Tag is the blocking judgement's tag when Cut.
+	// Tag is the blocking judgment's tag when Cut.
 	Tag any
 }
 

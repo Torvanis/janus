@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/fips140"
 	"encoding/binary"
+	"github.com/torvanis/janus/internal/fipsmode"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -41,14 +43,19 @@ func mustReject(t *testing.T, name string, data []byte) string {
 // PDFFixture builds a one-page PDF with the given text.
 func PDFFixture(t *testing.T, text string) []byte {
 	t.Helper()
-	p := fpdf.New("P", "mm", "A4", "")
-	p.AddPage()
-	p.SetFont("Helvetica", "", 14)
-	p.Cell(40, 10, text)
 	var buf bytes.Buffer
-	if err := p.Output(&buf); err != nil {
-		t.Fatal(err)
-	}
+	// Building the fixture is test scaffolding, not product crypto: fpdf
+	// hashes its font tables with SHA-1, which GODEBUG=fips140=only would
+	// otherwise refuse in the FIPS edition test run.
+	fips140.WithoutEnforcement(func() {
+		p := fpdf.New("P", "mm", "A4", "")
+		p.AddPage()
+		p.SetFont("Helvetica", "", 14)
+		p.Cell(40, 10, text)
+		if err := p.Output(&buf); err != nil {
+			t.Fatal(err)
+		}
+	})
 	return buf.Bytes()
 }
 
@@ -112,7 +119,7 @@ func TestPDFTextExtraction(t *testing.T) {
 func TestPDFRefusals(t *testing.T) {
 	mustReject(t, "fake.pdf", []byte("hello, not a pdf"))
 	mustReject(t, "broken.pdf", []byte("%PDF-1.4\n garbage without xref"))
-	// A cancelled context stops extraction.
+	// A canceled context stops extraction.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	time.Sleep(time.Millisecond)
@@ -243,5 +250,29 @@ func TestImageDecompressionBombRefused(t *testing.T) {
 	binary.BigEndian.PutUint32(b[29:], crc32IEEE(b[12:29]))
 	if msg := mustReject(t, "huge.png", b); !strings.Contains(msg, "too large") {
 		t.Fatalf("refusal = %q", msg)
+	}
+}
+
+// TestEncryptedPDFInFIPSEdition: the FIPS edition refuses an encrypted PDF up
+// front (decryption needs MD5 and RC4) with a message that names the reason;
+// the default edition keeps its existing behavior.
+func TestEncryptedPDFInFIPSEdition(t *testing.T) {
+	var buf bytes.Buffer
+	fips140.WithoutEnforcement(func() {
+		p := fpdf.New("P", "mm", "A4", "")
+		p.SetProtection(fpdf.CnProtectPrint, "user-pass", "owner-pass")
+		p.AddPage()
+		p.SetFont("Helvetica", "", 14)
+		p.Cell(40, 10, "sealed")
+		if err := p.Output(&buf); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !pdfLooksEncrypted(buf.Bytes()) || pdfLooksEncrypted(PDFFixture(t, "open")) {
+		t.Fatal("encryption detection is wrong")
+	}
+	msg := mustReject(t, "sealed.pdf", buf.Bytes())
+	if fipsmode.IsFIPSEdition() != strings.Contains(msg, "FIPS edition") {
+		t.Fatalf("edition=%s refusal=%q", fipsmode.Edition(), msg)
 	}
 }

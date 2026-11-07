@@ -341,7 +341,7 @@ export function ConfirmDialog({
   busy?: boolean;
   /**
    * Blocks the confirm button beyond the typed-name check — for dialogs that
-   * need a further explicit acknowledgement (e.g. a "force" checkbox) before
+   * need a further explicit acknowledgment (e.g. a "force" checkbox) before
    * the destructive action may proceed.
    */
   confirmDisabled?: boolean;

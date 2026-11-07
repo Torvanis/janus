@@ -23,6 +23,7 @@ import {
   titleCase,
 } from '../../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../../components/ui';
+import { RequestHeadersSection } from './RequestHeaders';
 import { ChargedTeam } from '../../components/ChargedTeam';
 import { childSafetyLine, instructionsLine, reasonLabel, splitRouteReason } from '../../lib/routing';
 import { RouteDecisionLine } from './Routing';
@@ -142,7 +143,7 @@ function isServiceEvent(event: UsageEvent): boolean {
  * Instance-wide request log for administrators: every user's proxied calls
  * with filtering, sorting, adjustable columns, CSV export, and a drill-down
  * drawer identifying the owning user. The cross-user scope is enforced
- * server-side (`scope=all` is honoured only for admins).
+ * server-side (`scope=all` is honored only for admins).
  */
 export function AdminRequestsPage(): ReactNode {
   const [range] = useUrlState<RangeKey>('range', 'week');
@@ -603,6 +604,10 @@ export function AdminRequestsPage(): ReactNode {
                   <RequestSecuritySection event={selected} />
                 </section>
                 <section className="card">
+                  <h3 style={{ marginTop: 0 }}>Headers</h3>
+                  <RequestHeadersSection eventId={selected.id} />
+                </section>
+                <section className="card">
                   <h3 style={{ marginTop: 0 }}>Classification</h3>
                   <RequestClassificationSection event={selected} categoryName={categoryName} />
                 </section>
@@ -761,7 +766,7 @@ function featureLabel(feature: string): string {
 }
 
 /**
- * How Usage insights labelled the request, and what classification cost
+ * How Usage insights labeled the request, and what classification cost
  * it: the wait before the request was forwarded (guards and an inline
  * label) versus work done in the background afterwards.
  */
@@ -818,7 +823,7 @@ function RequestClassificationSection({
         )}
       </DetailRow>
       {tag && tag.mode !== 'inline' ? (
-        <DetailRow label="Background labelling">
+        <DetailRow label="Background labeling">
           <span>
             {formatDuration(tag.latency_ms)}
             <span className="small muted">

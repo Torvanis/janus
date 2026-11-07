@@ -21,7 +21,7 @@ import (
 	"github.com/torvanis/janus/internal/usage"
 )
 
-// Prompt classification wiring. A sampled request's text is labelled with a
+// Prompt classification wiring. A sampled request's text is labeled with a
 // category from the admin's taxonomy, either before it is forwarded (inline:
 // the label rides on the response and is available to future routing) or on
 // a background queue (async: zero added latency). Either way a classifier

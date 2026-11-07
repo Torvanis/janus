@@ -94,15 +94,6 @@ func displayColumns(cols []Column, rows []Row) []Column {
 	return out
 }
 
-func isDimension(c Column, rows []Row) bool {
-	for _, row := range rows {
-		if _, ok := row.Dimensions[c.Key]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // factSection is a single aggregate row with no grouping (e.g. cost coverage).
 func factSection(s Section) bool {
 	return len(s.Rows) == 1 && len(s.Rows[0].Dimensions) == 0 && len(s.Rows[0].Values) > 0
@@ -378,16 +369,6 @@ func compactValue(v *float64, unit string) string {
 		return s
 	}
 	return formatValue(v, unit)
-}
-
-// higherIsWorse decides the color of a change; it never alters the value.
-func higherIsWorse(key string) bool {
-	for _, w := range []string{"cost", "error", "denial", "block", "latency", "ttfb", "unpriced", "estimated", "unknown", "_ms"} {
-		if strings.Contains(key, w) {
-			return true
-		}
-	}
-	return false
 }
 
 // changeSummary describes current versus prior for headline cards.

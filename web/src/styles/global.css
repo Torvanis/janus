@@ -255,9 +255,9 @@ pre,
 }
 
 /* --- Model card ----------------------------------------------------------- */
-/* The catalog card is a tile with a health accent: a coloured top rail and,
+/* The catalog card is a tile with a health accent: a colored top rail and,
    when the model is down, a tinted background so the state reads from across
-   the room, not just from the badge. Every colour comes from the semantic
+   the room, not just from the badge. Every color comes from the semantic
    status tokens so it follows the theme and stays legible in both modes. */
 
 .model-card {
@@ -371,7 +371,7 @@ pre,
   margin: calc(-1 * var(--janus-space-2)) 0 var(--janus-space-4);
   padding: var(--janus-space-2) var(--janus-space-3);
   border-left: 3px solid var(--janus-color-info-fg);
-  background: var(--janus-color-bg-accent-subtle);
+  background: var(--janus-color-primary-subtle);
   border-radius: var(--janus-radius-sm);
   color: var(--janus-color-text-muted);
 }
@@ -774,7 +774,7 @@ pre,
   margin: 0;
 }
 .rule-heading {
-  font-size: var(--janus-text-base);
+  font-size: var(--janus-text-md);
   font-weight: 600;
 }
 .rule-intro {
@@ -1390,7 +1390,7 @@ table.data tbody tr[data-selected='true'] {
 
 /* --- Security gateway ----------------------------------------------------- */
 /* Purpose-built pieces for /admin/security. Everything is token-driven so it
-   renders in both themes; nothing here hard-codes a colour. */
+   renders in both themes; nothing here hard-codes a color. */
 
 /* Status hero: one sentence that says whether the gateway is doing anything. */
 .secgw-hero {
@@ -2083,28 +2083,34 @@ table.data tbody tr[data-selected='true'] {
   font-size: var(--janus-text-sm);
 }
 .lookup-option.is-active {
-  background: var(--janus-color-bg-accent-subtle, var(--janus-color-bg-surface-overlay));
+  background: var(--janus-color-primary-subtle, var(--janus-color-bg-surface-overlay));
 }
 .lookup-option-detail {
   font-size: var(--janus-text-xs);
-  color: var(--janus-color-fg-muted);
+  color: var(--janus-color-text-muted);
 }
 .lookup-option-free .lookup-option-label {
   font-style: italic;
-  color: var(--janus-color-fg-muted);
+  color: var(--janus-color-text-muted);
 }
 .lookup-empty {
   padding: 8px 10px;
   font-size: var(--janus-text-sm);
-  color: var(--janus-color-fg-muted);
+  color: var(--janus-color-text-muted);
 }
 
 /* License notice in the shell (expiring/grace/expired/invalid only). */
 .license-banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--janus-space-3);
   margin-bottom: var(--janus-space-4);
+}
+/* The message takes the line; the actions wrap under it on a phone instead
+   of pushing the page wider than the screen. */
+.license-banner > span:first-child {
+  flex: 1 1 16rem;
 }
 .list-plain {
   list-style: none;
@@ -2261,7 +2267,7 @@ table.data .select-inline {
 }
 
 /* In-page vertical topic list (Help). Buttons need their chrome reset:
-   .nav-item was written for links, so on <button> the UA's grey button
+   .nav-item was written for links, so on <button> the UA's gray button
    background and system font leaked through. */
 .topic-list {
   list-style: none;
@@ -3400,4 +3406,23 @@ table.data tbody tr:hover td:has(> .row-actions) {
   .cs-cats tr {
     display: grid;
   }
+}
+
+/* --- Upstream health cell -------------------------------------------------- */
+.upstream-health {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 340px;
+}
+.upstream-health-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.upstream-health-error {
+  color: var(--janus-color-danger-fg, var(--janus-color-text-secondary));
 }

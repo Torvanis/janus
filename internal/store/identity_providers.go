@@ -202,7 +202,7 @@ func (s *Store) UpdateIdentityProvider(ctx context.Context, c *crypto.Cipher, id
 // DeleteIdentityProvider removes a provider. Users who signed in through it
 // keep their accounts (auth_provider_id stays), they just need another way in.
 func (s *Store) DeleteIdentityProvider(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, s.rebind(`DELETE FROM identity_provider WHERE id = ?`), id)
+	res, err := s.runner(ctx).ExecContext(ctx, s.rebind(`DELETE FROM identity_provider WHERE id = ?`), id)
 	if err != nil {
 		return fmt.Errorf("delete identity provider: %w", err)
 	}

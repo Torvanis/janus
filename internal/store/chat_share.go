@@ -103,10 +103,7 @@ func (s *Store) ListChatShares(ctx context.Context, userID, conversationID strin
 // RevokeChatShare ends one of the owner's links. The snapshot is dropped
 // at once (nothing left to read).
 func (s *Store) RevokeChatShare(ctx context.Context, userID, id string) (bool, error) {
-	runner := sqlRunner(s.db)
-	if s.tx != nil {
-		runner = s.tx
-	}
+	runner := s.runner(ctx)
 	res, err := runner.ExecContext(ctx, s.rebind(`UPDATE chat_share SET revoked_at = ?, snapshot_enc = '' WHERE id = ? AND user_id = ? AND revoked_at = ''`),
 		FormatTime(nowUTC()), id, userID)
 	if err != nil {

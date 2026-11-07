@@ -1676,7 +1676,7 @@
   background: var(--janus-color-bg-surface-hover);
 }
 
-/* Code blocks. Shiki tokens carry both theme colours as variables; the
+/* Code blocks. Shiki tokens carry both theme colors as variables; the
    active html[data-theme] picks one. Dark is the app default. */
 .chat-code {
   display: grid;
@@ -2460,8 +2460,8 @@
   gap: 14px;
   align-items: stretch;
   min-width: 0;
-  /* Break out of the 768px reading column: use the thread's width (centred
-     overflow of a centred flex item), up to 1600px. */
+  /* Break out of the 768px reading column: use the thread's width (centered
+     overflow of a centered flex item), up to 1600px. */
   align-self: center;
   width: min(1600px, calc(100cqw - 48px));
 }
@@ -2847,4 +2847,95 @@ button.chat-mode-chip {
 }
 .chat-tray-more {
   justify-self: start;
+}
+
+/* ask_user: the model's question, with choices. */
+.chat-question {
+  display: grid;
+  gap: 14px;
+  margin: 0.75em 0 0.25em;
+  padding: 14px 16px;
+  border: 1px solid var(--janus-color-primary-border);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-primary-subtle);
+}
+.chat-question-item {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.chat-question-text {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 2px;
+}
+.chat-question-hint {
+  font-size: 0.78rem;
+  color: var(--janus-color-text-muted);
+  margin-top: -4px;
+}
+.chat-question-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 8px;
+}
+.chat-question-option {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 9px 12px;
+  min-height: 44px;
+  border-radius: var(--janus-radius-md);
+  border: 1px solid var(--janus-color-border-default);
+  background: var(--janus-color-bg-surface);
+  color: var(--janus-color-text-primary);
+  cursor: pointer;
+}
+.chat-question-option:hover:not(:disabled) {
+  background: var(--janus-color-bg-surface-hover);
+}
+.chat-question-option:focus-visible {
+  outline: 2px solid var(--janus-color-border-focus);
+  outline-offset: 2px;
+}
+.chat-question-option-on {
+  border-color: var(--janus-color-primary-border);
+  background: var(--janus-color-bg-surface-active);
+}
+.chat-question-option:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.chat-question-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.chat-question-rec {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--janus-color-primary-subtle);
+  color: var(--janus-color-primary-on-subtle);
+}
+.chat-question-desc {
+  font-size: 0.8rem;
+  color: var(--janus-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.chat-question-other {
+  max-width: 100%;
+}
+.chat-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }

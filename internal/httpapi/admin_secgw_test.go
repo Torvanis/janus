@@ -31,7 +31,7 @@ func decodeInto(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 
 func TestAdminSecgwPolicyAndBindingLifecycle(t *testing.T) {
 	h := newHarness(t)
-	bizLicense(t, h) // enforcing/fallback/capture behaviour is Business
+	bizLicense(t, h) // enforcing/fallback/capture behavior is Business
 	sess := adminSession(t, h)
 	ctx := context.Background()
 
@@ -238,7 +238,7 @@ func TestAdminSecgwEffectiveTraceAndDryRun(t *testing.T) {
 		t.Fatalf("effective on empty: %d %s", rec.Code, rec.Body.String())
 	}
 	if body := rec.Body.String(); !strings.Contains(body, `"trace":[]`) || !strings.Contains(body, `"checks":[]`) {
-		t.Fatalf("empty effective must serialise lists as [], got %s", body)
+		t.Fatalf("empty effective must serialize lists as [], got %s", body)
 	}
 
 	org := store.SecgwPolicy{Name: "org", Enabled: true, Mandatory: true, Checks: []store.SecgwCheck{{Kind: store.SecgwCheckSecrets, Enabled: true, Mode: store.SecgwModeBlock}}}

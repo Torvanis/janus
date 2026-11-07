@@ -170,7 +170,7 @@ type chatMessage struct {
 // because it is a hint with no Anthropic counterpart and no effect on the
 // answer's meaning (seed, presence/frequency penalties, logprobs,
 // stream_options — usage is always reported), or rejected with an error
-// naming the field when honouring it silently is impossible (n > 1, audio
+// naming the field when honoring it silently is impossible (n > 1, audio
 // input). Nothing is discarded by accident.
 func chatToMessages(body []byte) ([]byte, error) {
 	if len(body) == 0 {
@@ -611,7 +611,7 @@ func toolResultBlock(m chatMessage) (map[string]any, error) {
 	return block, nil
 }
 
-// stopSequences normalises OpenAI's string-or-array stop field.
+// stopSequences normalizes OpenAI's string-or-array stop field.
 func stopSequences(raw json.RawMessage) []string {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil

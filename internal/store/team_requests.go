@@ -143,7 +143,7 @@ func (s *Store) CancelTeamJoinRequest(ctx context.Context, teamID, userID string
 		if err := tx.exec(ctx, `UPDATE team_join_request SET status='cancelled',updated_at=? WHERE id=?`, FormatTime(nowUTC()), reqs[0].ID); err != nil {
 			return err
 		}
-		return tx.TeamActionEvent(ctx, teamID, userID, "team.request.cancelled", "", "Membership request cancelled for "+reqs[0].TeamName)
+		return tx.TeamActionEvent(ctx, teamID, userID, "team.request.cancelled", "", "Membership request canceled for "+reqs[0].TeamName)
 	})
 }
 func (s *Store) DecideTeamJoinRequest(ctx context.Context, teamID, requestID, actorID string, approve bool, reason string) error {

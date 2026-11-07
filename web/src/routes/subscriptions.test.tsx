@@ -170,6 +170,51 @@ describe('SelectedModels', () => {
 });
 
 describe('SubscriptionsPage', () => {
+  it('colors the usage bar by how full it is, and never loses the bar', async () => {
+    mocked.get.mockResolvedValue({
+      available: true,
+      model_prefix: 'my/',
+      providers: [
+        {
+          id: 'copilot',
+          name: 'GitHub Copilot',
+          description: '',
+          enabled: true,
+          auth: 'device',
+          connection: {
+            id: 'c9',
+            provider: 'copilot',
+            account_email: 'octo',
+            account_name: 'octo',
+            models: [],
+            selected_models: [],
+            status: 'active',
+            last_error: '',
+            last_used_at: '',
+            created_at: '',
+            updated_at: '',
+            auto_renews: false,
+            checked_at: new Date().toISOString(),
+            plan_usage: {
+              plan: 'Copilot Pro',
+              windows: [
+                { label: 'Half', used_percent: 50 },
+                { label: 'Eighty', used_percent: 80 },
+                { label: 'Full', used_percent: 100 },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    wrapPage();
+    const fill = async (name: string) =>
+      ((await screen.findByRole('meter', { name })).querySelector('.usage-meter-fill') as HTMLElement).style.background;
+    expect(await fill('Half')).toBe('var(--janus-color-primary-bg)');
+    expect(await fill('Eighty')).toBe('var(--janus-color-warning-solid)');
+    expect(await fill('Full')).toBe('var(--janus-color-danger-solid)');
+  });
+
   it('shows sign-in health, plan usage meters and Janus activity, and connects key providers with a pasted key', async () => {
     const copilot = {
       id: 'copilot',

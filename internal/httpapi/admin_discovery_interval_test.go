@@ -15,7 +15,7 @@ import (
 // TestAdminDiscoveryIntervalEndpoints covers the runtime discovery-interval
 // contract: GET reports the environment default as effective; PATCH overrides
 // it, persists it, surfaces it in the status document, audit-logs the change
-// and makes the discovery scheduler honour it; out-of-range values are
+// and makes the discovery scheduler honor it; out-of-range values are
 // refused; 0 and DELETE revert to the default.
 func TestAdminDiscoveryIntervalEndpoints(t *testing.T) {
 	h := newHarness(t)
@@ -57,7 +57,7 @@ func TestAdminDiscoveryIntervalEndpoints(t *testing.T) {
 		t.Fatal("updated_at must be set once an override is stored")
 	}
 	if got := h.server.Discovery.EffectiveInterval(ctx); got != 2*time.Minute {
-		t.Fatalf("scheduler must honour the override, got %v", got)
+		t.Fatalf("scheduler must honor the override, got %v", got)
 	}
 	stored, err := h.store.DiscoveryIntervalOverride(ctx)
 	if err != nil || stored.Minutes != 2 {

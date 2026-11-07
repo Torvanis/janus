@@ -12,6 +12,7 @@ import (
 	"github.com/torvanis/janus/internal/auth"
 	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/websearch"
 )
 
 func decodeRec(t *testing.T, rec *httptest.ResponseRecorder, v any) {
@@ -253,5 +254,35 @@ func TestChatAdminCurationAndSwitches(t *testing.T) {
 	rec = h.doAsSession(admin, http.MethodPost, "/api/v1/chat/conversations/"+conv+"/messages", map[string]any{"content": "hi", "model": "my/xai/grok-4"})
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "Personal plans") {
 		t.Fatalf("plan model with plans off = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The chat web page policy (JANUS_WEB_*) is shown read-only: a PUT cannot
+// change it.
+func TestAdminChatShowsWebPagePolicyReadOnly(t *testing.T) {
+	h, admin := chatHarness(t)
+	p, err := websearch.ParsePagePolicy(func(k string) string {
+		return map[string]string{"JANUS_WEB_ALLOW_PRIVATE": "true", "JANUS_WEB_ALLOW_DOMAINS": "corp.example", "JANUS_WEB_PROXY": "http://u:secret@proxy.corp:3128"}[k]
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	websearch.SetPagePolicy(p)
+	t.Cleanup(func() { websearch.SetPagePolicy(nil) })
+	rec := h.doAsSession(admin, http.MethodGet, "/api/v1/admin/chat", nil)
+	var doc map[string]any
+	decodeRec(t, rec, &doc)
+	pol, _ := doc["web_page_policy"].(map[string]any)
+	if pol["allow_private"] != true || pol["default"] != false || pol["proxy"] != "http://proxy.corp:3128" || strings.Contains(rec.Body.String(), "secret") {
+		t.Fatalf("web_page_policy = %v", pol)
+	}
+	resp := chatAdminPut(t, h, admin, func(m map[string]any) {
+		m["web_page_policy"] = map[string]any{"allow_private": false}
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put: %d", resp.StatusCode)
+	}
+	if !websearch.CurrentPagePolicy().AllowPrivate {
+		t.Fatal("PUT changed the startup-only policy")
 	}
 }

@@ -406,7 +406,7 @@ func matchModelName(models []*Model, name string) ([]*Model, error) {
 // empty (or whitespace-only) displayName clears the alias so the native name
 // is presented again.
 //
-// The value is normalised and validated by NormalizeRoutableName — the same
+// The value is normalized and validated by NormalizeRoutableName — the same
 // rule managed-model aliases use, because callers address both through the
 // request body's "model" field. Names are lowercased, and spaces are refused:
 // routing matches exactly, so a name with a space could be saved but never
@@ -547,10 +547,7 @@ func (s *Store) MarkStaleModelsReport(ctx context.Context, upstreamID string, se
 			return err
 		}
 		_ = rows.Close()
-		runner := sqlRunner(tx.db)
-		if tx.tx != nil {
-			runner = tx.tx
-		}
+		runner := tx.runner(ctx)
 		res, err := runner.ExecContext(ctx, tx.rebind(`UPDATE model SET status_before_stale = status, status = ?`+where), append([]any{ModelStale}, whereArgs...)...)
 		if err != nil {
 			return err

@@ -9,12 +9,28 @@ import { LookupInput } from '../../components/LookupInput';
 import { userLookup } from '../../lib/lookups';
 import { useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { t } from '../../lib/i18n';
-import { useLicensed } from '../../app/session';
 import { DetailRow, FilterSelect } from '../shared';
 
 const PAGE_SIZE = 50;
 
+const AUTH_ACTIONS = [
+  'sign_in',
+  'sign_in_failed',
+  'sign_out',
+  'session_timeout',
+  'session_ended_cap',
+  'account_locked',
+  'account_unlocked',
+  'banner_acknowledged',
+  'password_expired',
+  'user_password_changed',
+];
+
 const ACTIONS = [
+  ...AUTH_ACTIONS,
+  'access_denied',
+  'security_policy_changed',
+  'user_smart_card_set',
   'user_created',
   'user_updated',
   'user_role_changed',
@@ -41,9 +57,26 @@ const ACTIONS = [
   'feature_flag_changed',
 ];
 
+const CATEGORIES = [
+  { id: '', label: 'Everything' },
+  { id: 'authentication', label: 'Sign-in and sessions' },
+  { id: 'access', label: 'Access denied' },
+  { id: 'administration', label: 'Administrative changes' },
+];
+
+type SortKey = 'created_at' | 'actor' | 'action' | 'outcome' | 'ip';
+
 export function AuditPage(): ReactNode {
   const [action] = useUrlState('action', '');
   const [resource] = useUrlState('resource', '');
+  const [category] = useUrlState('category', '');
+  const [outcome] = useUrlState('outcome', '');
+  const [ip, setIp] = useCollectionState('ip', '');
+  const [q, setQ] = useCollectionState('q', '');
+  const [sort] = useUrlState('sort', 'created_at');
+  const [dir] = useUrlState('dir', 'desc');
+  const [qDraft, setQDraft] = useState(q);
+  const [ipDraft, setIpDraft] = useState(ip);
   const [actor, setActor] = useCollectionState('actor', '');
   const [start, setStart] = useCollectionState('start', '');
   const [end, setEnd] = useCollectionState('end', '');
@@ -53,15 +86,25 @@ export function AuditPage(): ReactNode {
   const batchParams = useUrlStateBatch();
   const setAction = (next: string) => batchParams({ action: next, page: null });
   const setResource = (next: string) => batchParams({ resource: next, page: null });
+  const setCategory = (next: string) => batchParams({ category: next || null, action: null, page: null });
+  const setOutcome = (next: string) => batchParams({ outcome: next || null, page: null });
+  const sortBy = (key: SortKey) =>
+    batchParams({
+      sort: key === 'created_at' ? null : key,
+      dir: sort === key ? (dir === 'asc' ? null : 'asc') : key === 'created_at' ? null : 'asc',
+      page: null,
+    });
+  const filters = { action, actor, start, end, resource_type: resource, category, outcome, ip, q, sort, dir };
   const [selected, setSelected] = useState<AuditEntry | null>(null);
   const offset = Number.parseInt(page, 10) || 0;
 
   const audit = useQuery({
-    queryKey: ['admin', 'audit', action, resource, actor, start, end, offset],
+    queryKey: ['admin', 'audit', filters, offset],
     queryFn: () =>
       api.get<{ entries: AuditEntry[]; total_count: number; note: string }>(
-        `/api/v1/admin/audit${qs({ action, actor, start, end, resource_type: resource, limit: PAGE_SIZE, offset })}`,
+        `/api/v1/admin/audit${qs({ ...filters, limit: PAGE_SIZE, offset })}`,
       ),
+    placeholderData: (prev) => prev,
   });
 
   return (
@@ -71,10 +114,78 @@ export function AuditPage(): ReactNode {
           <h1 className="page-title">{t('adminAudit.title')}</h1>
           <p className="page-subtitle">{t('adminAudit.subtitle')}</p>
         </div>
-        <AuditExportButton action={action} resource={resource} actor={actor} start={start} end={end} />
+        <AuditExportButton filters={filters} />
       </header>
 
+      <div
+        className="chip-row"
+        role="tablist"
+        aria-label="Kind of event"
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--janus-space-2)' }}
+      >
+        {CATEGORIES.map((c) => (
+          <button
+            key={c.id || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={category === c.id}
+            className={`btn btn-sm ${category === c.id ? 'btn-primary' : ''}`}
+            onClick={() => setCategory(c.id)}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
       <div className="row wrap">
+        <form
+          className="row"
+          role="search"
+          style={{ gap: 'var(--janus-space-2)' }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setQ(qDraft.trim());
+            setIp(ipDraft.trim());
+          }}
+        >
+          <label>
+            Search
+            <input
+              className="input"
+              type="search"
+              placeholder="Name, action, resource, detail"
+              aria-label="Search the audit log"
+              value={qDraft}
+              onChange={(e) => setQDraft(e.target.value)}
+              onBlur={() => setQ(qDraft.trim())}
+            />
+          </label>
+          <label>
+            Address
+            <input
+              className="input mono"
+              placeholder="10.0.0.5"
+              aria-label="Source address"
+              value={ipDraft}
+              onChange={(e) => setIpDraft(e.target.value)}
+              onBlur={() => setIp(ipDraft.trim())}
+              style={{ width: '11em' }}
+            />
+          </label>
+          <button type="submit" className="sr-only">
+            Search
+          </button>
+        </form>
+        <FilterSelect
+          label="Outcome"
+          value={outcome}
+          onChange={setOutcome}
+          options={[
+            { value: '', label: 'Any outcome' },
+            { value: 'success', label: 'Succeeded' },
+            { value: 'failure', label: 'Failed' },
+          ]}
+        />
         <LookupInput label="Actor" value={actor ? [actor] : []} onChange={(ids) => setActor(ids.at(-1) ?? '')} {...userLookup} />
         <label>
           From (UTC)
@@ -102,7 +213,12 @@ export function AuditPage(): ReactNode {
           onChange={setAction}
           options={[
             { value: '', label: t('adminAudit.allActions') },
-            ...ACTIONS.map((value) => ({ value, label: titleCase(value) })),
+            ...(category === 'authentication' ? AUTH_ACTIONS : category === 'access' ? ['access_denied'] : ACTIONS).map(
+              (value) => ({
+                value,
+                label: titleCase(value),
+              }),
+            ),
           ]}
         />
         <FilterSelect
@@ -123,6 +239,10 @@ export function AuditPage(): ReactNode {
               'team',
               'token',
               'feature_flag',
+              'session',
+              'security_policy',
+              'sign_in',
+              'audit',
             ].map((value) => ({ value, label: titleCase(value) })),
           ]}
         />
@@ -132,7 +252,7 @@ export function AuditPage(): ReactNode {
         <AsyncSection
           query={audit}
           empty={{
-            when: (data) => data.total_count === 0 && !action && !resource,
+            when: (data) => data.total_count === 0 && !action && !resource && !category && !outcome && !ip && !q,
             title: t('adminAudit.emptyTitle'),
             body: t('adminAudit.emptyBody'),
           }}
@@ -146,9 +266,11 @@ export function AuditPage(): ReactNode {
                   <table className="data">
                     <thead>
                       <tr>
-                        <th scope="col">{t('tables.time')}</th>
-                        <th scope="col">{t('adminAudit.actor')}</th>
-                        <th scope="col">{t('adminAudit.action')}</th>
+                        <SortHeader label={t('tables.time')} k="created_at" sort={sort} dir={dir} onSort={sortBy} />
+                        <SortHeader label={t('adminAudit.actor')} k="actor" sort={sort} dir={dir} onSort={sortBy} />
+                        <SortHeader label={t('adminAudit.action')} k="action" sort={sort} dir={dir} onSort={sortBy} />
+                        <SortHeader label="Outcome" k="outcome" sort={sort} dir={dir} onSort={sortBy} />
+                        <SortHeader label="Address" k="ip" sort={sort} dir={dir} onSort={sortBy} />
                         <th scope="col">{t('adminAudit.resource')}</th>
                         <th scope="col">
                           <span className="sr-only">{t('adminAudit.detail')}</span>
@@ -173,6 +295,14 @@ export function AuditPage(): ReactNode {
                               {titleCase(entry.action)}
                             </Badge>
                           </td>
+                          <td>
+                            {entry.outcome === 'failure' ? (
+                              <Badge tone="danger">Failed</Badge>
+                            ) : (
+                              <span className="small muted">OK</span>
+                            )}
+                          </td>
+                          <td className="small mono muted">{entry.source_ip || '—'}</td>
                           <td className="small muted">{titleCase(entry.resource_type)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <span className="small muted">{t('adminAudit.viewDiff')}</span>
@@ -201,6 +331,8 @@ export function AuditPage(): ReactNode {
               <DetailRow label={t('tables.time')}>{formatDateTime(selected.created_at)}</DetailRow>
               <DetailRow label={t('adminAudit.actor')}>{selected.actor_label || t('adminAudit.system')}</DetailRow>
               <DetailRow label={t('adminAudit.action')}>{titleCase(selected.action)}</DetailRow>
+              <DetailRow label="Outcome">{selected.outcome === 'failure' ? 'Failed' : 'Succeeded'}</DetailRow>
+              {selected.source_ip ? <DetailRow label="Address">{selected.source_ip}</DetailRow> : null}
               <DetailRow label={t('adminAudit.resource')}>
                 {titleCase(selected.resource_type)}
                 {selected.resource_id ? <span className="mono small muted"> {selected.resource_id}</span> : null}
@@ -241,43 +373,45 @@ function JsonBlock({ value, emptyLabel }: { value: string; emptyLabel: string })
   );
 }
 
-/** Download the filtered log as CSV — Business: audit_export. */
-function AuditExportButton({
-  action,
-  resource,
-  actor,
-  start,
-  end,
-}: {
-  action: string;
-  resource: string;
-  actor: string;
-  start: string;
-  end: string;
-}): ReactNode {
-  const licensed = useLicensed('audit_export');
+/**
+ * Download the filtered log as CSV. Never license-gated: an administrator can
+ * always take the audit trail out, whatever the license state.
+ */
+function AuditExportButton({ filters }: { filters: Record<string, string> }): ReactNode {
   const params = new URLSearchParams();
-  if (action) params.set('action', action);
-  if (actor) params.set('actor', actor);
-  if (start) params.set('start', start);
-  if (end) params.set('end', end);
-  if (resource) params.set('resource_type', resource);
-  const href = `/api/v1/admin/audit/export${params.size ? `?${params}` : ''}`;
-  if (!licensed) {
-    return (
-      <span className="row" style={{ gap: 'var(--janus-space-2)' }} title={t('adminAudit.exportUpsell')}>
-        <button type="button" className="btn btn-sm" disabled aria-describedby="audit-export-upsell">
-          {t('adminAudit.export')}
-        </button>
-        <span id="audit-export-upsell" className="small muted">
-          {t('adminAudit.exportUpsell')}
-        </span>
-      </span>
-    );
+  for (const [k, v] of Object.entries(filters)) {
+    if (v && !(k === 'sort' && v === 'created_at') && !(k === 'dir' && v === 'desc')) params.set(k, v);
   }
+  const href = `/api/v1/admin/audit/export${params.size ? `?${params}` : ''}`;
   return (
     <a className="btn btn-sm" href={href} download>
       {t('adminAudit.export')}
     </a>
+  );
+}
+
+function SortHeader({
+  label,
+  k,
+  sort,
+  dir,
+  onSort,
+}: {
+  label: string;
+  k: SortKey;
+  sort: string;
+  dir: string;
+  onSort: (k: SortKey) => void;
+}): ReactNode {
+  const active = sort === k;
+  return (
+    <th scope="col" aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, font: 'inherit' }} onClick={() => onSort(k)}>
+        {label}
+        <span aria-hidden="true" style={{ marginLeft: 4, opacity: active ? 1 : 0.35 }}>
+          {active && dir === 'asc' ? '▲' : '▼'}
+        </span>
+      </button>
+    </th>
   );
 }

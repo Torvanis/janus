@@ -17,6 +17,61 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    version: '2026.11.1',
+    date: '2026-11-07',
+    categories: [
+      {
+        name: 'Added',
+        items: [
+          'Janus FIPS edition. The same source built with the Go Cryptographic Module v1.0.0 (CMVP certificate #5247) in approved mode, published as ghcr.io/torvanis/janus:<version>-fips next to the default image, plus janus-fips_<version>_linux_<arch>.tar.gz binaries and janus-fips-container-image-<version>-linux-<arch>.tar offline images on the release. A FIPS edition binary refuses to start unless it links that module with FIPS mode on; janus --fips-status prints the edition, the module and the features it restricts (TOTP with SHA-1, LDAP skip-verify, the evaluation sign-in, encrypted PDF attachments, untrusted TLS). The FIPS edition is a Business feature and refuses SQLite.',
+          'STIG profile: JANUS_STIG_PROFILE=true. One switch that puts Janus into its documented configuration for the DISA Application Security and Development STIG (Business): offline (no update check or license sync), 913-day audit retention, HMAC-SHA-256 TOTP, hard revocation checking, the STIG security settings below as a floor, and administrative changes that fail closed when their audit record cannot be written. Unsafe settings (plain HTTP, SQLite, the evaluation sign-in, LDAP skip-verify, untrusted upstream TLS, phoning home, a shorter audit retention) stop startup with a named error. A stig profile line at startup and Administration → Settings show what is in force. It supports your ATO; it is a configuration, not a certification.',
+          'Security settings (Administration → Settings → Security), one page saved together and audited. The defaults keep Janus as it was; Apply DoD STIG values fills in the STIG values to review and save. - Sessions: idle sign-out for people and for administrators in minutes, the longest session, and sessions per person (a new sign-in ends the oldest). The app\'s own refreshes do not count as activity, and a minute before the limit the person is warned and can stay signed in. - Sign-in notice: a customizable notice (or the DoD Notice and Consent Banner) that must be acknowledged before any sign-in method; the server refuses a sign-in without it. - Lockout: after a set number of failures within a window, the sign-in name is locked for a time or until an administrator unlocks it (Locked now). Covers Janus passwords and directory sign-in. - Passwords: minimum length, upper case, lower case, digit and special character, characters changed, remembered passwords, and minimum and maximum age (an expired password is changed at sign-in). Password forms show the rules. - Audit forwarding to syslog or a SIEM: every audit record over UDP, TCP or TLS, as RFC 5424 or CEF, with Send a test event. Records queue and never slow a request, and they always stay in Janus too. - Smart card (CAC/PIV) sign-in: the certificate comes from Janus\'s own TLS listener or from the proxy in front of it (X-Forwarded-Client-Cert, escaped PEM or base64, trusted proxies only). It must chain to an authority under Settings → Certificates and pass the revocation check, and is matched by UPN, email or DoD ID number (EDIPI), or a card identity set on the person in People. Administrators can be required to use a card.',
+          'Sign-in and access audit records. Sign-in, sign-out, failed sign-ins, lockouts, unlocks, time-outs, notice acknowledgments, expired passwords and refused requests (access_denied: a signed-in person refused a permission, or an API token that does not work; at most one per person, address and path per minute) are recorded with the source address and outcome. The Audit page filters by kind, outcome, address, action, resource, person and time, searches, and sorts by any column; the CSV export follows the filters.',
+          'One outbound trust store (Administration → Settings → Certificates). Every outbound TLS connection (providers, OIDC, LDAP, S3, webhooks, SMTP, OTLP, web search and page reads) verifies against the system roots plus the DoD PKI root CAs (JANUS_TRUST_DOD_ROOTS, on by default in the FIPS edition), JANUS_CA_BUNDLE, a directory of certificates rescanned every 30 seconds (JANUS_CA_DIR) and certificates uploaded in the app. An upstream can be set to allow an untrusted certificate for its host only (refused by the FIPS edition and the STIG profile).',
+          'TLS revocation checking (JANUS_TLS_REVOCATION=soft|hard, off by default, hard in the STIG profile): stapled OCSP, then the OCSP responder (JANUS_OCSP_RESPONDER for an enclave responder), then the CRL, for every certificate in the chain.',
+          'Listener TLS. JANUS_TLS_REQUIRE=true refuses to start unless Janus serves TLS itself. JANUS_TLS_SELF_SIGNED=true generates a self-signed certificate shared by every replica, for testing or while an issued one is on its way (Download and Regenerate under Settings → Certificates). An issued certificate (JANUS_TLS_CERT_PATH/JANUS_TLS_KEY_PATH) is reloaded when the files change.',
+          'Which web pages chat models may open (startup options, off by default): JANUS_WEB_ALLOW_PRIVATE opens private networks and internal names for offline networks; JANUS_WEB_ALLOW_NETWORKS/DENY_NETWORKS, JANUS_WEB_ALLOW_DOMAINS/DENY_DOMAINS, JANUS_WEB_ALLOW_PORTS, JANUS_WEB_HTTPS_ONLY, JANUS_WEB_PROXY (every read through the proxy) and JANUS_WEB_TLS_TRUST (custom or custom-only use the trust store). This server, link-local and metadata addresses are never opened. Administration → Chat → Tools shows the policy in force.',
+          'Models read files made earlier in the chat. A reply\'s files are described by their real kind and name in the history, small text files are included in full, and a new read_file tool opens any text file on the conversation (made earlier or uploaded) by name, in pages.',
+          'Models can ask you a question (ask_user). Instead of guessing, a chat model can ask up to four multiple-choice questions; the reply ends with a card (the first choice marked Recommended, with an optional typed answer) and your answer continues the conversation. On by default; off in Administration → Chat → Tools or per chat. Not used in Compare or deep research.',
+          'Chats are named in the background, and administrators choose by which model (Administration → Chat → Tools → Chat names). A chat is named once, after three replies or once it has been quiet for 10 minutes (it used to be right after the first reply). By default the model that wrote the last reply names it, so the conversation goes nowhere new. An administrator can pick one model for every chat (it gets only what the person typed, trimmed; never replies or files; never a chat the Security Gateway had any finding on; people don\'t need access to it, since naming is a system task billed to the chat) or turn naming off. Naming asks the model not to reason, so reasoning models answer in a few tokens. Renamed and temporary chats are left alone. JANUS_CHAT_AUTO_TITLE now only sets the starting choice.',
+          'Header policies (Safety & Security → Policy rules → Header policies): remove, set or add request headers per upstream and per personal-subscription provider. Credentials and provider identity headers always stay Janus\'s own.',
+          'Headers in the request log: what the caller sent, what the provider received and what the policy changed, with sensitive values masked (names and values, names only, or off).',
+        ],
+      },
+      {
+        name: 'Changed',
+        items: [
+          'Upgrading from 2026.10.5 runs migrations 0071–0074 (header policies, the trust store, the security settings, chat naming). 0074 marks existing chats as already named, so nothing old is renamed or billed. 0073 adds the source address and outcome to the audit log with two indexes; on PostgreSQL it takes a few seconds per million audit rows.',
+          'Edge and proxy headers are no longer forwarded to providers (cf-, X-Forwarded-, Forwarded, X-Real-IP, True-Client-IP, CDN-Loop, Via, …) through the built-in default header policy; unassign it to restore the old behavior.',
+          'Stronger cryptography in every build: AES-256-GCM with module-drawn nonces (stored data is unchanged and still readable by older versions), PBKDF2-HMAC-SHA-512 password hashes (bcrypt hashes upgrade at the next sign-in), HMAC-SHA-256 recovery codes, a TLS 1.2 floor on the listener and a health probe that verifies the listener certificate.',
+          'Audit export (CSV) is available in every edition.',
+          'American English across the interface, documentation and messages.',
+          'Administration menu: section titles stand apart from their pages, with an open/closed arrow; Settings sits with Chat at the top; Policy rules has Blocking rules and Header policies tabs.',
+          'Upstreams: a failing upstream shows its error and when it was last checked in its own row, instead of a separate panel below the list.',
+          'The Helm chart is versioned with Janus: janus-helm-chart-2026.11.1.tgz for Janus 2026.11.1 (previously 0.2.x). Resource names and selector labels are unchanged, so helm upgrade from 0.2.x works. FIPS edition: --set image.tag=2026.11.1-fips --set image.digest= (or its digest).',
+        ],
+      },
+      {
+        name: 'Fixed',
+        items: [
+          'Team leads and moderators can manage their team again, and people can ask to join a team. Adding members, deciding join requests, roles and leaving had moved to Administration, where only organization administrators could reach them. They are back on each team\'s page under Teams, and My teams has a Find a team panel to request membership in listed teams.',
+          'A personal subscription is no longer marked "reconnect" after one refused check; Janus renews the access token once first.',
+          'Files a model made (code, documents, reports, video, music) were described to later turns as "images", so another model could not read them.',
+          'A browser tab left open after its session ended kept polling and wrote an access_denied audit record every minute. The app now stops at the first refusal, and not being signed in is no longer an audit event.',
+          'Plan usage bars on Subscriptions lost their color between 70% and 89%; several other borders and panels used style names that did not exist.',
+        ],
+      },
+      {
+        name: 'Security',
+        items: [
+          'Release binaries and images are built with Go 1.26.10 (2026.10.5\'s standalone binaries used 1.26.7).',
+          'Edge identity headers such as Cf-Access-Jwt-Assertion and the caller\'s address no longer reach AI providers.',
+          'Smart-card certificates are trusted only from the authorities you configure, never the operating system\'s public roots.',
+        ],
+      },
+    ],
+  },
+  {
     version: '2026.10.5',
     date: '2026-10-30',
     categories: [

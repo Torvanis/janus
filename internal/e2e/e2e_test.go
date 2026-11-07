@@ -50,7 +50,9 @@ func startGateway(t *testing.T) string {
 	t.Setenv("JANUS_DATABASE_URL", "sqlite://"+filepath.Join(t.TempDir(), "janus.db"))
 	t.Setenv("JANUS_ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("JANUS_ENV", "development")
-	t.Setenv("JANUS_DEV_AUTH", "true")
+	if config.DevAuthCompiled {
+		t.Setenv("JANUS_DEV_AUTH", "true")
+	}
 	t.Setenv("JANUS_PUBLIC_URL", "http://127.0.0.1:8080")
 	t.Setenv("JANUS_BOOTSTRAP_ADMIN_EMAILS", adminEmail)
 
@@ -121,15 +123,26 @@ func newBrowser(t *testing.T, base string) *browser {
 	}
 }
 
+// signIn uses the dev-auth evaluation sign-in in the default edition. The
+// FIPS edition has no dev auth, so there the journey starts the way a fresh
+// FIPS deployment does: first-run setup creates the administrator with a
+// local account.
 func (b *browser) signIn(email string) {
 	b.t.Helper()
-	resp, err := b.http.Get(b.base + "/auth/start?email=" + url.QueryEscape(email))
+	var resp *http.Response
+	var err error
+	if config.DevAuthCompiled {
+		resp, err = b.http.Get(b.base + "/auth/start?email=" + url.QueryEscape(email))
+	} else {
+		resp, err = b.http.Post(b.base+"/auth/local/setup", "application/json",
+			strings.NewReader(`{"email":"`+email+`","name":"Admin","password":"e2e-admin-password-1"}`))
+	}
 	if err != nil {
-		b.t.Fatalf("dev-auth sign-in: %v", err)
+		b.t.Fatalf("sign-in: %v", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		b.t.Fatalf("dev-auth sign-in returned %d, want 302", resp.StatusCode)
+	if want := map[bool]int{true: http.StatusFound, false: http.StatusOK}[config.DevAuthCompiled]; resp.StatusCode != want {
+		b.t.Fatalf("sign-in returned %d, want %d", resp.StatusCode, want)
 	}
 	target, err := url.Parse(b.base)
 	if err != nil {
@@ -228,7 +241,7 @@ func TestFullUserJourney(t *testing.T) {
 		t.Fatalf("/api/v1/me did not return the signed-in user: %v", me)
 	}
 	if me["role"] != "admin" {
-		t.Fatalf("bootstrap admin list was not honoured; role = %v", me["role"])
+		t.Fatalf("bootstrap admin list was not honored; role = %v", me["role"])
 	}
 	// With JANUS_LOCAL_ONLY unset the bootstrap payload must report the
 	// default mode explicitly — the SPA keys every cost surface off it.

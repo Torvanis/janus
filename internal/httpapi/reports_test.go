@@ -65,10 +65,17 @@ func TestReportingHTTPRunLifecycle(t *testing.T) {
 	if e = h.store.FinishReportRun(ctx, id, claimed.LeaseToken, &res, ""); e != nil {
 		t.Fatal(e)
 	}
-	for _, f := range []string{"csv", "xlsx", "pdf", "json"} {
+	for _, f := range reporting.Formats() {
 		rr = reportingRequest(t, h, h.user, "GET", "/reports/runs/"+id+"/download?format="+f, nil)
 		if rr.Code != 200 || rr.Body.Len() == 0 {
 			t.Fatalf("export %s: %d %s", f, rr.Code, rr.Body)
+		}
+	}
+	// The FIPS edition refuses PDF with a named reason, never a 500.
+	if !reporting.PDFAvailable {
+		rr = reportingRequest(t, h, h.user, "GET", "/reports/runs/"+id+"/download?format=pdf", nil)
+		if rr.Code != 400 || !strings.Contains(rr.Body.String(), "FIPS edition") {
+			t.Fatalf("FIPS edition pdf export: %d %s", rr.Code, rr.Body)
 		}
 	}
 	rr = reportingRequest(t, h, h.user, "GET", "/reports/runs/"+id, nil)

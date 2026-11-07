@@ -29,7 +29,39 @@ type Session struct {
 	CreatedAt    time.Time
 	LastSeenAt   time.Time
 	AbsoluteEnds time.Time
+	// IdleTimeout is the idle limit in force for this session's user.
+	IdleTimeout time.Duration
 }
+
+// TimeoutError is ErrNoSession for a session that just ended on a limit,
+// so the caller can audit it and tell the person why.
+type TimeoutError struct {
+	UserID string
+	Reason string // idle or expired
+}
+
+func (e *TimeoutError) Error() string { return "session ended: " + e.Reason }
+
+// Is makes errors.Is(err, ErrNoSession) true.
+func (e *TimeoutError) Is(target error) bool { return target == ErrNoSession }
+
+type backgroundKey struct{}
+
+// WithBackground marks ctx as a background request (the app polling, not
+// the person): it does not count as activity for the idle timeout.
+func WithBackground(ctx context.Context) context.Context {
+	return context.WithValue(ctx, backgroundKey{}, true)
+}
+
+// IsBackground reports WithBackground.
+func IsBackground(ctx context.Context) bool {
+	v, _ := ctx.Value(backgroundKey{}).(bool)
+	return v
+}
+
+// ActivityHeader is sent by the app with "background" on requests it makes
+// by itself (refreshes, polling).
+const ActivityHeader = "X-Janus-Activity"
 
 // SessionStore persists sessions. The database-backed DBSessionStore is the
 // production implementation (shared across replicas); the in-memory
@@ -92,11 +124,16 @@ func (m *MemorySessionStore) Get(_ context.Context, id string) (*Session, error)
 		return nil, ErrNoSession
 	}
 	now := m.now()
-	if now.After(s.AbsoluteEnds) || now.Sub(s.LastSeenAt) > m.idleTimeout {
+	if now.After(s.AbsoluteEnds) {
 		delete(m.sessions, id)
-		return nil, ErrNoSession
+		return nil, &TimeoutError{UserID: s.UserID, Reason: "expired"}
+	}
+	if now.Sub(s.LastSeenAt) > m.idleTimeout {
+		delete(m.sessions, id)
+		return nil, &TimeoutError{UserID: s.UserID, Reason: "idle"}
 	}
 	s.LastSeenAt = now
+	s.IdleTimeout = m.idleTimeout
 	copied := *s
 	return &copied, nil
 }
