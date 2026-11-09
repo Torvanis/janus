@@ -282,7 +282,7 @@ class ChartTest(unittest.TestCase):
 
     def test_image_digest_and_tag(self):
         image = deployment(self.render())["spec"]["template"]["spec"]["containers"][0]["image"]
-        self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:ab2e159beb8a75b49c0b1d241945c830a44b0440f986bbc3e46cb5554aae6e6a")
+        self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:0cc0c4996ee516bcf09daf147d456a16ec9a3358e6a4b7ea37a4b93e54a2310c")
         image = deployment(self.render({"image": {"digest": "", "tag": "2026.11.1"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
         self.assertEqual(image, "ghcr.io/torvanis/janus:2026.11.1")
 
