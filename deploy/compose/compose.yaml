@@ -1,0 +1,114 @@
+# Janus with PostgreSQL on one server (Docker Compose v2).
+#
+# Run `python3 setup.py --admin-email you@example.com` first: it writes .env
+# (encryption key, database password, hostname) once, starts both containers
+# with Janus reachable from this machine only, creates the first
+# administrator, and then publishes the HTTPS port. See README.md.
+#
+# Release bundles pin both images by digest. Never change JANUS_ENCRYPTION_KEY
+# or POSTGRES_PASSWORD in .env after the first start.
+name: janus
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: janus
+      POSTGRES_DB: janus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python3 setup.py first}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - janus-pg:/var/lib/postgresql/data
+    # No published port: only the janus container reaches the database.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U janus -d janus"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    shm_size: 128m
+    stop_grace_period: 60s
+
+  janus:
+    image: ${JANUS_IMAGE:-ghcr.io/torvanis/janus:2026.11.1@sha256:0cc0c4996ee516bcf09daf147d456a16ec9a3358e6a4b7ea37a4b93e54a2310c}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      JANUS_ENCRYPTION_KEY: ${JANUS_ENCRYPTION_KEY:?Run python3 setup.py first}
+      JANUS_DATABASE_URL: postgres://janus:${POSTGRES_PASSWORD}@postgres:5432/janus?sslmode=disable
+      JANUS_DB_MAX_CONNS: "10"
+      JANUS_ENV: production
+      JANUS_DEV_AUTH: "false"
+      JANUS_LISTEN_ADDR: ":8443"
+      JANUS_PUBLIC_URL: ${JANUS_PUBLIC_URL:?Run python3 setup.py first}
+      # HTTPS: a self-signed certificate is created on first start and kept
+      # (encrypted) in the database. For your own certificate run
+      # `python3 setup.py cert --cert fullchain.pem --key privkey.pem`.
+      JANUS_TLS_SELF_SIGNED: ${JANUS_TLS_SELF_SIGNED:-true}
+      JANUS_TLS_SELF_SIGNED_NAMES: ${JANUS_TLS_NAMES:-}
+      JANUS_TLS_CERT_PATH: ${JANUS_TLS_CERT_PATH:-}
+      JANUS_TLS_KEY_PATH: ${JANUS_TLS_KEY_PATH:-}
+      # Set by `setup.py --caddy` to the Compose network, so Janus believes
+      # the client address Caddy forwards and nobody else's.
+      JANUS_TRUSTED_PROXIES: ${JANUS_TRUSTED_PROXIES:-}
+      JANUS_TROUBLESHOOT_DIR: /data/captures
+      # Optional license key file, e.g. /certs/janus.license (see README.md).
+      JANUS_LICENSE_FILE: ${JANUS_LICENSE_FILE:-}
+    ports:
+      # Loopback until the first administrator exists; setup.py then sets
+      # JANUS_BIND=0.0.0.0 in .env.
+      - "${JANUS_BIND:-127.0.0.1}:${JANUS_HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./certs:/certs:ro
+      - janus-data:/data
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=64m"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "/janus", "--health-probe"]
+      interval: 30s
+      timeout: 6s
+      start_period: 60s
+      retries: 3
+
+  # Optional: Let's Encrypt certificates and a port 80 redirect in front of
+  # Janus. Enabled by `python3 setup.py --caddy` (COMPOSE_PROFILES=caddy in
+  # .env). Needs a public DNS name for JANUS_HOSTNAME and ports 80 and 443
+  # reachable from the internet.
+  caddy:
+    profiles: ["caddy"]
+    image: ${CADDY_IMAGE:-caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0}
+    restart: unless-stopped
+    depends_on:
+      janus:
+        condition: service_healthy
+    environment:
+      JANUS_HOSTNAME: ${JANUS_HOSTNAME:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${JANUS_SUBNET:-172.31.250.0/24}
+
+volumes:
+  janus-pg:
+  janus-data:
+  caddy-data:
+  caddy-config:

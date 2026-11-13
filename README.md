@@ -100,6 +100,22 @@ shared default administrator password. After setup:
 The named volume preserves the evaluation database across container restarts.
 Use the same encryption key on every restart and on every replica.
 
+## Docker Compose with PostgreSQL
+
+For one server and a small team, the release attaches
+`janus-compose-bundle-<version>.tar.gz` (listed in `SHA256SUMS`): Janus and
+PostgreSQL 16, both pinned by digest, HTTPS with a self-signed certificate
+(or your own, or Let's Encrypt through an optional Caddy container), and a
+`setup.py` that creates the first administrator before the port is published.
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+tar xzf janus-compose-bundle-<version>.tar.gz && cd janus-compose
+python3 setup.py --admin-email you@example.com --hostname ai.example.com
+```
+
+Backup, restore, certificates and upgrades: [deploy/compose/README.md](deploy/compose/README.md).
+
 ## Configuration
 
 Janus reads configuration from environment variables. Common settings:

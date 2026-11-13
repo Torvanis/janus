@@ -1,0 +1,48 @@
+name: Compose bundle
+
+# Builds janus-compose-bundle-<version>.tar.gz and runs it for real: Docker
+# Compose, PostgreSQL 16, setup.py, a signed-in administrator, a token,
+# restart, and backup -> restore into a wiped stack.
+on:
+  pull_request:
+    paths:
+      - deploy/compose/**
+      - scripts/release.py
+      - scripts/test_packaging.py
+      - scripts/compose-smoke.py
+      - charts/janus-helm-chart/values.yaml
+      - .github/workflows/compose-bundle.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Packaging tests
+        run: python3 -m unittest discover -s scripts -p 'test_packaging.py' -v
+      - name: Build the bundle
+        run: |
+          VERSION=$(sed -n 's/^VERSION ?= //p' Makefile)
+          DIST_DIR=dist VERSION="$VERSION" python3 scripts/release.py compose-bundle
+          mkdir run && tar xzf dist/janus-compose-bundle-*.tar.gz -C run
+      - name: setup.py (PostgreSQL 16)
+        working-directory: run/janus-compose
+        run: |
+          echo "127.0.0.1 ai.example.test" | sudo tee -a /etc/hosts
+          python3 setup.py --admin-email admin@example.test --hostname ai.example.test --https-port 8443 | tee ../setup.log
+          test "$(stat -c %a .env)" = 600
+          grep -q '^JANUS_BIND=0.0.0.0$' .env
+          docker compose ps
+      - name: Smoke test
+        run: python3 scripts/compose-smoke.py run/janus-compose run/setup.log ai.example.test 8443
+      - name: Logs
+        if: failure()
+        working-directory: run/janus-compose
+        run: docker compose logs --tail 100
