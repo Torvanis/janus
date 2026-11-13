@@ -1,26 +1,18 @@
 # Deployment examples
 
-These examples use one replica and persistent SQLite storage for evaluation or
-small single-node installations. Production deployments should use PostgreSQL,
-backups, TLS, and an appropriate licensed configuration. Do not scale a SQLite
-instance above one replica or mount its database into multiple writers.
+## Docker Compose with PostgreSQL
 
-## Compose (Docker Compose v2)
+`deploy/compose/` in the source repository is the source of the release asset
+`janus-compose-bundle-<version>.tar.gz`: Janus and PostgreSQL 16 on one
+server, HTTPS served by Janus, the first administrator created by `setup.py`
+before the port is published, and backup/restore scripts. Use the release
+asset; it pins both images by digest. For a quick look without Compose, see
+"Quick start with a container" in the top-level README (SQLite, loopback only).
 
-From the repository root:
-
-```sh
-python3 scripts/init-env.py
-docker compose --env-file deploy/.env -f deploy/compose.yaml up --build -d
-```
-
-Open <http://127.0.0.1:8080> and create the first administrator. There is no
-default password and development authentication is disabled. The published port
-is bound only to loopback. Keep it that way until administrator setup is complete.
-Back up `deploy/.env` and the `janus-data` volume together; never generate a new
-key for an existing database. The initializer refuses to overwrite a key.
-`docker compose ... down` retains the data; **do not use `down -v`** unless you
-intend to delete it. Compose builds the image locally from this source checkout.
+The Kubernetes example below uses one replica and persistent SQLite storage for
+evaluation. Production deployments should use PostgreSQL, backups, TLS, and an
+appropriate licensed configuration. Do not scale a SQLite instance above one
+replica or mount its database into multiple writers.
 
 ## Kubernetes
 

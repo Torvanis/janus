@@ -26,6 +26,9 @@ def load(name):
 
 installer = load('install')
 release = load('release')
+_spec = importlib.util.spec_from_file_location('compose_setup', ROOT / 'deploy/compose/setup.py')
+compose_setup = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(compose_setup)
 launcher = load('run-local')
 metadata = load('release-metadata')
 
@@ -111,7 +114,7 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             launcher.encryption_key(key, db)
 
-    def test_compose_key_never_overwritten(self):
+    def test_init_env_key_never_overwritten(self):
         output = self.path / '.env'
         command = ['python3', str(HERE / 'init-env.py'), '--output', str(output)]
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
@@ -185,6 +188,110 @@ class ServerInstallTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
+
+
+class ComposeBundleTests(unittest.TestCase):
+    """deploy/compose: the janus-compose-bundle release asset and its setup.py."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name)
+
+    def env_of(self, text):
+        return dict(line.split('=', 1) for line in text.splitlines() if line and not line.startswith('#'))
+
+    def test_new_env_has_hex_secrets_and_starts_on_loopback(self):
+        env = self.env_of(compose_setup.new_env('ai.example.com', 443, names=['192.0.2.10']))
+        self.assertRegex(env['JANUS_ENCRYPTION_KEY'], r'^[0-9a-f]{64}$')
+        self.assertRegex(env['POSTGRES_PASSWORD'], r'^[0-9a-f]{64}$')
+        self.assertNotEqual(env['JANUS_ENCRYPTION_KEY'], env['POSTGRES_PASSWORD'])
+        self.assertEqual(env['JANUS_BIND'], '127.0.0.1')
+        self.assertEqual(env['JANUS_PUBLIC_URL'], 'https://ai.example.com')
+        self.assertEqual(env['JANUS_HTTPS_PORT'], '443')
+        self.assertEqual(env['JANUS_TLS_NAMES'], 'ai.example.com,localhost,127.0.0.1,192.0.2.10')
+        self.assertNotIn('COMPOSE_PROFILES', env)
+        other = self.env_of(compose_setup.new_env('ai.example.com', 443))
+        self.assertNotEqual(env['JANUS_ENCRYPTION_KEY'], other['JANUS_ENCRYPTION_KEY'])
+
+    def test_new_env_ports_and_caddy(self):
+        env = self.env_of(compose_setup.new_env('ai.example.com', 8443))
+        self.assertEqual(env['JANUS_PUBLIC_URL'], 'https://ai.example.com:8443')
+        caddy = self.env_of(compose_setup.new_env('ai.example.com', 443, caddy=True))
+        self.assertEqual(caddy['JANUS_PUBLIC_URL'], 'https://ai.example.com')
+        self.assertEqual(caddy['JANUS_HTTPS_PORT'], str(compose_setup.CADDY_JANUS_PORT))
+        self.assertEqual(caddy['JANUS_BIND'], '127.0.0.1')
+        self.assertEqual(caddy['JANUS_TRUSTED_PROXIES'], compose_setup.DEFAULT_SUBNET)
+        # Caddy is switched on only after the administrator exists.
+        self.assertNotIn('COMPOSE_PROFILES', caddy)
+        self.assertIn(compose_setup.DEFAULT_SUBNET, (ROOT / 'deploy/compose/compose.yaml').read_text())
+
+    def test_env_file_private_and_never_overwritten(self):
+        env = self.path / '.env'
+        compose_setup.create_env_file(compose_setup.new_env('ai.example.com', 443), env)
+        before = env.read_bytes()
+        self.assertEqual(stat.S_IMODE(env.stat().st_mode), 0o600)
+        with self.assertRaises(compose_setup.SetupError):
+            compose_setup.create_env_file(compose_setup.new_env('ai.example.com', 443), env)
+        self.assertEqual(before, env.read_bytes())
+
+    def test_set_env_values_keeps_secrets(self):
+        env = self.path / '.env'
+        compose_setup.create_env_file(compose_setup.new_env('ai.example.com', 443), env)
+        before = compose_setup.read_env(env)
+        compose_setup.set_env_values({'JANUS_BIND': '0.0.0.0', 'JANUS_TLS_CERT_PATH': '/certs/fullchain.pem'}, env)
+        after = compose_setup.read_env(env)
+        self.assertEqual(after['JANUS_BIND'], '0.0.0.0')
+        self.assertEqual(after['JANUS_TLS_CERT_PATH'], '/certs/fullchain.pem')
+        for key in ('JANUS_ENCRYPTION_KEY', 'POSTGRES_PASSWORD', 'JANUS_PUBLIC_URL'):
+            self.assertEqual(before[key], after[key])
+        self.assertEqual(stat.S_IMODE(env.stat().st_mode), 0o600)
+        compose_setup.set_env_values({'JANUS_TLS_CERT_PATH': None}, env)
+        self.assertNotIn('JANUS_TLS_CERT_PATH', compose_setup.read_env(env))
+        for key in ('JANUS_ENCRYPTION_KEY', 'POSTGRES_PASSWORD'):
+            with self.assertRaises(compose_setup.SetupError):
+                compose_setup.set_env_values({key: '00'}, env)
+        self.assertEqual(before['JANUS_ENCRYPTION_KEY'], compose_setup.read_env(env)['JANUS_ENCRYPTION_KEY'])
+
+    def test_compose_runs_released_image_and_hides_database(self):
+        text = (ROOT / 'deploy/compose/compose.yaml').read_text()
+        release.check_compose(text, release.os.environ.get('VERSION', '2026.11.1'), release.chart_digest())
+        with self.assertRaises(SystemExit):
+            release.check_compose(text, '2026.11.1', 'sha256:' + '0' * 64)
+        with self.assertRaises(SystemExit):
+            release.check_compose(text.replace('@sha256:', ':x@sha:', 1), '2026.11.1', release.chart_digest())
+        postgres = text[text.index('\n  postgres:'):text.index('\n  janus:')]
+        self.assertNotIn('ports:', postgres)
+        self.assertIn('"${JANUS_BIND:-127.0.0.1}:${JANUS_HTTPS_PORT:-443}:8443"', text)
+        self.assertNotIn('sqlite', text.lower())
+        self.assertFalse((ROOT / 'deploy/compose.yaml').exists(), 'the SQLite Compose example was retired')
+
+    def test_bundle_contents_modes_and_reproducibility(self):
+        first = self.path / 'a'
+        second = self.path / 'b'
+        first.mkdir()
+        second.mkdir()
+        bundle = release.compose_bundle(first, '2026.11.1', 0)
+        self.assertEqual(bundle.name, 'janus-compose-bundle-2026.11.1.tar.gz')
+        self.assertEqual(bundle.read_bytes(), release.compose_bundle(second, '2026.11.1', 0).read_bytes())
+        with tarfile.open(bundle) as tar:
+            members = {m.name: m for m in tar.getmembers()}
+        expected = {'janus-compose/' + n for n in release.COMPOSE_FILES + release.LEGAL}
+        self.assertEqual(set(members), expected)
+        for name, member in members.items():
+            executable = name.endswith(('.py', '.sh'))
+            self.assertEqual(member.mode, 0o755 if executable else 0o644, name)
+            self.assertEqual((member.uid, member.gid), (0, 0))
+
+    def test_shell_scripts_parse(self):
+        for name in ('backup.sh', 'restore.sh'):
+            result = subprocess.run(['sh', '-n', str(ROOT / 'deploy/compose' / name)], capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_hostname_validation(self):
+        self.assertTrue(compose_setup.valid_hostname('ai.example.com'))
+        self.assertTrue(compose_setup.valid_hostname('192.0.2.10'))
+        self.assertFalse(compose_setup.valid_hostname('bad_host!'))
 
 
 if __name__ == '__main__':

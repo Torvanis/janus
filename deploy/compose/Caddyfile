@@ -1,0 +1,12 @@
+# Used only with the optional Caddy profile (python3 setup.py --caddy).
+# Caddy obtains and renews a Let's Encrypt certificate for JANUS_HOSTNAME,
+# redirects port 80 to HTTPS and forwards to Janus on the Compose network.
+{$JANUS_HOSTNAME} {
+	reverse_proxy https://janus:8443 {
+		# The hop to Janus stays inside the Compose network; Janus serves
+		# its own self-signed certificate there.
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
