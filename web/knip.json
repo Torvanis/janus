@@ -1,7 +1,5 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "scripts/gen-docs.mjs"
-  ],
+  "entry": ["scripts/gen-docs.mjs", "scripts/npm-audit-gate.mjs"],
   "ignoreExportsUsedInFile": true
 }
