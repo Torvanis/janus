@@ -540,3 +540,20 @@ func TestDevAuthRefusedInFIPSEdition(t *testing.T) {
 		t.Fatal("DevAuth() true in the FIPS edition")
 	}
 }
+
+// JANUS_CHAT_PREVIEW was removed when Chat left preview: set to anything it
+// is reported once (for the startup warning) and changes nothing else.
+func TestRemovedChatPreviewVariableIsOnlyReported(t *testing.T) {
+	t.Setenv("JANUS_CHAT_PREVIEW", "")
+	os.Unsetenv("JANUS_CHAT_PREVIEW")
+	if got := RemovedVariablesSet(); len(got) != 0 {
+		t.Fatalf("unset: %v", got)
+	}
+	for _, v := range []string{"true", "false", ""} {
+		t.Setenv("JANUS_CHAT_PREVIEW", v)
+		got := RemovedVariablesSet()
+		if len(got) != 1 || got[0].Name != "JANUS_CHAT_PREVIEW" || !strings.Contains(got[0].Message, "Administration → Chat") {
+			t.Fatalf("%q: %v", v, got)
+		}
+	}
+}

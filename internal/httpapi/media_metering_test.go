@@ -51,16 +51,19 @@ func TestProxyDoesNotByteMeterBinaryTTS(t *testing.T) {
 	if event.Modality != "tts" {
 		t.Fatalf("modality = %q, want tts", event.Modality)
 	}
-	if event.AccountingMode != usage.AccountingUnmetered {
-		t.Errorf("accounting mode = %q, want %q: a binary body must never be byte-estimated, and the gap must be distinguishable from an error response",
-			event.AccountingMode, usage.AccountingUnmetered)
+	// Speech is billed by the characters sent, which are measured from the
+	// request; the model has no price line for them, so the request is
+	// recorded as measured and unpriced, never byte-estimated.
+	if event.AccountingMode != usage.AccountingMeasuredUnpriced || event.BilledUnit != "character" || event.BilledQuantity != 17 {
+		t.Errorf("accounting = %q %q %v, want %q character 17: a binary body must never be byte-estimated",
+			event.AccountingMode, event.BilledUnit, event.BilledQuantity, usage.AccountingMeasuredUnpriced)
 	}
 	if event.TokensOut != 0 || event.TokensIn != 0 {
 		t.Errorf("token counts = (%d, %d), want (0, 0): %d phantom tokens would be invented by bytes/4",
 			event.TokensIn, event.TokensOut, usage.EstimateTokensFromBytes(int64(len(audio))))
 	}
 	if event.CostNano != 0 {
-		t.Errorf("cost = %d nano-USD, want 0 for an unmetered modality", event.CostNano)
+		t.Errorf("cost = %d nano-USD, want 0 without a price line", event.CostNano)
 	}
 	// The response bytes are still recorded — observability is unaffected,
 	// only the fabricated billing is removed.

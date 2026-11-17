@@ -97,6 +97,7 @@ const ADMIN_SECTIONS: NavSection[] = [
       { to: '/admin/users', label: () => t('shell.navPeople'), glyph: '⚭', admin: true },
       { to: '/admin/quotas', label: () => t('shell.navQuotas'), glyph: '◑', admin: true },
       { to: '/admin/insights', label: () => t('shell.navInsights'), glyph: '◭', admin: true },
+      { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
     ],
   },
   {
@@ -107,13 +108,6 @@ const ADMIN_SECTIONS: NavSection[] = [
       { to: '/admin/child-safety', label: () => 'Child Safety', glyph: '☂', admin: true },
       { to: '/admin/rules', label: () => t('shell.navPolicyRules'), glyph: '⛨', admin: true },
       { to: '/admin/alerts', label: () => t('shell.navAlerts'), glyph: '◉', admin: true },
-    ],
-  },
-  {
-    id: 'admin-activity',
-    label: () => 'Activity',
-    items: [
-      { to: '/admin/requests', label: () => t('shell.navRequests'), glyph: '≡', admin: true },
       { to: '/admin/audit', label: () => t('shell.navAuditLog'), glyph: '❑', admin: true },
     ],
   },
@@ -142,7 +136,7 @@ export function Shell({ children }: { children: ReactNode }): ReactNode {
   // The Subscriptions page exists only while the administrator has the
   // feature on (and never on an offline install).
   const navVisible = (item: NavItem) =>
-    (item.to !== '/subscriptions' || me?.personal_subscriptions === true) && (item.to !== '/chat' || me?.chat_preview === true);
+    (item.to !== '/subscriptions' || me?.personal_subscriptions === true) && (item.to !== '/chat' || me?.chat_available === true);
   const primarySections = PRIMARY_SECTIONS.map((section) => ({ ...section, items: section.items.filter(navVisible) })).filter(
     (section) => section.items.length > 0,
   );

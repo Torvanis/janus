@@ -46,60 +46,17 @@ const (
 		"what is said (quote it), music and other sounds. Plain prose, no preamble."
 )
 
-var (
-	// chatAudioNameHints / chatVideoNameHints: model families that take
-	// sound / video input through chat completions.
-	chatAudioNameHints = []string{"gpt-audio", "gpt-4o-audio", "gpt-4o-mini-audio", "gemini", "voxtral", "omni", "phi-4-multimodal"}
-	chatVideoNameHints = []string{"gemini", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "qwen-vl", "omni", "internvl", "llava-video", "minicpm-v"}
-	// chatMediaNonChat are image-, sound- and video-making variants inside
-	// those families (they take a prompt, not a file).
-	chatMediaNonChat = []string{"embed", "tts", "transcribe", "realtime", "whisper", "image", "imagen", "lyria", "veo", "live"}
-)
-
-func chatNameHint(name string, hints []string) bool {
-	n := strings.ToLower(name)
-	if i := strings.LastIndex(n, "/"); i >= 0 {
-		n = n[i+1:]
-	}
-	for _, bad := range chatMediaNonChat {
-		if strings.Contains(n, bad) {
-			return false
-		}
-	}
-	for _, h := range hints {
-		if strings.Contains(n, h) {
-			return true
-		}
-	}
-	return false
-}
-
 // chatTakes reports whether a chat model takes attached sound (kind audio)
-// or video: the admin's word (Admin → Chat → Models), else the name.
-func (s *Server) chatTakes(ctx context.Context, model, kind string) bool {
-	set := s.chatAdmin(ctx).Models[model]
-	say, hints := set.Audio, chatAudioNameHints
+// or video from its capability record only (input.audio / input.video:
+// administrator > measured > provider). Unknown is treated like "no": the
+// model gets a transcript or a description instead (owner rule: nothing is
+// inferred from a model's name).
+func (s *Server) chatTakes(ctx context.Context, user *store.User, model, kind string) bool {
+	key := adapter.CapInAudio
 	if kind == store.ChatAttachmentVideo {
-		say, hints = set.Video, chatVideoNameHints
+		key = adapter.CapInVideo
 	}
-	switch say {
-	case "yes":
-		return true
-	case "no":
-		return false
-	}
-	if chatNameHint(model, hints) {
-		return true
-	}
-	if resolved, err := s.Store.ResolveModelForRequest(ctx, model); err == nil {
-		if resolved.Model != nil && chatNameHint(resolved.Model.Name, hints) {
-			return true
-		}
-		if resolved.Managed != nil && chatNameHint(resolved.Managed.TargetName, hints) {
-			return true
-		}
-	}
-	return false
+	return s.chatModelTakesInput(ctx, user, model, key)
 }
 
 // chatTranscribeModel is the speech-to-text model Chat uses for this
@@ -132,12 +89,12 @@ func (s *Server) chatDescribeModel(ctx context.Context, user *store.User, asking
 	var avail []string
 	for _, m := range catalog.Models {
 		name := m.PublicName()
-		if name != asking && slices.Contains(m.Modalities, adapter.ModalityChat) && s.chatTakes(ctx, name, store.ChatAttachmentVideo) {
+		if name != asking && slices.Contains(m.Modalities, adapter.ModalityChat) && s.chatTakes(ctx, user, name, store.ChatAttachmentVideo) {
 			avail = append(avail, name)
 		}
 	}
 	for _, mm := range catalog.Managed {
-		if mm.Name != asking && s.chatTakes(ctx, mm.Name, store.ChatAttachmentVideo) {
+		if mm.Name != asking && s.chatTakes(ctx, user, mm.Name, store.ChatAttachmentVideo) {
 			avail = append(avail, mm.Name)
 		}
 	}
@@ -199,7 +156,7 @@ func (b *chatHistoryBuild) mediaPart(ctx context.Context, a *store.ChatAttachmen
 	}
 	// A child's sound and video always go through text first, so Child
 	// Safety reads what is in them before the model does.
-	if child == nil && b.s.chatTakes(ctx, b.model, a.Kind) {
+	if child == nil && b.s.chatTakes(ctx, b.user, b.model, a.Kind) {
 		return chatPart{Type: "text", media: a, mode: chatMediaInline, est: a.EstTokens}
 	}
 	if a.TextRef != "" {
@@ -295,7 +252,9 @@ func (b *chatToolbox) mediaText(ctx context.Context, a *store.ChatAttachment, mo
 		// Streamed: a watching model reads the whole video before its
 		// first word, longer than the proxy's time-to-first-byte limit for
 		// a buffered reply (a 2.9 MB clip on vLLM took over 30 s).
-		payload, _ := json.Marshal(map[string]any{"model": model, "stream": true, "stream_options": map[string]any{"include_usage": true}, "messages": []map[string]any{{
+		// No thinking, like naming: a description needs none, and the
+		// proxy sends the model's own switch (or its least thinking).
+		payload, _ := json.Marshal(map[string]any{"model": model, "stream": true, "stream_options": map[string]any{"include_usage": true}, "reasoning_effort": "none", "messages": []map[string]any{{
 			"role": "user", "content": []map[string]any{
 				{"type": "text", "text": chatDescribePrompt},
 				{"type": "video_url", "video_url": map[string]string{"url": "data:" + a.MIME + ";base64," + base64.StdEncoding.EncodeToString(data)}},

@@ -13,7 +13,7 @@ import type {
   UpstreamTimeoutsPatch,
 } from '../../lib/types';
 import { formatDateTime, formatDuration, formatNumber, formatRelative, titleCase } from '../../lib/format';
-import { AsyncSection, Badge, ConfirmDialog, Field, useToast } from '../../components/ui';
+import { AsyncSection, Badge, BreakAfterSlash, ConfirmDialog, Field, useToast } from '../../components/ui';
 import { DetailRow } from '../shared';
 import { t } from '../../lib/i18n';
 import { TroubleshootingCard } from './TroubleshootingCard';
@@ -21,6 +21,7 @@ import { LicenseCard } from './LicenseCard';
 import { RetainedPanel } from '../../components/RouteTopNav';
 import { PersonalSubscriptionsCard } from './PersonalSubscriptionsCard';
 import { FileStorageCard } from './FileStorageCard';
+import { providerLabel } from './providerPresets';
 
 /**
  * Label/description/consequence copy for each feature flag on the
@@ -187,7 +188,7 @@ export function SystemPage({
                         {data.upstreams.map((upstream) => (
                           <tr key={upstream.id}>
                             <td>{upstream.name}</td>
-                            <td className="small muted">{upstream.adapter_type}</td>
+                            <td className="small muted">{providerLabel(upstream.adapter_type)}</td>
                             <td>
                               {!upstream.enabled ? (
                                 <Badge tone="neutral">{t('tables.disabled')}</Badge>
@@ -268,7 +269,7 @@ export function SystemPage({
                   </DetailRow>
                   <DetailRow label={t('adminSystem.purgeRunsAt')}>{data.retention.purge_at_utc} UTC</DetailRow>
                   <DetailRow label={t('adminSystem.prometheus')}>
-                    <a href={data.telemetry.prometheus}>{data.telemetry.prometheus}</a>
+                    <code>{data.telemetry.prometheus}</code>
                   </DetailRow>
                   <DetailRow label={t('adminSystem.adapters')}>{data.adapters.join(', ')}</DetailRow>
                 </div>
@@ -498,8 +499,8 @@ function HealthTile({ label, ok, detail, warn }: { label: string; ok: boolean; d
           {!ok ? t('adminSystem.down') : warn ? t('adminSystem.attention') : t('adminSystem.ok')}
         </Badge>
       </div>
-      <div className="tile-meta" style={{ marginTop: 'var(--janus-space-3)' }}>
-        {detail}
+      <div className="tile-meta break-slash" style={{ marginTop: 'var(--janus-space-3)' }}>
+        <BreakAfterSlash text={detail} />
       </div>
     </article>
   );
@@ -515,7 +516,8 @@ function HealthTile({ label, ok, detail, warn }: { label: string; ok: boolean; d
  */
 function MeteringTile({ metering }: { metering: MeteringHealth }): ReactNode {
   const { summary } = metering;
-  const gaps = summary.gaps.slice(0, 3);
+  const unmetered = summary.gaps.filter((gap) => (gap.accounting ?? 'unmetered_modality') === 'unmetered_modality');
+  const unpriced = summary.gaps.filter((gap) => gap.accounting === 'measured_unpriced');
   return (
     <article className="tile tile-wide" data-testid="metering-tile">
       <div className="row-between">
@@ -524,7 +526,7 @@ function MeteringTile({ metering }: { metering: MeteringHealth }): ReactNode {
           {metering.ok ? t('adminSystem.ok') : t('adminSystem.attention')}
         </Badge>
       </div>
-      <div className="tile-meta stack" style={{ marginTop: 'var(--janus-space-2)', gap: 'var(--janus-space-2)' }}>
+      <div className="tile-meta stack" style={{ marginTop: 'var(--janus-space-2)', gap: 'var(--janus-space-3)' }}>
         {metering.ok ? (
           <>
             <span>{t('adminSystem.meteringOk', { days: metering.window_days })}</span>
@@ -534,33 +536,55 @@ function MeteringTile({ metering }: { metering: MeteringHealth }): ReactNode {
               </span>
             ) : null}
           </>
-        ) : (
-          <>
+        ) : null}
+        {summary.unmetered > 0 ? (
+          <div className="stack" style={{ gap: 'var(--janus-space-2)' }}>
             <span>{t('adminSystem.meteringGap', { count: formatNumber(summary.unmetered), days: metering.window_days })}</span>
-            <ul
-              className="row wrap small"
-              style={{ margin: 0, paddingLeft: 0, listStyle: 'none', gap: 'var(--janus-space-2) var(--janus-space-5)' }}
-            >
-              {gaps.map((gap) => (
-                <li key={`${gap.model_name}-${gap.upstream_id}-${gap.modality}`}>
-                  <span className="mono">{gap.model_name}</span>
-                  <span className="muted">
-                    {' '}
-                    · {gap.upstream_name || gap.upstream_id} · {gap.modality} · {formatNumber(gap.requests)} req
-                  </span>
-                </li>
-              ))}
-              {summary.gaps.length > gaps.length ? (
-                <li className="muted">{t('adminSystem.meteringMore', { count: summary.gaps.length - gaps.length })}</li>
-              ) : null}
-            </ul>
+            <MeteringGapList gaps={unmetered} />
             <Link className="small" to="/admin/requests?accounting=unmetered_modality">
               {t('adminSystem.meteringViewRequests')}
             </Link>
-          </>
-        )}
+          </div>
+        ) : null}
+        {(summary.measured_unpriced ?? 0) > 0 ? (
+          <div className="stack" style={{ gap: 'var(--janus-space-2)' }} data-testid="metering-unpriced">
+            <span>
+              {t('adminSystem.meteringUnpriced', {
+                count: formatNumber(summary.measured_unpriced ?? 0),
+                days: metering.window_days,
+              })}
+            </span>
+            <MeteringGapList gaps={unpriced} />
+            <Link className="small" to="/admin/requests?accounting=measured_unpriced">
+              {t('adminSystem.meteringViewUnpriced')}
+            </Link>
+          </div>
+        ) : null}
       </div>
     </article>
+  );
+}
+
+function MeteringGapList({ gaps }: { gaps: MeteringHealth['summary']['gaps'] }): ReactNode {
+  const shown = gaps.slice(0, 3);
+  return (
+    <ul
+      className="row wrap small"
+      style={{ margin: 0, paddingLeft: 0, listStyle: 'none', gap: 'var(--janus-space-2) var(--janus-space-5)' }}
+    >
+      {shown.map((gap) => (
+        <li key={`${gap.model_name}-${gap.upstream_id}-${gap.modality}-${gap.accounting ?? ''}`}>
+          <span className="mono">{gap.model_name}</span>
+          <span className="muted">
+            {' '}
+            · {gap.upstream_name || gap.upstream_id} · {gap.modality} · {formatNumber(gap.requests)} req
+          </span>
+        </li>
+      ))}
+      {gaps.length > shown.length ? (
+        <li className="muted">{t('adminSystem.meteringMore', { count: gaps.length - shown.length })}</li>
+      ) : null}
+    </ul>
   );
 }
 
@@ -716,7 +740,9 @@ function UpstreamTimeoutsCard({ timeouts }: { timeouts: UpstreamTimeouts }): Rea
           })}
         </div>
         <div className="row-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-          <span className="small muted">{t('adminSystem.timeouts.envVarsNote')}</span>
+          <span className="small muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+            {t('adminSystem.timeouts.envVarsNote')}
+          </span>
           <div className="row" style={{ gap: 8 }}>
             {overridden ? (
               <button type="button" className="btn btn-ghost" onClick={() => reset.mutate()} disabled={busy}>

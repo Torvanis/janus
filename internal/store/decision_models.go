@@ -63,8 +63,9 @@ const (
 	// CostSourceProvider: only the provider's reported charge; a call the
 	// provider does not price costs nothing.
 	CostSourceProvider = "provider"
-	// CostSourceCard: always the rate card (plus the request fee), even
-	// when the provider reports a charge.
+	// CostSourceCard: the rate card (plus the request fee) when the
+	// provider quotes no charge. A quoted charge always wins (owner ruling),
+	// so this prices calls exactly like CostSourceAuto; kept for saved rows.
 	CostSourceCard = "card"
 	// CostSourceNone: free (self-hosted with no chargeback).
 	CostSourceNone = "none"

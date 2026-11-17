@@ -73,7 +73,14 @@ function mockGets(conversation?: unknown) {
 
 function renderAt(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+  const me = {
+    id: 'u1',
+    active_team_id: '',
+    teams: [],
+    feature_flags: {},
+    chat_enabled: true,
+    chat_available: true,
+  } as unknown as Me;
   return render(
     <QueryClientProvider client={qc}>
       <SessionContext.Provider value={{ me, config: null, loading: false, error: null, refresh: () => {} }}>

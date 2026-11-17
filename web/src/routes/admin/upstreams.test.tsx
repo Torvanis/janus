@@ -290,3 +290,24 @@ describe('Add upstream: self-hosted engine setup note', () => {
     });
   });
 });
+
+describe('Upstreams table: provider column', () => {
+  it('shows the provider name, not the stored adapter type', async () => {
+    const vllm: Upstream = {
+      ...upstreamFixture,
+      id: 'up-2',
+      name: 'GPU server',
+      adapter_type: 'vlm',
+      base_url: 'http://gpu1.example.com:8000/v1',
+    };
+    mocked.get.mockImplementation((path: string) =>
+      path === '/api/v1/admin/upstreams'
+        ? Promise.resolve({ upstreams: [vllm], adapter_types: ['vlm'] })
+        : Promise.reject(new Error(`unexpected GET ${path}`)),
+    );
+    renderDetail();
+    const row = (await screen.findByRole('button', { name: 'GPU server' })).closest('tr') as HTMLElement;
+    expect(within(row).getByText('vLLM')).toBeTruthy();
+    expect(within(row).queryByText('vlm')).toBeNull();
+  });
+});

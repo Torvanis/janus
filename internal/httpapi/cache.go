@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/torvanis/janus/internal/usage"
 	"strings"
 	"sync"
 	"time"
@@ -221,7 +222,14 @@ func (s *Server) cachedUpstreamByID(ctx context.Context, id string) (*store.Upst
 type cachedRates struct {
 	In, Out, Cached            int64
 	CacheWrite5m, CacheWrite1h int64
-	OK                         bool
+	// Lines are the price lines in force with the rates (usage/lines.go).
+	Lines map[string]int64
+	OK    bool
+}
+
+// rates is the card as the cost functions take it.
+func (c cachedRates) rates() usage.Rates {
+	return usage.Rates{InNano: c.In, OutNano: c.Out, CachedNano: c.Cached, CacheWrite5mNano: c.CacheWrite5m, CacheWrite1hNano: c.CacheWrite1h, Lines: c.Lines}
 }
 
 func (s *Server) cachedRateCard(ctx context.Context, modelID string) cachedRates {
@@ -233,7 +241,7 @@ func (s *Server) cachedRateCard(ctx context.Context, modelID string) cachedRates
 		return cachedRates{
 			In: rc.RateInNano, Out: rc.RateOutNano, Cached: rc.RateCachedNano,
 			CacheWrite5m: rc.RateCacheWrite5mNano, CacheWrite1h: rc.RateCacheWrite1hNano,
-			OK: true,
+			Lines: rc.Lines, OK: true,
 		}, nil
 	})
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,7 +45,13 @@ type harness struct {
 	token string
 	model *store.Model
 
+	// upstreamMu orders the fake upstream's appends with readers that look
+	// at requests the gateway cut off (their handler finishes on its own time).
+	upstreamMu       sync.Mutex
 	upstreamRequests []recordedRequest
+	// upstreamRoutes answers "METHOD /path" with a fixed JSON (or JSONL)
+	// body, for tests that need different replies on different paths.
+	upstreamRoutes map[string]string
 
 	// upstreamReply, when set, replaces the default non-streaming JSON
 	// reply; streamFrames, when set, replaces the default SSE frames. Both
@@ -65,7 +72,15 @@ func newHarness(t *testing.T) *harness {
 
 	h.upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		h.upstreamMu.Lock()
 		h.upstreamRequests = append(h.upstreamRequests, recordedRequest{Path: r.URL.Path, Body: body, Header: r.Header.Clone()})
+		routed, isRouted := h.upstreamRoutes[r.Method+" "+r.URL.Path]
+		h.upstreamMu.Unlock()
+		if isRouted {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(routed))
+			return
+		}
 
 		switch {
 		case r.URL.Path == "/v1/models":
@@ -141,6 +156,13 @@ func newHarness(t *testing.T) *harness {
 		Logger:    logger, StartedAt: time.Now(),
 	}
 	h.handler = h.server.Handler()
+
+	// Tests count the requests their fake upstream receives. Janus measuring
+	// a model on its own (when it is enabled, or after a refusal) would add
+	// to them, so it is off here; the capability probe tests turn it on.
+	if err := db.SetCapabilityProbeSetting(ctx, store.CapabilityProbeSetting{OnEnable: false}); err != nil {
+		t.Fatalf("turn off capability probes: %v", err)
+	}
 
 	// Seed: an upstream, an enabled and priced model, a user, a grant, a token.
 	up, err := db.CreateUpstream(ctx, "test-upstream", "openai_compatible", h.upstream.URL, "", "")
@@ -1646,7 +1668,7 @@ func TestHealthAndMetricsEndpoints(t *testing.T) {
 	h.waitForUsageEvents(1)
 
 	rec := httptest.NewRecorder()
-	h.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	h.server.MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/metrics returned %d", rec.Code)
 	}
@@ -2149,8 +2171,10 @@ func TestProxyMetersAnthropicCacheWriteTokens(t *testing.T) {
 	if event.TokensCacheWrite5m != 100 || event.TokensCacheWrite1h != 200 {
 		t.Errorf("cache-write tokens = (%d, %d), want (100, 200)", event.TokensCacheWrite5m, event.TokensCacheWrite1h)
 	}
-	if event.TokensIn != 1000 || event.TokensOut != 500 || event.TokensCached != 50 {
-		t.Errorf("token counts = (%d, %d, %d), want (1000, 500, 50)", event.TokensIn, event.TokensOut, event.TokensCached)
+	// Input tokens include cached tokens, as Anthropic bills them:
+	// 1000 fresh + 50 read + 100 + 200 written.
+	if event.TokensIn != 1350 || event.TokensOut != 500 || event.TokensCached != 50 {
+		t.Errorf("token counts = (%d, %d, %d), want (1350, 500, 50)", event.TokensIn, event.TokensOut, event.TokensCached)
 	}
 	if event.CostNano != wantWithWrites {
 		t.Errorf("cost = %d nano-USD, want %d (must include both write-rate terms)", event.CostNano, wantWithWrites)
@@ -2186,8 +2210,8 @@ func TestProxyMetersAnthropicCacheWriteTokens(t *testing.T) {
 	if event == nil {
 		t.Fatalf("no streamed event with cache-write tokens among %d events", len(events))
 	}
-	if event.TokensCacheWrite1h != 200 || event.TokensIn != 1000 || event.TokensOut != 500 || event.TokensCached != 50 {
-		t.Errorf("streamed counts = (in %d, out %d, cached %d, cw5m %d, cw1h %d), want (1000, 500, 50, 100, 200)",
+	if event.TokensCacheWrite1h != 200 || event.TokensIn != 1350 || event.TokensOut != 500 || event.TokensCached != 50 {
+		t.Errorf("streamed counts = (in %d, out %d, cached %d, cw5m %d, cw1h %d), want (1350, 500, 50, 100, 200)",
 			event.TokensIn, event.TokensOut, event.TokensCached, event.TokensCacheWrite5m, event.TokensCacheWrite1h)
 	}
 	if event.CostNano != wantWithWrites {
@@ -2204,7 +2228,7 @@ func TestProxyMetersAnthropicCacheWriteTokens(t *testing.T) {
 		t.Fatalf("no-cache anthropic proxy returned %d: %s", rec.Code, rec.Body.String())
 	}
 	events = h.waitForUsageEvents(3)
-	event = findEvent(events, func(e *store.UsageEvent) bool { return !e.Streaming && e.TokensCacheWrite5m == 0 && e.TokensIn == 1000 })
+	event = findEvent(events, func(e *store.UsageEvent) bool { return !e.Streaming && e.TokensCacheWrite5m == 0 && e.TokensIn == 1050 })
 	if event == nil {
 		t.Fatalf("no cache-write-free event among %d events", len(events))
 	}
@@ -2215,10 +2239,10 @@ func TestProxyMetersAnthropicCacheWriteTokens(t *testing.T) {
 		InNano: 10 * usage.NanoPerUSD, OutNano: 30 * usage.NanoPerUSD, CachedNano: 1 * usage.NanoPerUSD,
 		CacheWrite5mNano: usage.NanoFromUSD(12.50), CacheWrite1hNano: 20 * usage.NanoPerUSD,
 	}
-	// Still an Anthropic body, so the cache-read count stays additive; only
-	// the cache-WRITE dimensions are absent from this response.
+	// Still an Anthropic body with 50 cache reads (the prompt is 1,050);
+	// only the cache-WRITE dimensions are absent from this response.
 	want := usage.ComputeCostAll(usage.TokenCounts{
-		In: 1000, Out: 500, Cached: 50, CachedDisjoint: true,
+		In: 1050, Out: 500, Cached: 50,
 	}, rates)
 	if event.CostNano != want {
 		t.Errorf("cost without cache writes = %d nano-USD, want %d", event.CostNano, want)

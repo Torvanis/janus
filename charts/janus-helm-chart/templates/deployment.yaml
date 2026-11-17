@@ -48,6 +48,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ int .Values.metrics.port }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -69,6 +73,10 @@ spec:
               value: {{ .Values.publicURL | quote }}
             - name: JANUS_LISTEN_ADDR
               value: ":8080"
+            # Prometheus metrics have a port of their own; the Ingress and the
+            # http Service port never serve them.
+            - name: JANUS_METRICS_ADDR
+              value: {{ if .Values.metrics.enabled }}{{ printf ":%d" (int .Values.metrics.port) | quote }}{{ else }}"off"{{ end }}
             - name: JANUS_COOKIE_SECURE
               value: {{ hasPrefix "https://" .Values.publicURL | quote }}
             {{- if eq .Values.database.type "sqlite" }}

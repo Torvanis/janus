@@ -242,6 +242,8 @@ describe('Model performance charts', () => {
       expect(within(card).getByRole('img', { name: title })).toBeTruthy();
     }
     const legends = within(card).getAllByRole('list', { name: 'Chart series' });
+    // This fixture has no response figures (an older server), so the time to
+    // first token, output and cache charts show their empty state, no legend.
     expect(legends).toHaveLength(3);
     expect(legends[0]!.textContent).toContain('local/llama-8b');
     expect(legends[0]!.textContent).toContain('25');
@@ -254,6 +256,84 @@ describe('Model performance charts', () => {
     const speedSvg = within(card).getByRole('img', { name: 'Average tokens per second' });
     const path = speedSvg.querySelector('g[data-series="m-1"] path')!.getAttribute('d')!;
     expect(path.startsWith('M50.00,')).toBe(true);
+  });
+
+  it('plots time to first token, output size and cache hit rate; a model without cache data reads "not reported"', async () => {
+    const withResponse = {
+      ...perf,
+      models: [
+        {
+          ...perf.models[0]!,
+          avg_ttft_ms: 820,
+          ttft_ms_series: [null, 790, 850],
+          avg_output_tokens: 1950,
+          output_tokens_series: [null, 1900, 2000],
+          cache_reported: true,
+          cache_hit_rate: 0.086,
+          cache_hit_rate_series: [null, 0, 0.1],
+        },
+        {
+          ...perf.models[1]!,
+          avg_ttft_ms: null,
+          ttft_ms_series: [null, null, null],
+          avg_output_tokens: 300,
+          output_tokens_series: [300, null, null],
+          cache_reported: false,
+          cache_hit_rate: null,
+          cache_hit_rate_series: [null, null, null],
+        },
+      ],
+    };
+    mocked.get.mockResolvedValue({ ...overviewData(), model_performance: withResponse });
+    renderOverview();
+    const card = await screen.findByTestId('model-performance');
+    for (const title of ['Average time to first token', 'Average output tokens', 'Cache hit rate']) {
+      expect(within(card).getByRole('img', { name: title })).toBeTruthy();
+    }
+    const legends = within(card).getAllByRole('list', { name: 'Chart series' });
+    expect(legends).toHaveLength(6);
+    expect(legends[3]!.textContent).toContain('820 ms');
+    expect(legends[3]!.textContent).toContain('—');
+    expect(legends[4]!.textContent).toContain('1,950 tok');
+    expect(legends[5]!.textContent).toContain('8.6%');
+    expect(legends[5]!.textContent).toContain('not reported');
+    expect(legends[5]!.textContent).not.toContain('0%not');
+    // A 0% bucket of a reporting model is drawn (a real zero); the
+    // not-reported model has no line at all.
+    const cacheSvg = within(card).getByRole('img', { name: 'Cache hit rate' });
+    expect(cacheSvg.querySelector('g[data-series="m-1"] path')!.getAttribute('d')).toMatch(/^M50\.00,100\.00 L100\.00,/);
+    expect(cacheSvg.querySelector('g[data-series="m-2"] path')).toBeNull();
+  });
+
+  it('lets the admin pick which models to plot, kept in the URL and sent to the server', async () => {
+    mocked.get.mockResolvedValue({
+      ...overviewData(),
+      model_performance: {
+        ...perf,
+        available: [
+          { key: 'm-1', model_name: 'local/vllm-8b', requests: 8451 },
+          { key: 'm-2', model_name: 'qwen3.8-27b', requests: 130 },
+          { key: 'm-3', model_name: 'rarely-used', requests: 2 },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderOverview();
+    const card = await screen.findByTestId('model-performance');
+    expect(card.textContent).toContain('The 2 most-used models');
+    await user.click(within(card).getByRole('button', { name: 'Models: Most used' }));
+    const picker = within(card).getByRole('group', { name: 'Models to plot' });
+    expect(within(picker).getByText('rarely-used')).toBeTruthy();
+    await user.click(within(picker).getByRole('checkbox', { name: /rarely-used/ }));
+    expect(screen.getByTestId('location-search').textContent).toContain('models=m-3');
+    await vi.waitFor(() =>
+      expect(mocked.get.mock.calls.map((c) => c[0])).toContain('/api/v1/admin/overview?range=month&part=performance&models=m-3'),
+    );
+    await user.click(within(picker).getByRole('checkbox', { name: /qwen3\.8-27b/ }));
+    expect(screen.getByTestId('location-search').textContent).toContain('models=m-3%2Cm-2');
+    // Back to the default.
+    await user.click(within(picker).getByRole('button', { name: 'Most used' }));
+    expect(screen.getByTestId('location-search').textContent).not.toContain('models=');
   });
 
   it('adds the upstream to the legend only when two plotted models share a name', async () => {

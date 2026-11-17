@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -194,14 +195,80 @@ type ModelPerformance struct {
 	Concurrency     []float64  `json:"concurrency"`
 	TokensPerSecSer []*float64 `json:"tokens_per_second_series"`
 	InputTokensSer  []*float64 `json:"input_tokens_series"`
+
+	// Response figures (see responseQualifies). Each range average is nil
+	// when nothing in the range qualified, and each bucket is nil when
+	// nothing in it did, so a chart shows a gap rather than a false zero.
+	//
+	// AvgTTFTMs is the mean time to first token (ttfb_ms) of successful
+	// STREAMED requests: on a buffered reply the first byte arrives with the
+	// whole answer, so its ttfb is the full generation time.
+	AvgTTFTMs   *float64   `json:"avg_ttft_ms"`
+	TTFTSamples int64      `json:"ttft_samples"`
+	TTFTSer     []*float64 `json:"ttft_ms_series"`
+	// AvgOutputTokens is the mean tokens_out per successful request whose
+	// tokens the provider reported.
+	AvgOutputTokens *float64   `json:"avg_output_tokens"`
+	OutputTokensSer []*float64 `json:"output_tokens_series"`
+	// CacheHitRate is cached input ÷ the whole prompt, token-weighted, in
+	// [0, 1]: tokens_cached / tokens_in, the same formula as the
+	// console's cache figure (web/src/lib/cache.ts). CacheReported is false
+	// when the model reported no cache reads or writes at all in the range;
+	// the rate and every bucket are then nil ("not reported", never 0%).
+	CacheReported bool       `json:"cache_reported"`
+	CacheHitRate  *float64   `json:"cache_hit_rate"`
+	CacheHitSer   []*float64 `json:"cache_hit_rate_series"`
 }
+
+// ModelPerformanceChoice is one model with traffic in the range, offered to
+// the admin as a model to plot.
+type ModelPerformanceChoice struct {
+	ModelID      string `json:"key"`
+	ModelName    string `json:"model_name"`
+	UpstreamID   string `json:"upstream_id"`
+	UpstreamName string `json:"upstream_name"`
+	Requests     int64  `json:"requests"`
+}
+
+// PerfSelect chooses which models ModelPerformanceSeriesFor returns.
+type PerfSelect struct {
+	// Top is how many of the most-used models to return when ModelIDs is
+	// empty (0 = all).
+	Top int
+	// ModelIDs is an explicit choice, returned in this order; ids without
+	// traffic in the range are left out.
+	ModelIDs []string
+	// OnlyChosen narrows the scan itself to ModelIDs (the (model_id,
+	// created_at) index then serves it). The Available list is empty, since
+	// the other models were never read. For one model's figures.
+	OnlyChosen bool
+}
+
+// MaxPerfChoices caps the Available list.
+const MaxPerfChoices = 200
 
 // ModelPerformanceSeries is the admin Overview's model-performance payload.
 type ModelPerformanceSeries struct {
 	Buckets       []string           `json:"buckets"`
 	BucketSeconds int64              `json:"bucket_seconds"`
 	Models        []ModelPerformance `json:"models"`
+	// Available is every model with traffic in the range (most requests
+	// first, capped at MaxPerfChoices), for the model picker.
+	Available []ModelPerformanceChoice `json:"available"`
 }
+
+// responseQualifies is the SQL condition for a request that feeds the
+// response figures (time to first token, output size, cache hit rate): a
+// success, called by someone (not the gateway's own classifier, auto-routing
+// or capability-probe calls) and not a job-status check, which runs no
+// inference. Gateway refusals are excluded by the outer query already.
+const responseQualifies = `(http_status < 300 AND error_code = '' AND token_accounting_method <> 'not_billable' AND client_app NOT IN ('` +
+	InternalClientApp + `','` + InternalRoutingClientApp + `','` + InternalProbeClientApp + `'))`
+
+// tokensQualify narrows responseQualifies to requests whose tokens the
+// provider reported: byte estimates and unmetered media have no real token
+// counts and no cache figures.
+const tokensQualify = responseQualifies + ` AND token_accounting_method NOT IN ('byte_count_fallback','unmetered_modality')`
 
 // ModelPerformanceSeriesFor buckets the scope's traffic for the `top` models
 // with the most requests. Bucket alignment matches UsageSeries so the charts
@@ -211,9 +278,12 @@ type ModelPerformanceSeries struct {
 //     the bucket's request latencies divided by the bucket's duration. A
 //     request is attributed to the bucket it finished in.
 //   - Speed uses the same qualifying rule as the model catalog (speedSample).
-//   - Input context is the mean tokens_in (prompt, including cached prefix)
+//   - Input context is the mean tokens_in (the whole prompt: cached prefix
+//     and cache writes included, as providers bill them)
 //     of the bucket's successful requests.
-func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope, bucket time.Duration, buckets, top int) (ModelPerformanceSeries, error) {
+//   - Time to first token, output size and cache hit rate: see the
+//     ModelPerformance fields and responseQualifies.
+func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope, bucket time.Duration, buckets int, pick PerfSelect) (ModelPerformanceSeries, error) {
 	if bucket <= 0 || buckets <= 0 {
 		return ModelPerformanceSeries{}, fmt.Errorf("model performance requires a positive bucket size and count")
 	}
@@ -236,6 +306,10 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 		tpsSum              float64
 		tpsN                int64
 		inputTokens, inputN int64
+		ttftMs, ttftN       int64
+		outTokens, outN     int64
+		cacheIn, cached     int64
+		cacheSeen           int64
 	}
 	type modelAcc struct {
 		name       string
@@ -262,13 +336,29 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 	ok := `(http_status < 300 AND error_code = '')`
 	speed := ok + ` AND token_accounting_method <> 'byte_count_fallback' AND tokens_out >= ` +
 		fmt.Sprint(PerfMinOutputTokens) + ` AND tokens_out_per_second > 0 AND (throughput_source = 'upstream' OR streaming <> 0)`
+	ttft := responseQualifies + ` AND streaming <> 0 AND ttfb_ms > 0`
+	modelClause := ""
+	if pick.OnlyChosen {
+		if len(pick.ModelIDs) == 0 {
+			return ModelPerformanceSeries{Buckets: []string{}, Models: []ModelPerformance{}, Available: []ModelPerformanceChoice{}}, nil
+		}
+		modelClause = " AND model_id IN (" + placeholders(len(pick.ModelIDs)) + ")"
+		args = append(args, toArgs(pick.ModelIDs)...)
+	}
 	rows, err := s.query(ctx, `SELECT model_id, MIN(model_name), MIN(upstream_id), b, COUNT(*),
 		COALESCE(SUM(CASE WHEN latency_ms > 0 THEN latency_ms ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN `+ok+` THEN tokens_in ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN `+ok+` THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN `+speed+` THEN tokens_out_per_second ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN `+speed+` THEN 1 ELSE 0 END),0)
-		FROM (SELECT *, `+idxExpr.String()+` AS b FROM usage_event WHERE `+clause+` AND model_id <> '' AND error_code NOT LIKE 'policy.%') e
+		COALESCE(SUM(CASE WHEN `+speed+` THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+ttft+` THEN ttfb_ms ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+ttft+` THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+tokensQualify+` THEN tokens_out ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+tokensQualify+` THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+tokensQualify+` THEN tokens_in ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+tokensQualify+` THEN tokens_cached ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN `+tokensQualify+` AND (tokens_cached > 0 OR tokens_cache_write_5m > 0 OR tokens_cache_write_1h > 0) THEN 1 ELSE 0 END),0)
+		FROM (SELECT *, `+idxExpr.String()+` AS b FROM usage_event WHERE `+clause+modelClause+` AND model_id <> '' AND error_code NOT LIKE 'policy.%') e
 		WHERE b >= 0 GROUP BY model_id, b`, append(idxArgs, args...)...)
 	if err != nil {
 		return ModelPerformanceSeries{}, fmt.Errorf("model performance: %w", err)
@@ -278,8 +368,10 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 		var modelID, modelName, upstreamID string
 		var idx int
 		var requests, latencyMs, inputTokens, inputN, tpsN int64
+		var ttftMs, ttftN, outTokens, outN, cacheIn, cached, cacheSeen int64
 		var tpsSum float64
-		if err := rows.Scan(&modelID, &modelName, &upstreamID, &idx, &requests, &latencyMs, &inputTokens, &inputN, &tpsSum, &tpsN); err != nil {
+		if err := rows.Scan(&modelID, &modelName, &upstreamID, &idx, &requests, &latencyMs, &inputTokens, &inputN, &tpsSum, &tpsN,
+			&ttftMs, &ttftN, &outTokens, &outN, &cacheIn, &cached, &cacheSeen); err != nil {
 			return ModelPerformanceSeries{}, fmt.Errorf("scan model performance: %w", err)
 		}
 		if idx < 0 || idx >= buckets {
@@ -297,6 +389,13 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 		b.inputN += inputN
 		b.tpsSum += tpsSum
 		b.tpsN += tpsN
+		b.ttftMs += ttftMs
+		b.ttftN += ttftN
+		b.outTokens += outTokens
+		b.outN += outN
+		b.cacheIn += cacheIn
+		b.cached += cached
+		b.cacheSeen += cacheSeen
 	}
 	if err := rows.Err(); err != nil {
 		return ModelPerformanceSeries{}, err
@@ -313,14 +412,32 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 		}
 		return ids[i] < ids[j]
 	})
-	if top > 0 && len(ids) > top {
-		ids = ids[:top]
+	available := make([]ModelPerformanceChoice, 0, min(len(ids), MaxPerfChoices))
+	if !pick.OnlyChosen {
+		for _, id := range ids[:min(len(ids), MaxPerfChoices)] {
+			m := byModel[id]
+			available = append(available, ModelPerformanceChoice{ModelID: id, ModelName: m.name, UpstreamID: m.upstreamID, Requests: m.requests})
+		}
+	}
+	if len(pick.ModelIDs) > 0 {
+		chosen := make([]string, 0, len(pick.ModelIDs))
+		seen := map[string]bool{}
+		for _, id := range pick.ModelIDs {
+			if byModel[id] != nil && !seen[id] {
+				seen[id] = true
+				chosen = append(chosen, id)
+			}
+		}
+		ids = chosen
+	} else if pick.Top > 0 && len(ids) > pick.Top {
+		ids = ids[:pick.Top]
 	}
 
 	out := ModelPerformanceSeries{
 		Buckets:       make([]string, buckets),
 		BucketSeconds: int64(bucket / time.Second),
 		Models:        make([]ModelPerformance, 0, len(ids)),
+		Available:     available,
 	}
 	for i := range out.Buckets {
 		out.Buckets[i] = FormatTime(grid.Add(-bucket * time.Duration(buckets-i-1)).Truncate(time.Second))
@@ -353,10 +470,29 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 			Concurrency:     make([]float64, buckets),
 			TokensPerSecSer: make([]*float64, buckets),
 			InputTokensSer:  make([]*float64, buckets),
+			TTFTSer:         make([]*float64, buckets),
+			OutputTokensSer: make([]*float64, buckets),
+			CacheHitSer:     make([]*float64, buckets),
 		}
 		var latency, tpsN, inputTokens, inputN int64
+		var ttftMs, ttftN, outTokens, outN, cacheIn, cached, cacheSeen int64
 		var tpsSum float64
+		for _, b := range m.buckets {
+			cacheSeen += b.cacheSeen
+		}
+		p.CacheReported = cacheSeen > 0
 		for i, b := range m.buckets {
+			p.TTFTSer[i] = ratio(b.ttftMs, b.ttftN, round1)
+			p.OutputTokensSer[i] = ratio(b.outTokens, b.outN, round1)
+			if p.CacheReported {
+				p.CacheHitSer[i] = hitRate(b.cached, b.cacheIn)
+			}
+			ttftMs += b.ttftMs
+			ttftN += b.ttftN
+			outTokens += b.outTokens
+			outN += b.outN
+			cacheIn += b.cacheIn
+			cached += b.cached
 			if ms := bucketMs(i); ms > 0 {
 				p.Concurrency[i] = round2(float64(b.latencyMs) / ms)
 			}
@@ -383,9 +519,37 @@ func (s *Store) ModelPerformanceSeriesFor(ctx context.Context, scope UsageScope,
 		if inputN > 0 {
 			p.AvgInputTokens = round1(float64(inputTokens) / float64(inputN))
 		}
+		p.AvgTTFTMs = ratio(ttftMs, ttftN, round1)
+		p.TTFTSamples = ttftN
+		p.AvgOutputTokens = ratio(outTokens, outN, round1)
+		if p.CacheReported {
+			p.CacheHitRate = hitRate(cached, cacheIn)
+		}
 		out.Models = append(out.Models, p)
 	}
 	return out, nil
+}
+
+// ratio is sum ÷ n rounded, or nil when n is 0 (nothing measured).
+func ratio(sum, n int64, round func(float64) float64) *float64 {
+	if n <= 0 {
+		return nil
+	}
+	v := round(float64(sum) / float64(n))
+	return &v
+}
+
+// hitRate is cached ÷ input (the whole prompt) clamped to [0, 1] and rounded
+// to 0.1%, or nil when there was no input to hit. The clamp only guards
+// against a provider that reported more cached tokens than prompt tokens.
+func hitRate(cached, input int64) *float64 {
+	if input <= 0 {
+		return nil
+	}
+	v := float64(cached) / float64(input)
+	v = math.Max(0, math.Min(1, v))
+	v = float64(int64(v*1000+0.5)) / 1000
+	return &v
 }
 
 func round1(v float64) float64 { return float64(int64(v*10+sign(v)*0.5)) / 10 }

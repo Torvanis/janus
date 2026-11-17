@@ -167,9 +167,16 @@ func TestProxyGeminiVideoDownloadRedirect(t *testing.T) {
 	_ = h.store.SetModelStatus(ctx, m.ID, store.ModelEnabled)
 	_, _ = h.store.CreateGrant(ctx, m.ID, store.ModelKindModel, store.GranteeAllUsers, "")
 
+	// The job was created through the gateway by this user; the record is
+	// what makes it reachable, and what routes the download (no model named).
+	if err := h.store.RecordUpstreamObject(ctx, store.UpstreamObject{
+		UpstreamID: up.ID, ObjectID: "models/veo-test/operations/x1", Kind: "video",
+		OwnerType: store.ObjectOwnerUser, OwnerID: h.user.ID, ModelID: m.ID, AccessID: m.ID, RequestedModel: "veo-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/videos/models/veo-test/operations/x1/content", nil)
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	req.Header.Set("X-Janus-Model", "veo-test")
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ftyp") {

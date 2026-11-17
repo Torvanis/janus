@@ -82,9 +82,20 @@ type Usage struct {
 	TokensCached int64
 	// CostUSD is set when the provider reports a price (OpenRouter does).
 	CostUSD float64
+	// CostNano is the same quote parsed exactly (no float64); see Nano.
+	CostNano int64
 	// CostReported says the provider reported a price, even $0: a
 	// reported zero is a price, not a missing one.
 	CostReported bool
+}
+
+// Nano is the quoted cost in nano-USD: the exactly parsed CostNano, or
+// CostUSD rounded to the nano-USD for a Usage built without it.
+func (u Usage) Nano() int64 {
+	if u.CostNano != 0 || u.CostUSD <= 0 {
+		return u.CostNano
+	}
+	return int64(u.CostUSD*1e9 + 0.5)
 }
 
 // Result is one classifier call.

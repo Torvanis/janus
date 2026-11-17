@@ -3,11 +3,12 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
 import type { AdminUserDetail, AdminUserRow, Group, Team } from '../../lib/types';
-import { formatDate, formatNumber, formatRelative, formatUSD, statusTone, titleCase } from '../../lib/format';
+import { formatDate, formatDateTime, formatNumber, formatRelative, formatUSD, statusTone, titleCase } from '../../lib/format';
 import { AreaChart, type MetricKey } from '../../components/charts';
 import { ChargedTeam } from '../../components/ChargedTeam';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, EmptyState, Field, Modal, Pagination, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { HeaderLabel, Truncate } from '../../components/TableText';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { DetailRow, FilterSelect, SearchInput, SortHeader, TokenSizeFilter, tokenSizeParams } from '../shared';
 import { RetainedPanel } from '../../components/RouteTopNav';
@@ -59,10 +60,14 @@ function SortableColumn({
   return (
     <th scope="col" className={className} aria-sort={active ? (current.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button type="button" onClick={() => onSort(`${field}_${active && current.dir === 'asc' ? 'desc' : 'asc'}`)}>
-        {label}
-        <span aria-hidden="true" style={{ opacity: active ? 1 : 0.3 }}>
-          {active && current.dir === 'desc' ? '↓' : '↑'}
-        </span>
+        <HeaderLabel
+          label={label}
+          after={
+            <span aria-hidden="true" style={{ opacity: active ? 1 : 0.3 }}>
+              {active && current.dir === 'desc' ? '↓' : '↑'}
+            </span>
+          }
+        />
       </button>
     </th>
   );
@@ -578,9 +583,9 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
                 <ul className="stack" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
                   {data.effective_grants.map((grant) => (
                     <li key={`${grant.model}-${grant.source}`} className="row-between small">
-                      <span className="truncate">
+                      <Truncate title={`${grant.model} ${t('adminPeople.onUpstream', { name: grant.upstream })}`}>
                         {grant.model} <span className="muted">{t('adminPeople.onUpstream', { name: grant.upstream })}</span>
-                      </span>
+                      </Truncate>
                       <Badge tone={grant.status === 'enabled' ? 'primary' : 'neutral'}>
                         {t('adminPeople.viaSource', { name: grant.source })}
                       </Badge>
@@ -598,7 +603,7 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
                 <ul className="stack" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 6 }}>
                   {data.tokens.map((token) => (
                     <li key={token.id} className="row-between small">
-                      <span className="truncate">{token.description || t('adminPeople.untitled')}</span>
+                      <Truncate>{token.description || t('adminPeople.untitled')}</Truncate>
                       <span className="mono muted">{token.prefix}…</span>
                     </li>
                   ))}
@@ -682,8 +687,10 @@ function UserDetailDrawer({ userId, onClose }: { userId: string | null; onClose:
                     <tbody>
                       {data.recent_requests.map((request) => (
                         <tr key={request.id}>
-                          <td className="small muted">{formatRelative(request.created_at)}</td>
-                          <td className="small truncate">{request.model || '—'}</td>
+                          <td className="small muted nowrap" title={formatDateTime(request.created_at)}>
+                            {formatRelative(request.created_at)}
+                          </td>
+                          <td className="small nowrap">{request.model || '—'}</td>
                           <td className="small">
                             <ChargedTeam event={request} />
                           </td>

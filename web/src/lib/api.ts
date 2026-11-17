@@ -57,7 +57,12 @@ export function csrfHeaders(): Record<string, string> {
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+interface RequestOptions {
+  /** Give up after this long with a "did not answer" error instead of waiting forever. */
+  timeoutMs?: number;
+}
+
+async function request<T>(method: Method, path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -81,8 +86,18 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
       headers,
       credentials: 'same-origin',
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined,
     });
-  } catch {
+  } catch (error) {
+    // By name: the abort reason is a DOMException, whose class differs
+    // between the browser, jsdom and Node.
+    if ((error as { name?: string } | null)?.name === 'TimeoutError') {
+      throw new ApiError(0, {
+        message: `The gateway did not answer within ${Math.round((opts.timeoutMs ?? 0) / 1000)} seconds.`,
+        code: 'timeout',
+        type: 'server_error',
+      });
+    }
     throw new ApiError(0, {
       message: 'The gateway could not be reached. Check your connection — Janus will retry automatically.',
       code: 'network_error',
@@ -119,7 +134,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>('GET', path),
+  get: <T>(path: string, opts?: RequestOptions) => request<T>('GET', path, undefined, opts),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body ?? {}),

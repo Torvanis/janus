@@ -129,10 +129,6 @@ func (s *Server) handleChatSearch(w http.ResponseWriter, r *http.Request) {
 // in batches of 500. Needed after an encryption-key rotation or an upgrade
 // that changes tokenization. Admins trigger it but never see content.
 func (s *Server) handleChatReindex(w http.ResponseWriter, r *http.Request) {
-	if !s.chatEnabled() {
-		WriteError(w, r, ErrNotFoundf("chat"))
-		return
-	}
 	ctx := r.Context()
 	key := s.chatSearchKey()
 	var messages, cleared, titles, unreadable int
@@ -252,7 +248,8 @@ func (s *Server) chatGenerateTitle(ctx context.Context, user *store.User, token 
 	messages = append(messages, map[string]string{"role": "user", "content": "Title for the conversation above:"})
 	// No reasoning: a title needs none, and a reasoning model would spend
 	// its output budget thinking. reasoning_effort "none" turns it off on
-	// vLLM/llama.cpp Qwen, OpenAI and Gemini; Claude takes its least effort.
+	// vLLM/llama.cpp Qwen, OpenAI and Gemini, and the proxy turns it into the
+	// model's own switch (Claude: thinking disabled) or its least thinking.
 	payload, _ := json.Marshal(map[string]any{
 		"model": model, "stream": false, "max_tokens": chatTitleMaxTokens,
 		"reasoning_effort": "none", "messages": messages,

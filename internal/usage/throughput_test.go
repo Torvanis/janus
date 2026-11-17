@@ -14,14 +14,14 @@ func TestProcessedInputTokensExcludesCacheReads(t *testing.T) {
 		in   TokenCounts
 		want int64
 	}{
-		{"subset convention subtracts cached", TokenCounts{In: 1000, Cached: 900}, 100},
+		{"cached tokens are subtracted", TokenCounts{In: 1000, Cached: 900}, 100},
 		{"no cache is unchanged", TokenCounts{In: 1000}, 1000},
 		{"fully cached processes nothing", TokenCounts{In: 1000, Cached: 1000}, 0},
 		{"inconsistent report never goes negative", TokenCounts{In: 100, Cached: 900}, 0},
-		// Anthropic/Bedrock: input_tokens already excludes cache reads, and
+		// Anthropic/Bedrock: 50 fresh + 9,000 read (+ writes) is the prompt;
 		// cache writes are prompt the provider really processed.
-		{"disjoint keeps fresh input", TokenCounts{In: 50, Cached: 9000, CachedDisjoint: true}, 50},
-		{"disjoint adds cache writes", TokenCounts{In: 50, Cached: 9000, CacheWrite5m: 200, CacheWrite1h: 30, CachedDisjoint: true}, 280},
+		{"cache reads excluded", TokenCounts{In: 9050, Cached: 9000}, 50},
+		{"cache writes kept", TokenCounts{In: 9280, Cached: 9000, CacheWrite5m: 200, CacheWrite1h: 30}, 280},
 	}
 	for _, tc := range cases {
 		if got := ProcessedInputTokens(tc.in); got != tc.want {

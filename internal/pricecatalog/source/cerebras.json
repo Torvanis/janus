@@ -1,0 +1,31 @@
+{
+  "provider": "cerebras",
+  "entries": [
+    {
+      "provider": "cerebras",
+      "model": "gpt-oss-120b",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 350000000,
+        "rate_out_nanousd": 750000000
+      },
+      "source": {
+        "url": "https://www.cerebras.ai/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "cerebras",
+      "model": "qwen-3.8-27b",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 990000000,
+        "rate_out_nanousd": 1490000000
+      },
+      "source": {
+        "url": "https://www.cerebras.ai/pricing",
+        "read_at": "2026-11-06"
+      }
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 import { Suspense, lazy, type ReactNode } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SessionProvider, useSession } from './app/session';
 import { Shell } from './app/Shell';
 import { Spinner } from './components/ui';
+import { t } from './lib/i18n';
 import { LoginPage, SignedOutPage } from './routes/Login';
 import { DashboardPage } from './routes/Dashboard';
 import { TokensPage } from './routes/Tokens';
@@ -84,9 +85,11 @@ function AppRoutes(): ReactNode {
                 <Route
                   path="/chat/shared/:share"
                   element={
-                    <Suspense fallback={<FullPageSpinner />}>
-                      <SharedChatPage />
-                    </Suspense>
+                    <RequireChat shared>
+                      <Suspense fallback={<FullPageSpinner />}>
+                        <SharedChatPage />
+                      </Suspense>
+                    </RequireChat>
                   }
                 />
                 {['/chat', '/chat/:id'].map((path) => (
@@ -94,9 +97,11 @@ function AppRoutes(): ReactNode {
                     key={path}
                     path={path}
                     element={
-                      <Suspense fallback={<FullPageSpinner />}>
-                        <ChatPage />
-                      </Suspense>
+                      <RequireChat>
+                        <Suspense fallback={<FullPageSpinner />}>
+                          <ChatPage />
+                        </Suspense>
+                      </RequireChat>
                     }
                   />
                 ))}
@@ -150,6 +155,43 @@ function RequireSession({ children }: { children: ReactNode }): ReactNode {
     return <Navigate to={`/auth/login?redirect_uri=${encodeURIComponent(target)}`} replace />;
   }
   return <>{children}</>;
+}
+
+/**
+ * Chat pages render only while Administration → Chat has Chat on
+ * (me.chat_enabled) and, except for a shared chat, this person may use it
+ * (me.chat_available). Otherwise the page explains why and makes no chat
+ * API call; administrators get a link to the switch.
+ */
+function RequireChat({ children, shared = false }: { children: ReactNode; shared?: boolean }): ReactNode {
+  const { me } = useSession();
+  const isAdmin = me?.role === 'admin';
+  if (me?.chat_enabled === true && (shared || me.chat_available === true)) return <>{children}</>;
+  const off = me?.chat_enabled !== true;
+  return (
+    <div className="page">
+      <div className="state" style={{ minHeight: '60dvh' }}>
+        <h1 className="state-title">{off ? 'Chat is turned off' : 'Chat is not available to you'}</h1>
+        <p className="state-body">
+          {off
+            ? isAdmin
+              ? 'Janus Chat is turned off for everyone on this Janus. You can turn it on in Administration → Chat.'
+              : 'Janus Chat is turned off for this Janus. Ask an administrator if you need it.'
+            : me?.chat_unavailable_reason || 'Ask an administrator for access to Janus Chat.'}
+        </p>
+        <div className="row">
+          {isAdmin ? (
+            <Link className="btn btn-primary" to="/admin/chat">
+              Open Administration → Chat
+            </Link>
+          ) : null}
+          <Link className={isAdmin ? 'btn' : 'btn btn-primary'} to="/dashboard">
+            {t('common.backToDashboard')}
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RequireAdmin({ children }: { children: ReactNode }): ReactNode {

@@ -2,7 +2,7 @@ package secgw
 
 import (
 	"context"
-	"regexp"
+	"strings"
 
 	"github.com/torvanis/janus/internal/store"
 )
@@ -31,25 +31,44 @@ func ToolOutputJudged(ctx context.Context) bool {
 	return v
 }
 
-// chatMediaTextRe is a transcript or description Chat made of an attached
-// sound or video file and put in the person's message.
-var chatMediaTextRe = regexp.MustCompile(`(?s)<file name="[^"\n]*" kind="(?:transcript|description)">\n.*?\n</file>`)
+type judgedTextKey struct{}
+
+// WithJudgedText names the exact texts the caller made and judged itself
+// and put in the person's message (Chat's transcripts and descriptions of
+// attached sound and video). The model-backed checks leave those out of
+// the person's words. The texts are matched whole: a block the person
+// typed to look like one is not on the list, so it is judged as theirs.
+func WithJudgedText(ctx context.Context, texts []string) context.Context {
+	return context.WithValue(ctx, judgedTextKey{}, texts)
+}
+
+// JudgedText reports WithJudgedText, for a caller that judged its tool
+// output (WithToolOutputJudged); nil otherwise.
+func JudgedText(ctx context.Context) []string {
+	if !ToolOutputJudged(ctx) {
+		return nil
+	}
+	v, _ := ctx.Value(judgedTextKey{}).([]string)
+	return v
+}
 
 // userWordsOnly is msgs with the text of tool output blanked (indexes and
 // roles kept, so the new turn starts where it did): every check that
-// skips empty text then judges the person's words alone. With media, the
-// transcripts and descriptions Chat made (and judged) of attached files
-// are taken out too — only for a caller that judged them
-// (WithToolOutputJudged), or anyone could hide words in such a block.
-func userWordsOnly(msgs []Message, media bool) []Message {
+// skips empty text then judges the person's words alone. The texts in
+// judged (see WithJudgedText) are taken out as well.
+func userWordsOnly(msgs []Message, judged []string) []Message {
 	out := make([]Message, len(msgs))
 	copy(out, msgs)
 	for i := range out {
 		switch {
 		case out[i].Tool:
 			out[i].Text = ""
-		case media && !isAssistant(out[i].Role):
-			out[i].Text = chatMediaTextRe.ReplaceAllString(out[i].Text, "")
+		case !isAssistant(out[i].Role):
+			for _, block := range judged {
+				if block != "" {
+					out[i].Text = strings.ReplaceAll(out[i].Text, block, "")
+				}
+			}
 		}
 	}
 	return out

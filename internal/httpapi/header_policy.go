@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/url"
 
 	"github.com/torvanis/janus/internal/headerpolicy"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/subscription"
 )
 
 // headerPolicySnapshot returns the cached policies and assignments. A load
@@ -55,24 +57,27 @@ func (s *Server) recordHeaderLog(event *store.UsageEvent, rw *headerRewrite, out
 		return
 	}
 	snap := s.headerPolicySnapshot(context.Background())
-	mode := headerpolicy.LogValues
+	// When the setting cannot be read, keep the least: names only.
+	mode := headerpolicy.LogNames
 	var secret map[string]bool
 	if snap != nil {
 		mode = snap.LogMode
+		if rw.policy != nil {
+			secret = snap.Secret[rw.policy.ID]
+		}
 	}
 	if mode == headerpolicy.LogOff {
 		return
 	}
+	// A header a rule marks secret is masked in both lists: the caller may
+	// send that same header, and it is no less secret on the way in.
 	entry := &store.RequestHeaderLog{
-		Inbound: headerpolicy.ForLog(rw.inbound, mode, nil),
+		Inbound: headerpolicy.ForLog(rw.inbound, mode, secret),
 		Changes: rw.changes,
 		Target:  rw.target,
 	}
 	if rw.policy != nil {
 		entry.PolicyID, entry.PolicyName = rw.policy.ID, rw.policy.Name
-		if snap != nil {
-			secret = snap.Secret[rw.policy.ID]
-		}
 	}
 	entry.Outbound = headerpolicy.ForLog(outbound, mode, secret)
 	event.AfterInsertHeaders = func(ctx context.Context) {
@@ -81,4 +86,45 @@ func (s *Server) recordHeaderLog(event *store.UsageEvent, rw *headerRewrite, out
 			s.Logger.WarnContext(ctx, "write request header log", "error", err, "usage_id", event.ID)
 		}
 	}
+}
+
+// upstreamPolicy returns a lookup of the header policy in force for one
+// upstream (its own, else the default), read from the cached snapshot each
+// time so an edit applies without a restart.
+func (s *Server) upstreamPolicy(upstreamID string) func(ctx context.Context) *headerpolicy.Policy {
+	return func(ctx context.Context) *headerpolicy.Policy {
+		p, _ := s.headerPolicySnapshot(ctx).Resolve(store.HeaderTargetUpstream, upstreamID)
+		return p
+	}
+}
+
+// ownUpstreamClient is the client for a call Janus itself makes to an upstream
+// (discovery, probes, classifiers, decision models, routing evaluation,
+// background job polls). It is upstreamHTTPClient plus the upstream's header
+// policy: the headers the policy adds go out on every request to that
+// upstream's origin, so a policy that carries the upstream's access
+// credentials (a Cloudflare Access service token, a gateway key) works for
+// these calls as it does for users' requests.
+//
+// Every call to an upstream that does not come from a caller's request must
+// use this, never upstreamHTTPClient directly: TestOwnUpstreamCallsUseThePolicyClient
+// lists the remaining direct uses and fails when one is added.
+func (s *Server) ownUpstreamClient(ctx context.Context, upstreamID, baseURL string) *http.Client {
+	return headerpolicy.Client(s.upstreamHTTPClient(ctx), baseURL, s.upstreamPolicy(upstreamID))
+}
+
+// ownPersonalClient is ownUpstreamClient for a personal plan provider: the
+// client for the calls Janus itself makes to the vendor (sign-in, token
+// renewal and revocation, account, model list, plan usage). The headers the
+// provider's policy adds go out on requests to the provider's own endpoints
+// (subscription.OwnsURL) and to no other host. The policy is the one an
+// administrator assigned to the provider for everyone, else the default.
+func (s *Server) ownPersonalClient(ctx context.Context, provider subscription.Provider) *http.Client {
+	id := provider.ID()
+	return headerpolicy.ClientFor(s.upstreamHTTPClient(ctx),
+		func(u *url.URL) bool { return subscription.OwnsURL(provider, u) },
+		func(ctx context.Context) *headerpolicy.Policy {
+			p, _ := s.headerPolicySnapshot(ctx).Resolve(store.HeaderTargetPersonal, id)
+			return p
+		})
 }

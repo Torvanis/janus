@@ -1,9 +1,11 @@
 /**
  * Upstream deletion preflight: the delete dialog fetches what depends on the
- * upstream, lists the hosted models and the managed models targeting them,
- * blocks the delete while enabled aliases depend on it until the admin
- * explicitly forces, and offers to purge the direct grants that would
- * otherwise dangle. The DELETE carries force / purge_grants accordingly.
+ * upstream, summarizes the models that turn off and the managed models that
+ * stop working (each with a Fix link), blocks the delete while enabled
+ * managed models depend on it until the admin explicitly chooses "Delete
+ * anyway", and offers to remove the grants that would otherwise dangle. The
+ * name must be typed only when something in use breaks. The DELETE carries
+ * force / purge_grants accordingly.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -75,7 +77,7 @@ function renderList() {
 async function openDeleteDialog(): Promise<HTMLElement> {
   const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: 'Delete' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Delete “Anthropic”?' });
+  const dialog = await screen.findByRole('dialog', { name: 'Delete upstream “Anthropic”?' });
   await within(dialog).findByTestId('upstream-dependents');
   return dialog;
 }
@@ -111,24 +113,24 @@ describe('upstream delete dialog — dependents preflight', () => {
     renderList();
     const user = userEvent.setup();
     const dialog = await openDeleteDialog();
-    await user.click(within(dialog).getByText('60 hosted model(s) will be disabled'));
-    const physical = within(dialog).getByRole('region', { name: 'Hosted dependents' });
+    await user.click(within(dialog).getByText('60 models turn off'));
+    const physical = within(dialog).getByRole('region', { name: 'Affected models' });
     await user.click(within(physical).getByRole('button', { name: /Next/ }));
     expect(within(physical).getByText('physical-25')).toBeTruthy();
     await user.type(within(physical).getByRole('searchbox'), 'physical-59');
     expect(within(physical).getByText('physical-59')).toBeTruthy();
     expect(within(physical).getByText('1 of 60 rows')).toBeTruthy();
-    const aliases = within(dialog).getByRole('region', { name: 'Managed alias dependents' });
+    const aliases = within(dialog).getByRole('region', { name: 'Affected managed models' });
     await user.click(within(aliases).getByRole('button', { name: /Next/ }));
     expect(within(aliases).getByText('alias-25')).toBeTruthy();
     await user.type(within(aliases).getByRole('searchbox'), 'no-match');
     expect(within(aliases).getByText('0 of 60 rows')).toBeTruthy();
-    expect(within(dialog).getByText('60 managed model(s) target models on this upstream.')).toBeTruthy();
+    expect(within(dialog).getByText('60 managed models stop working')).toBeTruthy();
     await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
     const confirm = within(dialog).getByRole('button', { name: 'Delete upstream' }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
-    await user.click(within(dialog).getByRole('checkbox', { name: /Delete anyway and break 60 enabled managed model/ }));
-    await user.click(within(dialog).getByRole('checkbox', { name: /Also remove 75 direct grant/ }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Delete anyway and break 60 managed models/ }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Also remove the 75 grants/ }));
     expect(mocked.del).not.toHaveBeenCalled();
     await user.click(confirm);
     await waitFor(() => expect(mocked.del).toHaveBeenCalledWith('/api/v1/admin/upstreams/up-1?force=true&purge_grants=true'));
@@ -144,8 +146,20 @@ describe('upstream delete dialog — dependents preflight', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Delete' }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
+    // The blocker is named and comes with a way out; no name field, no delete.
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('Couldn’t check what uses Anthropic');
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
     expect((within(dialog).getByRole('button', { name: 'Delete upstream' }) as HTMLButtonElement).disabled).toBe(true);
+    // Try again re-runs the check; once it succeeds the delete can proceed.
+    mocked.get.mockImplementation((path: string) =>
+      path.endsWith('/dependents')
+        ? Promise.resolve({ models: twoModels, managed_models: [], grant_count: 0, blocking_managed_models: 0 })
+        : get(path),
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }));
+    await within(dialog).findByTestId('upstream-dependents');
+    await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
+    expect((within(dialog).getByRole('button', { name: 'Delete upstream' }) as HTMLButtonElement).disabled).toBe(false);
     expect(mocked.del).not.toHaveBeenCalled();
   });
 
@@ -193,11 +207,16 @@ describe('upstream delete dialog — dependents preflight', () => {
     const user = userEvent.setup();
     const dialog = await openDeleteDialog();
 
-    expect(within(dialog).getByText('2 hosted model(s) will be disabled')).toBeTruthy();
+    expect(within(dialog).getByText('2 models turn off')).toBeTruthy();
+    expect(within(dialog).getByText('· 2 in use')).toBeTruthy();
     expect(within(dialog).queryByRole('alert')).toBeNull();
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
     const confirm = within(dialog).getByRole('button', { name: 'Delete upstream' });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
-    await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
+    // Models in use break, so the name field appears and takes focus.
+    const field = within(dialog).getByRole('textbox');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    await user.type(field, 'Anthropic');
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
     await user.click(confirm);
     await waitFor(() => expect(mocked.del).toHaveBeenCalledWith('/api/v1/admin/upstreams/up-1'));
@@ -217,27 +236,77 @@ describe('upstream delete dialog — dependents preflight', () => {
     const user = userEvent.setup();
     const dialog = await openDeleteDialog();
 
-    const warning = within(dialog).getByRole('alert');
-    expect(within(warning).getByText('2 managed model(s) target models on this upstream.')).toBeTruthy();
-    expect(within(warning).getByText('current-best')).toBeTruthy();
-    expect(within(warning).getByText(/old-alias/)).toBeTruthy();
-    expect(within(warning).getByText(/already disabled/)).toBeTruthy();
-    expect(
-      within(warning)
-        .getByRole('link', { name: /Managed models page/ })
-        .getAttribute('href'),
-    ).toBe('/admin/managed-models');
+    // Only the enabled one stops working; the blocker says what to do.
+    expect(within(dialog).getByText('1 managed model stops working')).toBeTruthy();
+    expect(within(dialog).getByRole('alert').textContent).toBe('Fix it first: point it at another model or turn it off.');
+    const aliases = within(dialog).getByRole('region', { name: 'Affected managed models' });
+    expect(within(aliases).getByText('current-best')).toBeTruthy();
+    expect(within(aliases).getByText(/already off/)).toBeTruthy();
+    // A short list is just the list: no search box or page-size picker.
+    expect(within(aliases).queryByRole('searchbox')).toBeNull();
+    expect(within(aliases).queryByRole('combobox')).toBeNull();
+    // Each managed model links straight to its row on the Managed models page.
+    expect(within(aliases).getByRole('link', { name: 'Fix current-best on the Managed models page' }).getAttribute('href')).toBe(
+      '/admin/managed-models?q=current-best',
+    );
+    expect(within(aliases).getByRole('link', { name: 'Fix old-alias on the Managed models page' }).getAttribute('href')).toBe(
+      '/admin/managed-models?q=old-alias',
+    );
 
     const confirm = within(dialog).getByRole('button', { name: 'Delete upstream' });
     await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
     // Typed name alone is not enough while an enabled alias blocks.
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
 
-    await user.click(within(dialog).getByRole('checkbox', { name: /Delete anyway and break 1 enabled managed model/ }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Delete anyway and break 1 managed model/ }));
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
-    await user.click(within(dialog).getByRole('checkbox', { name: /Also remove 3 direct grant/ }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Also remove the 3 grants/ }));
     await user.click(confirm);
 
     await waitFor(() => expect(mocked.del).toHaveBeenCalledWith('/api/v1/admin/upstreams/up-1?force=true&purge_grants=true'));
+  });
+
+  it('deletes an upstream with nothing in use in one click, without typing the name', async () => {
+    mockApi({
+      models: [{ id: 'm-1', name: 'claude-fable-5', display_name: '', status: 'pending_approval' }],
+      managed_models: [{ id: 'mm-1', name: 'parked', status: 'disabled', target_model_name: 'claude-fable-5' }],
+      grant_count: 1,
+      blocking_managed_models: 0,
+    });
+    renderList();
+    const user = userEvent.setup();
+    const dialog = await openDeleteDialog();
+
+    expect(within(dialog).getByText('1 model turns off')).toBeTruthy();
+    expect(within(dialog).getByText('1 managed model(s) point here, all already off')).toBeTruthy();
+    expect(within(dialog).queryByRole('textbox')).toBeNull();
+    expect(within(dialog).queryByRole('checkbox', { name: /Delete anyway/ })).toBeNull();
+    // Focus stays on the safe choice.
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }));
+    const confirm = within(dialog).getByRole('button', { name: 'Delete upstream' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    await user.click(confirm);
+    await waitFor(() => expect(mocked.del).toHaveBeenCalledWith('/api/v1/admin/upstreams/up-1'));
+    expect(await screen.findByText('Anthropic deleted. Its models are off, and usage history is kept.')).toBeTruthy();
+  });
+
+  it('never sends force when the admin unticks "Delete anyway" again', async () => {
+    mockApi({
+      models: twoModels,
+      managed_models: [{ id: 'mm-1', name: 'current-best', status: 'enabled', target_model_name: 'claude-fable-5' }],
+      grant_count: 0,
+      blocking_managed_models: 1,
+    });
+    renderList();
+    const user = userEvent.setup();
+    const dialog = await openDeleteDialog();
+    const force = within(dialog).getByRole('checkbox', { name: /Delete anyway/ });
+    const confirm = within(dialog).getByRole('button', { name: 'Delete upstream' }) as HTMLButtonElement;
+    await user.type(within(dialog).getByRole('textbox'), 'Anthropic');
+    await user.click(force);
+    expect(confirm.disabled).toBe(false);
+    await user.click(force);
+    expect(confirm.disabled).toBe(true);
+    expect(mocked.del).not.toHaveBeenCalled();
   });
 });

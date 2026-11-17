@@ -10,7 +10,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import type {
   SecgwBinding,
   SecgwEffective,
@@ -592,6 +592,37 @@ describe('security — violations', () => {
     const drawer = screen.getByRole('dialog');
     expect(within(drawer).getByText('Nothing stored')).toBeTruthy();
     expect(within(drawer).queryByRole('button', { name: 'Reveal captured text' })).toBeNull();
+  });
+});
+
+describe('security — violations that fail to load', () => {
+  it('shows the server’s reason and Try again, not an empty page, and sends the day filters', async () => {
+    mocked.get.mockImplementation(async (path: string) => {
+      if (path.includes('/secgw/violations?') && path.includes('since=7d')) {
+        throw new ApiError(400, {
+          message: 'since must be an RFC 3339 timestamp or a duration like 24h',
+          code: 'invalid_request',
+          type: 'invalid_request_error',
+          param: 'since',
+        });
+      }
+      if (path.includes('/secgw/violations?')) return { violations: [violation] };
+      if (path.endsWith('/secgw/categories')) return categoriesDoc;
+      throw new Error(`unexpected GET ${path}`);
+    });
+    renderPage('/admin/security/violations');
+    const user = userEvent.setup();
+    await screen.findByText('Prompt injection scored 0.97');
+    expect(screen.getByText(/^1–1 · newest first/)).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Last 7 days' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('since must be an RFC 3339 timestamp or a duration like 24h');
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(mocked.get.mock.calls.some(([p]) => (p as string).includes('/secgw/violations?since=7d'))).toBe(true);
+    // No "No rows on this page" under an error: that reads as an empty result.
+    expect(screen.queryByText(/No rows on this page/)).toBeNull();
+    expect(screen.queryByText(/violations on this page/)).toBeNull();
   });
 });
 

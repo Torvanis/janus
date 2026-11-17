@@ -20,6 +20,8 @@ describe('active team selection', () => {
     expect(screen.getByTitle(/does not change API keys. Manage each/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Manage token teams' }).getAttribute('href')).toBe('/tokens');
     expect(screen.getByLabelText('Working under').getAttribute('title')).toMatch(/browser.*model/i);
+    // The app's own select style, not a bare native control.
+    expect(screen.getByLabelText('Working under').classList.contains('select')).toBe(true);
   });
   it('keeps removed context visible with an escape instead of silently selecting another team', () => {
     render(

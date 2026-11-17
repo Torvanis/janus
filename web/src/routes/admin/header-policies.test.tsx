@@ -98,6 +98,16 @@ describe('HeaderPoliciesPanel', () => {
     expect((within(openai).getByRole('combobox') as HTMLSelectElement).value).toBe('hp_acme');
   });
 
+  it('shows a target URL whole, as typed, wrapping after a slash instead of being cut', async () => {
+    wrap(<HeaderPoliciesPanel />);
+    const openai = await screen.findByRole('row', { name: /^OpenAI https/ });
+    const url = within(openai).getByTitle('https://api.openai.com/v1');
+    expect(url.textContent).toBe('https://api.openai.com/v1');
+    expect(url.className).toContain('hp-target-detail');
+    expect(url.className).not.toContain('truncate');
+    expect(url.querySelectorAll('wbr').length).toBe(3);
+  });
+
   it('assigns a policy to a target', async () => {
     const user = userEvent.setup();
     wrap(<HeaderPoliciesPanel />);

@@ -1,0 +1,246 @@
+{
+  "provider": "xai",
+  "entries": [
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-non-reasoning",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=199999": 2500000000,
+        "rate_out_nanousd@prompt_over=199999": 5000000000,
+        "rate_cached_nanousd@prompt_over=199999": 400000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-0309-reasoning",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=199999": 2500000000,
+        "rate_out_nanousd@prompt_over=199999": 5000000000,
+        "rate_cached_nanousd@prompt_over=199999": 400000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.20-multi-agent-0309",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=199999": 2500000000,
+        "rate_out_nanousd@prompt_over=199999": 5000000000,
+        "rate_cached_nanousd@prompt_over=199999": 400000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.3",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=199999": 2500000000,
+        "rate_out_nanousd@prompt_over=199999": 5000000000,
+        "rate_cached_nanousd@prompt_over=199999": 400000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.5",
+      "type": "chat",
+      "context_window": 500000,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 6000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_in_nanousd@prompt_over=199999": 4000000000,
+        "rate_out_nanousd@prompt_over=199999": 12000000000,
+        "rate_cached_nanousd@prompt_over=199999": 600000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.6",
+      "type": "chat",
+      "context_window": 500000,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 6000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_in_nanousd@prompt_over=199999": 4000000000,
+        "rate_out_nanousd@prompt_over=199999": 12000000000,
+        "rate_cached_nanousd@prompt_over=199999": 1000000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4.7",
+      "type": "chat",
+      "context_window": 500000,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 6000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_in_nanousd@prompt_over=199999": 4000000000,
+        "rate_out_nanousd@prompt_over=199999": 12000000000,
+        "rate_cached_nanousd@prompt_over=199999": 1000000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-build-0.1",
+      "type": "chat",
+      "context_window": 256000,
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 2000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=199999": 2000000000,
+        "rate_out_nanousd@prompt_over=199999": 4000000000,
+        "rate_cached_nanousd@prompt_over=199999": 400000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-imagine-image",
+      "type": "image",
+      "lines": {
+        "price_image_nanousd": 20000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "1K and 2K output cost the same. Image inputs add $0.002 per image."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-imagine-image-2.0",
+      "type": "image",
+      "lines": {
+        "price_image_nanousd@quality=low,resolution=1k": 40000000,
+        "price_image_nanousd@quality=low,resolution=1.5k": 50000000,
+        "price_image_nanousd@quality=low,resolution=2k": 60000000,
+        "price_image_nanousd@quality=medium,resolution=1k": 60000000,
+        "price_image_nanousd@quality=medium,resolution=1.5k": 70000000,
+        "price_image_nanousd@quality=medium,resolution=2k": 80000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Image inputs (edits) add $0.01 per image."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-imagine-video",
+      "type": "video",
+      "lines": {
+        "price_video_second_nanousd@resolution=480p": 50000000,
+        "price_video_second_nanousd@resolution=720p": 70000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-imagine-video-1.5",
+      "type": "video",
+      "lines": {
+        "price_video_second_nanousd@resolution=480p": 80000000,
+        "price_video_second_nanousd@resolution=720p": 140000000,
+        "price_video_second_nanousd@resolution=1080p": 250000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+    },
+    {
+      "provider": "xai",
+      "model": "grok-imagine-video-1.5-lite",
+      "type": "video",
+      "lines": {
+        "price_video_second_nanousd@resolution=480p": 20000000,
+        "price_video_second_nanousd@resolution=720p": 30000000,
+        "price_video_second_nanousd@resolution=1080p": 140000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+    }
+  ],
+  "defaults": [
+    {
+      "provider": "xai",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 15000000000
+      },
+      "source": {
+        "url": "https://docs.x.ai/developers/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "xAI Text to Speech: $15.00 per 1M characters."
+    }
+  ]
+}

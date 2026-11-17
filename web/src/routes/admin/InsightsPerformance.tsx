@@ -136,7 +136,10 @@ function costHint(d: DecisionModelView, source: string, fee: number): string {
         ? `The charge ${d.upstream_name} reports with each answer${feeText}.`
         : `${d.upstream_name} does not report a charge, so calls will cost $0${feeText}. Use the rate card instead.`;
     case 'card':
-      return `Rate card: ${card}${feeText}.`;
+      // A provider's quote is the call's cost even here (owner ruling).
+      return d.provider_reports_cost
+        ? `The charge ${d.upstream_name} quotes with each answer always wins, else the rate card (${card})${feeText}.`
+        : `Rate card: ${card}${feeText}.`;
     case 'none':
       return 'Calls are free (for example a model you host yourself).';
     default:

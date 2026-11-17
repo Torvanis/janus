@@ -19,8 +19,10 @@ import (
 // ChatTemporaryTTL is how long an idle temporary conversation is kept.
 const ChatTemporaryTTL = 24 * time.Hour
 
-// Chat reasoning effort values the SPA offers; "" = model default.
-var ChatReasoningEfforts = []string{"", "low", "medium", "high"}
+// Chat reasoning effort values a conversation may hold; "" = model
+// default, "none" = no reasoning. The SPA offers the ones the chosen model
+// takes, and the proxy fits whatever is stored to the model that answers.
+var ChatReasoningEfforts = []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 var chatSettingsMigration = migration{name: "0059_chat_settings", stmt: []string{
 	`ALTER TABLE chat_conversation ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,

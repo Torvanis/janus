@@ -12,6 +12,7 @@
  */
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { t } from '../lib/i18n';
+import { useFitToViewport } from './useFitToViewport';
 
 export interface LookupOption {
   id: string;
@@ -58,6 +59,8 @@ export function LookupInput({
   const [labels, setLabels] = useState<Record<string, LookupOption>>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
+  useFitToViewport(menuRef, open);
   const seq = useRef(0);
   const listId = useId();
 
@@ -230,7 +233,7 @@ export function LookupInput({
         </p>
       ) : null}
       {open ? (
-        <ul id={listId} role="listbox" className="lookup-menu" aria-label={label}>
+        <ul ref={menuRef} id={listId} role="listbox" className="lookup-menu" aria-label={label}>
           {options.map((o, i) => (
             <li
               key={o.id}
@@ -238,6 +241,7 @@ export function LookupInput({
               role="option"
               aria-selected={i === highlight}
               className={'lookup-option' + (i === highlight ? ' is-active' : '')}
+              title={o.detail ? `${o.label} · ${o.detail}` : o.label}
               onMouseEnter={() => setHighlight(i)}
               onMouseDown={(e) => {
                 e.preventDefault();

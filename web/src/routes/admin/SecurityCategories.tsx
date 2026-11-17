@@ -13,6 +13,7 @@ import { api } from '../../lib/api';
 import { formatDuration, formatNumber } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { Truncate, UsedBy } from '../../components/TableText';
 import { t, type MessageKey } from '../../lib/i18n';
 import type {
   SecgwCategoryGroup,
@@ -237,15 +238,24 @@ export function CategoriesTab(): ReactNode {
                         <tr key={c.id} data-clickable="true" onClick={() => open(c)}>
                           <th scope="row">
                             <div>{c.name}</div>
-                            <div className="small muted routing-cell-note">
+                            <Truncate
+                              as="div"
+                              lines={2}
+                              className="small muted routing-cell-note"
+                              title={c.linked_slug ? undefined : c.includes}
+                            >
                               {c.linked_slug
                                 ? t('adminSecurity.categories.follows', { name: c.linked_name ?? c.linked_slug })
                                 : firstSentence(c.includes)}
-                            </div>
+                            </Truncate>
                           </th>
                           <td className="num">{pct(c.min_confidence)}</td>
                           <td className="small">
-                            {(c.used_by ?? []).length === 0 ? <span className="muted">—</span> : (c.used_by ?? []).join(', ')}
+                            {(c.used_by ?? []).length === 0 ? (
+                              <span className="muted">—</span>
+                            ) : (
+                              <UsedBy names={c.used_by ?? []} />
+                            )}
                           </td>
                           <td onClick={(e) => e.stopPropagation()}>
                             <label className="switch">

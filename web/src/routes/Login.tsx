@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -28,16 +28,19 @@ export function ConsentBanner({ banner, onAcknowledged }: { banner: SignInBanner
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const paragraphs = (banner.text ?? '').split(/\n\s*\n/).filter((p) => p.trim() !== '');
+  const textRef = useRef<HTMLDivElement>(null);
+  const scrollable = useIsScrollable(textRef);
   return (
     <section className="stack consent-banner" aria-labelledby="consent-title">
       <h2 id="consent-title" style={{ margin: 0, fontSize: '1.05rem' }}>
         {banner.title || 'Notice'}
       </h2>
-      <div className="consent-text" tabIndex={0} aria-label={banner.title || 'Notice'}>
+      <div ref={textRef} className="consent-text" tabIndex={0} aria-label={banner.title || 'Notice'}>
         {paragraphs.map((p, i) => (
           <p key={i}>{p}</p>
         ))}
       </div>
+      {scrollable ? <p className="consent-more">Scroll to read the whole notice.</p> : null}
       {error ? (
         <div className="banner banner-danger" role="alert">
           <span>{error}</span>
@@ -63,6 +66,20 @@ export function ConsentBanner({ banner, onAcknowledged }: { banner: SignInBanner
   );
 }
 
+/** True while the element's content is taller than the element (it scrolls). */
+function useIsScrollable(ref: RefObject<HTMLElement | null>): boolean {
+  const [scrollable, setScrollable] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setScrollable(el.scrollHeight > el.clientHeight + 1);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [ref]);
+  return scrollable;
+}
+
 interface AuthHealth {
   status: 'ok' | 'unavailable';
   provider: string;
@@ -70,6 +87,12 @@ interface AuthHealth {
   local_auth?: boolean;
   needs_setup?: boolean;
   detail?: string;
+  /** An LDAP directory is on: the form accepts user names. */
+  directory_sign_in?: boolean;
+  /** The domain a user name without one signs in with. */
+  default_domain?: string;
+  /** The Windows (NetBIOS) domain accepted as DOMAIN\name. */
+  windows_domain?: string;
 }
 
 export function LoginPage(): ReactNode {
@@ -89,6 +112,9 @@ export function LoginPage(): ReactNode {
   const devAuth = health.data?.dev_auth ?? config.data?.dev_auth ?? false;
   const localAuth = health.data?.local_auth ?? false;
   const needsSetup = health.data?.needs_setup ?? false;
+  const directory = health.data?.directory_sign_in ?? false;
+  const defaultDomain = health.data?.default_domain;
+  const windowsDomain = health.data?.windows_domain;
   const providers = useQuery({
     queryKey: ['auth-providers', redirectTo],
     queryFn: () => api.get<{ providers: SignInProvider[] }>(`/auth/providers?redirect_uri=${encodeURIComponent(redirectTo)}`),
@@ -102,6 +128,19 @@ export function LoginPage(): ReactNode {
   });
   const [acknowledged, setAcknowledged] = useState(false);
   const mustAcknowledge = banner.data?.enabled === true && !banner.data.acknowledged && !acknowledged;
+  // /auth/health and /auth/banner usually answer in a few ms; showing
+  // "Checking your identity provider" for that long is a flash. Show it only
+  // when the checks are slow.
+  const checking = banner.isLoading || health.isLoading;
+  const [showChecking, setShowChecking] = useState(false);
+  useEffect(() => {
+    if (!checking) {
+      setShowChecking(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowChecking(true), 400);
+    return () => window.clearTimeout(timer);
+  }, [checking]);
 
   return (
     <div className="auth-page">
@@ -118,7 +157,7 @@ export function LoginPage(): ReactNode {
         }}
         reducedMotion={appearance.reducedMotion}
       />
-      <main className="auth-card">
+      <main className={mustAcknowledge ? 'auth-card auth-card-consent' : 'auth-card'}>
         <div className="auth-brand">
           <svg viewBox="0 0 32 32" width="46" height="46" aria-hidden="true">
             <defs>
@@ -142,16 +181,17 @@ export function LoginPage(): ReactNode {
           </div>
         ) : null}
 
-        {banner.isLoading ? (
-          <div className="row" style={{ justifyContent: 'center', padding: 'var(--janus-space-4)' }}>
-            <Spinner label={t('login.checkingProvider')} />
-          </div>
+        {checking ? (
+          showChecking ? (
+            <div className="row" style={{ justifyContent: 'center', padding: 'var(--janus-space-4)' }}>
+              <Spinner label={t('login.checkingProvider')} />
+            </div>
+          ) : (
+            // Reserve the space so the card does not jump when the form arrives.
+            <div style={{ minHeight: 48 }} aria-busy="true" />
+          )
         ) : mustAcknowledge && banner.data ? (
           <ConsentBanner banner={banner.data} onAcknowledged={() => setAcknowledged(true)} />
-        ) : health.isLoading ? (
-          <div className="row" style={{ justifyContent: 'center', padding: 'var(--janus-space-4)' }}>
-            <Spinner label={t('login.checkingProvider')} />
-          </div>
         ) : needsSetup ? (
           <FirstRunSetup />
         ) : providerDown && localAuth ? (
@@ -164,7 +204,12 @@ export function LoginPage(): ReactNode {
                 </div>
               </div>
             </div>
-            <LocalSignIn redirectTo={redirectTo} />
+            <LocalSignIn
+              redirectTo={redirectTo}
+              directory={directory}
+              defaultDomain={defaultDomain}
+              windowsDomain={windowsDomain}
+            />
           </div>
         ) : providerDown ? (
           <div className="stack">
@@ -183,7 +228,13 @@ export function LoginPage(): ReactNode {
         ) : devAuth ? (
           <DevSignIn redirectTo={redirectTo} />
         ) : localAuth ? (
-          <LocalSignIn redirectTo={redirectTo} providers={providerList} />
+          <LocalSignIn
+            redirectTo={redirectTo}
+            providers={providerList}
+            directory={directory}
+            defaultDomain={defaultDomain}
+            windowsDomain={windowsDomain}
+          />
         ) : (
           <div className="stack">
             {(providerList.length > 0

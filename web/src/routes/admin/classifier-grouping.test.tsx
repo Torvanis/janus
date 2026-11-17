@@ -434,7 +434,12 @@ describe('Usage insights — performance', () => {
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'How calls to nimble-9b are priced' }), 'card');
     await user.type(screen.getByRole('spinbutton', { name: 'Fee per call for nimble-9b' }), '0.001');
-    expect(screen.getByText('Rate card: $0.042 per million tokens read plus $0.001 per call.')).toBeTruthy();
+    // Openrouter quotes a charge, and a quote always wins over the card.
+    expect(
+      screen.getByText(
+        'The charge Openrouter quotes with each answer always wins, else the rate card ($0.042 per million tokens read) plus $0.001 per call.',
+      ),
+    ).toBeTruthy();
     await user.click(screen.getByRole('checkbox', { name: 'Allow granting it anyway' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>

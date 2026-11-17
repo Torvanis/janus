@@ -634,10 +634,14 @@ func TestChildSafetyAnswersAppropriatelyWithInstructions(t *testing.T) {
 			t.Fatalf("system prompt missing %q:\n%s", want, sys)
 		}
 	}
+	// The classifier's own usage row can land before the request's row, so
+	// wait for the request's row, not for any row.
 	var ev *store.UsageEvent
-	for _, e := range h.waitForUsageEvents(1) {
-		if e.ClientApp != "janus-security-gateway" {
-			ev = e
+	for deadline := time.Now().Add(20 * time.Second); ev == nil && time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+		for _, e := range h.waitForUsageEvents(1) {
+			if e.ClientApp != "janus-security-gateway" {
+				ev = e
+			}
 		}
 	}
 	if ev == nil || !strings.Contains(ev.RouteReason, "child=personal_info") || ev.SecgwAction == store.SecgwActionBlocked {

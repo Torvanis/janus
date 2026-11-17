@@ -1,0 +1,193 @@
+{
+  "provider": "mistral",
+  "entries": [
+    {
+      "provider": "mistral",
+      "model": "codestral-2508",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 900000000,
+        "rate_cached_nanousd": 30000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "codestral-embed-2505",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "ministral-3b-2512",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 100000000,
+        "rate_cached_nanousd": 10000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-embed-2312",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-large-4",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 700000000,
+        "rate_out_nanousd": 2100000000,
+        "rate_cached_nanousd": 70000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-moderation-2603",
+      "type": "moderation",
+      "lines": {
+        "rate_in_nanousd": 0,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "Free."
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-ocr-2512",
+      "type": "chat",
+      "lines": {
+        "price_kpage_nanousd": 2000000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "OCR: $2 per 1,000 pages ($3 with annotations)."
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-ocr-4-1",
+      "type": "chat",
+      "aliases": [
+        "mistral-ocr-latest"
+      ],
+      "lines": {
+        "price_kpage_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "OCR: $4 per 1,000 pages ($5 with annotations)."
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-small-2603",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 600000000,
+        "rate_cached_nanousd": 15000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "voxtral-mini-transcribe-3-0",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 3500000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "voxtral-mini-transcribe-realtime-3-0",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 8000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "voxtral-mini-tts-3-0",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 13000000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "mistral",
+      "model": "voxtral-small-transcribe-3-0",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 4000000
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      }
+    }
+  ],
+  "defaults": [
+    {
+      "provider": "mistral",
+      "type": "moderation",
+      "lines": {
+        "rate_in_nanousd": 0,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.mistral.ai/inference/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "Mistral moderation is free."
+    }
+  ]
+}

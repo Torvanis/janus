@@ -81,10 +81,10 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"identity_provider": map[string]any{"ok": s.OIDC != nil || s.Config.DevAuth(), "provider": s.providerLabel(), "dev_auth": s.Config.DevAuth()},
 		"quota_ledger":      map[string]any{"ok": true, "mode": "durable ledger with event-log reconciliation"},
 		"email":             map[string]any{"ok": s.Alerts.EmailEnabled(), "detail": smtpDetail(s.Alerts.EmailEnabled())},
-		"telemetry":         map[string]any{"prometheus": "/metrics"},
+		"telemetry":         map[string]any{"prometheus": s.metricsLocation()},
 		"upstreams":         upstreamStatus,
 		"metering": map[string]any{
-			"ok":          accounting.Unmetered == 0,
+			"ok":          accounting.Unmetered == 0 && accounting.MeasuredUnpriced == 0,
 			"window_days": 30,
 			"summary":     accounting,
 		},
@@ -493,4 +493,14 @@ func smtpDetail(enabled bool) string {
 		return "SMTP is configured; email alerts will be delivered."
 	}
 	return "Email delivery is off — JANUS_SMTP_HOST is not set."
+}
+
+// metricsLocation says where Prometheus metrics are served: a port of their
+// own, never the one this page was loaded from.
+func (s *Server) metricsLocation() string {
+	addr := strings.TrimSpace(s.Config.MetricsAddr)
+	if addr == "" || strings.EqualFold(addr, "off") {
+		return "off"
+	}
+	return addr + "/metrics"
 }

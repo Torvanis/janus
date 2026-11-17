@@ -254,12 +254,13 @@ describe('Recent request attribution', () => {
 
 describe('Input-tokens tile cache metric', () => {
   it('shows the canonical hit rate plus the served-from-cache count', async () => {
-    // 50 / (950 + 100 + 0) = 4.8% — byte-identical to the Explore rendering
-    // for the same Totals (both surfaces call lib/cache.ts cacheMeta()).
+    // 950 fresh + 50 read + 100 written = 1,100 input tokens; 50 / 1,100 =
+    // 4.5% — byte-identical to the Explore rendering for the same Totals
+    // (both surfaces call lib/cache.ts cacheMeta()).
     mockApi(
       personal({
         totals: totals({
-          tokens_in: 950,
+          tokens_in: 1100,
           tokens_out: 400,
           tokens_cached: 50,
           tokens_cache_write_5m: 100,
@@ -271,8 +272,8 @@ describe('Input-tokens tile cache metric', () => {
     renderDashboard();
 
     const tile = (await screen.findByText('Input tokens')).closest('article')!;
-    expect(within(tile).getByText('950')).toBeTruthy();
-    expect(within(tile).getByText('4.8% cache hit rate · 50 served from cache')).toBeTruthy();
+    expect(within(tile).getByText('1,100')).toBeTruthy();
+    expect(within(tile).getByText('4.5% cache hit rate · 50 served from cache')).toBeTruthy();
   });
 
   it('hides the cache metric entirely when the window has no cache activity', async () => {

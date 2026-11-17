@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/torvanis/janus/internal/safehttp"
 	"io"
 	"log/slog"
 	"net/http"
@@ -198,7 +199,7 @@ type OIDCProvider struct {
 // failure here is fatal at startup: the operator gets the exact URL that failed.
 func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDCProvider, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: safehttp.CheckRedirect(nil)}
 	}
 	discoveryURL := strings.TrimRight(cfg.ProviderURL, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)

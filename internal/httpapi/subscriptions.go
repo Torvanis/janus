@@ -204,7 +204,7 @@ func (s *Server) subscriptionAccessToken(ctx context.Context, route *personalRou
 		s.markSubscriptionReauth(ctx, fresh, route.provider.DisplayName(), reason)
 		return "", subscriptionReauthError(route.provider, reason)
 	}
-	tokens, err := route.provider.Refresh(ctx, s.upstreamHTTPClient(ctx), refresh)
+	tokens, err := route.provider.Refresh(ctx, s.ownPersonalClient(ctx, route.provider), refresh)
 	var reauth *subscription.ReauthError
 	if errors.As(err, &reauth) {
 		s.markSubscriptionReauth(ctx, fresh, route.provider.DisplayName(), reauth.Reason)
@@ -287,7 +287,18 @@ func (s *Server) personalCatalog(ctx context.Context, user *store.User) ([]map[s
 			// Anything else a client sends is fitted, never refused.
 			if efforts != nil {
 				entry["janus"].(map[string]any)["reasoning_efforts"] = efforts
+				// The proxy sends "none" only to a model whose levels
+				// hold it (subscription.Reasoning.Fit), so that is
+				// exactly where Chat may offer Off.
+				if slices.Contains(efforts, "none") {
+					entry["janus"].(map[string]any)["thinking_off"] = adapter.ThinkingOffEffortNone
+				}
 			}
+			// What the model takes, with where each value came from
+			// (built-in plan default, the vendor's list, the owner's
+			// measurement or setting): the same shape as an
+			// organization model's capabilities.
+			entry["janus"].(map[string]any)["capabilities"] = c.Capabilities[m].ResolveWith(subscription.PlanDefaults(c.Provider, m))
 			out = append(out, entry)
 		}
 	}
@@ -324,6 +335,9 @@ func (s *Server) mountSubscriptionRoutes(r chi.Router) {
 	r.Post("/me/subscriptions/{id}/check", s.handleCheckMySubscription)
 	r.Put("/me/subscriptions/{id}/models", s.handleSelectSubscriptionModels)
 	r.Delete("/me/subscriptions/{id}", s.handleDisconnectMySubscription)
+	r.Get("/me/subscriptions/{id}/capabilities", s.handleGetPlanCapabilities)
+	r.Patch("/me/subscriptions/{id}/capabilities", s.handleSetPlanCapabilities)
+	r.Post("/me/subscriptions/{id}/capabilities/measure", s.handleMeasurePlanCapabilities)
 }
 
 func (s *Server) mountSubscriptionAdminRoutes(r chi.Router) {
@@ -474,7 +488,7 @@ func (s *Server) handleStartSubscriptionConnect(w http.ResponseWriter, r *http.R
 		WriteError(w, r, ErrInvalidRequest(provider.DisplayName()+" connects with a key: paste it on the Subscriptions page."))
 		return
 	}
-	auth, err := provider.StartDeviceAuthorization(r.Context(), s.upstreamHTTPClient(r.Context()))
+	auth, err := provider.StartDeviceAuthorization(r.Context(), s.ownPersonalClient(r.Context(), provider))
 	if err != nil {
 		s.Logger.WarnContext(r.Context(), "start subscription device authorization", "provider", providerID, "error", err.Error())
 		WriteError(w, r, ErrUpstreamUnavailable(provider.DisplayName()).WithReason(err.Error()))
@@ -546,7 +560,7 @@ func (s *Server) handlePollSubscriptionConnect(w http.ResponseWriter, r *http.Re
 		WriteError(w, r, err)
 		return
 	}
-	client := s.upstreamHTTPClient(ctx)
+	client := s.ownPersonalClient(ctx, provider)
 	tokens, err := provider.PollDeviceAuthorization(ctx, client, deviceCode)
 	switch {
 	case errors.Is(err, subscription.ErrAuthorizationPending):
@@ -627,7 +641,7 @@ func (s *Server) handleConnectSubscriptionKey(w http.ResponseWriter, r *http.Req
 		WriteError(w, r, ErrInvalidRequest("Paste the key you created at "+provider.DisplayName()+".").WithParam("key"))
 		return
 	}
-	account, err := keyed.VerifyKey(ctx, s.upstreamHTTPClient(ctx), key)
+	account, err := keyed.VerifyKey(ctx, s.ownPersonalClient(ctx, provider), key)
 	if err != nil {
 		var reauth *subscription.ReauthError
 		msg := err.Error()
@@ -645,7 +659,7 @@ func (s *Server) handleConnectSubscriptionKey(w http.ResponseWriter, r *http.Req
 func (s *Server) completeSubscriptionConnect(w http.ResponseWriter, r *http.Request, provider subscription.Provider, account *subscription.Account, tokens *subscription.Tokens) {
 	ctx := r.Context()
 	user := UserFrom(ctx)
-	client := s.upstreamHTTPClient(ctx)
+	client := s.ownPersonalClient(ctx, provider)
 	// One vendor account belongs to one Janus user. Connecting an account
 	// that someone else already connected would make it shared.
 	if existing, err := s.Store.SubscriptionByAccount(ctx, provider.ID(), account.Subject); err == nil && existing.UserID != user.ID {
@@ -653,7 +667,7 @@ func (s *Server) completeSubscriptionConnect(w http.ResponseWriter, r *http.Requ
 		WriteJSON(w, http.StatusOK, map[string]any{"status": "failed", "message": "That " + provider.DisplayName() + " account is already connected to another Janus user. A subscription can only be connected by the person who owns it."})
 		return
 	}
-	models, catalog, err := subscription.FetchModels(ctx, provider, client, tokens.AccessToken)
+	models, catalog, reported, err := subscription.FetchModels(ctx, provider, client, tokens.AccessToken)
 	var reauth *subscription.ReauthError
 	if errors.As(err, &reauth) {
 		_ = provider.Revoke(ctx, client, tokens.RefreshToken)
@@ -691,6 +705,9 @@ func (s *Server) completeSubscriptionConnect(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	if models != nil {
+		s.storeReportedCapabilities(ctx, conn.ID, models, reported)
 	}
 	action := "subscription_connected"
 	if previous != nil {
@@ -746,7 +763,7 @@ func (s *Server) handleRefreshSubscriptionModels(w http.ResponseWriter, r *http.
 		WriteError(w, r, apiErr)
 		return
 	}
-	models, catalog, err := subscription.FetchModels(r.Context(), provider, s.upstreamHTTPClient(r.Context()), token)
+	models, catalog, reported, err := subscription.FetchModels(r.Context(), provider, s.ownPersonalClient(r.Context(), provider), token)
 	var reauth *subscription.ReauthError
 	if errors.As(err, &reauth) {
 		s.markSubscriptionReauth(r.Context(), conn, provider.DisplayName(), reauth.Reason)
@@ -762,6 +779,7 @@ func (s *Server) handleRefreshSubscriptionModels(w http.ResponseWriter, r *http.
 		return
 	}
 	s.refreshReasoningFacts(r.Context(), conn, models, catalog)
+	s.storeReportedCapabilities(r.Context(), conn.ID, models, reported)
 	updated, err := s.Store.SubscriptionByID(r.Context(), conn.ID)
 	if err != nil {
 		WriteError(w, r, err)
@@ -818,6 +836,9 @@ func (s *Server) handleSelectSubscriptionModels(w http.ResponseWriter, r *http.R
 	}
 	s.audit(r, "subscription_models_selected", "subscription", conn.ID,
 		map[string]any{"selected": conn.SelectedModels}, map[string]any{"selected": selected})
+	if conn.Status == store.SubscriptionActive {
+		s.measurePlanSelection(r.Context(), conn, conn.SelectedModels, selected)
+	}
 	updated, err := s.Store.SubscriptionByID(r.Context(), conn.ID)
 	if err != nil {
 		WriteError(w, r, err)

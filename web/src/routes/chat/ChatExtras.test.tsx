@@ -27,7 +27,7 @@ describe('MadeFiles', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Preview' }));
     const frame = container.querySelector('iframe');
     expect(frame?.getAttribute('sandbox')).not.toContain('allow-same-origin');
-    expect(frame?.getAttribute('srcdoc')).toContain('<canvas>');
+    expect(frame?.getAttribute('src')).toBe('/chat/preview-frame');
   });
 
   it('shows a non-HTML file without a preview, and plays video and music', async () => {

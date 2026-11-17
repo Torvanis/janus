@@ -150,6 +150,12 @@ func TestTroubleshootingModeEndToEnd(t *testing.T) {
 	if !strings.Contains(dl.Header().Get("Content-Disposition"), ".tar.gz") {
 		t.Fatalf("Content-Disposition = %q", dl.Header().Get("Content-Disposition"))
 	}
+	// An administrator reading what someone sent a model is on the audit
+	// record (2026-11 security review, ADM-03: it was not).
+	if entries, _, err := h.store.ListAudit(context.Background(), store.AuditFilter{Action: "troubleshooting_capture_downloaded", Limit: 10}); err != nil || len(entries) != 1 ||
+		!strings.Contains(string(entries[0].NewValue), target.ID) {
+		t.Fatalf("download not audited: %v %+v", err, entries)
+	}
 	files := readArchive(t, dl.Body.Bytes())
 	dir := ""
 	for name := range files {

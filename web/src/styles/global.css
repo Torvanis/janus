@@ -66,6 +66,14 @@ pre,
   font-variant-numeric: tabular-nums;
 }
 
+/* Inline code in running text (URLs, ids, env names) wraps rather than
+   widening the page on a phone. break-word (not anywhere) leaves table
+   column sizing alone; code blocks (pre) keep their own scroll. */
+p > code,
+li > code {
+  overflow-wrap: break-word;
+}
+
 :focus-visible {
   outline: none;
   box-shadow:
@@ -116,6 +124,12 @@ pre,
   display: grid;
   gap: var(--janus-space-4);
 }
+/* A grid item may be narrower than its content's longest word or row: the
+   content wraps or scrolls inside the card instead of widening the track and
+   the whole page (the admin overview's Outcomes card on a phone). */
+.grid > * {
+  min-width: 0;
+}
 .grid-tiles {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
@@ -150,6 +164,14 @@ pre,
   display: flex;
   flex-direction: column;
   gap: var(--janus-space-5);
+}
+/* Ultrawide monitors (3440px): a wider cap lets the widest admin tables
+   (managed models, API tokens) show every column without scrolling, while
+   pages stay well short of edge to edge. */
+@media (min-width: 2400px) {
+  .page {
+    max-width: 2000px;
+  }
 }
 
 .page-header {
@@ -253,6 +275,11 @@ pre,
   font-size: var(--janus-text-xs);
   color: var(--janus-color-text-muted);
 }
+/* Text with long URLs or paths rendered through <BreakAfterSlash>: it breaks
+   after a "/" first and mid-segment only when one segment alone is too wide. */
+.break-slash {
+  overflow-wrap: break-word;
+}
 
 /* --- Model card ----------------------------------------------------------- */
 /* The catalog card is a tile with a health accent: a colored top rail and,
@@ -296,20 +323,56 @@ pre,
 }
 .model-card-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  align-items: baseline;
   gap: var(--janus-space-2);
+  min-width: 0;
+}
+/* Fixed-size health dot: it sits beside the name without ever squeezing it. */
+.model-card-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--janus-color-text-muted);
+  transform: translateY(-1px);
+}
+.model-card-dot[data-tone='success'] {
+  background: var(--janus-color-success-solid);
+}
+.model-card-dot[data-tone='warning'] {
+  background: var(--janus-color-warning-solid);
+}
+.model-card-dot[data-tone='danger'] {
+  background: var(--janus-color-danger-solid);
 }
 .model-card-title {
   margin: 0;
+  min-width: 0;
   font-size: var(--janus-text-lg);
+  font-weight: 600;
   line-height: var(--janus-leading-tight);
+  overflow-wrap: break-word;
+}
+.model-card-native {
+  margin-top: calc(-1 * var(--janus-space-2));
   overflow-wrap: anywhere;
 }
-.model-card-health {
+.model-card-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: 4px var(--janus-space-2);
+  margin-top: calc(-1 * var(--janus-space-2));
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+  min-width: 0;
+}
+.model-card-uses {
+  overflow-wrap: anywhere;
+}
+.model-card-chips {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .model-card-alert {
@@ -323,48 +386,93 @@ pre,
   color: var(--janus-color-danger-fg);
   font-size: var(--janus-text-xs);
   line-height: var(--janus-leading-normal);
+  overflow-wrap: anywhere;
 }
-.model-card-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--janus-space-2);
-  margin: 0;
+/* The facts people choose on, one quiet row: no boxes, wraps instead of clipping. */
+.model-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--janus-space-2) var(--janus-space-5);
+  margin: auto 0 0;
+  padding-top: var(--janus-space-3);
+  border-top: 1px solid var(--janus-color-border-default);
 }
-.model-card-stat {
-  padding: var(--janus-space-2) var(--janus-space-3);
-  border-radius: var(--janus-radius-md);
-  background: var(--janus-color-bg-surface-raised);
-  border: 1px solid var(--janus-color-border-default);
+.model-card-fact {
   min-width: 0;
 }
-.model-card-stat dt {
+.model-card-fact dt {
   font-size: var(--janus-text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--janus-color-text-muted);
 }
-.model-card-stat dd {
+.model-card-fact dd {
   margin: 2px 0 0;
-  font-family: var(--janus-font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--janus-text-sm);
   font-weight: 600;
-  overflow-wrap: anywhere;
 }
-.model-card-stat[data-tone='danger'] dd {
-  color: var(--janus-color-danger-fg);
+.model-card-unit {
+  display: block;
+  font-size: var(--janus-text-2xs);
+  font-weight: 400;
+  color: var(--janus-color-text-muted);
 }
-.model-card-stat[data-tone='warning'] dd {
-  color: var(--janus-color-warning-fg);
+/* Catalog grid and its sections. */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  gap: var(--janus-space-4);
 }
-.model-card-stat[data-tone='success'] dd {
-  color: var(--janus-color-success-fg);
+.model-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-3);
 }
-.model-card-stat[data-tone='primary'] dd {
-  color: var(--janus-color-primary-on-subtle);
+.model-section-head h2 {
+  margin: 0;
+  font-size: var(--janus-text-lg);
 }
-.model-card-stat-wide {
-  grid-column: 1 / -1;
+.model-section-head p {
+  margin: 2px 0 0;
+  max-width: 70ch;
+}
+.model-section-count {
+  margin-left: var(--janus-space-1);
+  font-size: var(--janus-text-sm);
+  font-weight: 500;
+  color: var(--janus-color-text-muted);
+}
+/* Filters: one row on desktop; on phones search takes a row, the rest pair up. */
+.models-toolbar {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(0, 1fr)) auto;
+  gap: var(--janus-space-2);
+  align-items: center;
+}
+.models-toolbar > * {
+  min-width: 0;
+}
+.models-toolbar-search input {
+  flex: 1;
+  width: 100%;
+  min-width: 0 !important;
+}
+.models-view {
+  justify-self: end;
+}
+@media (max-width: 900px) {
+  .models-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .models-toolbar-search {
+    grid-column: 1 / -1;
+  }
+  .models-view {
+    justify-self: stretch;
+  }
+  .models-view button {
+    flex: 1;
+    text-align: center;
+  }
 }
 /* One-line engine setup note in the add-upstream drawer. */
 .engine-setup-note {
@@ -393,6 +501,46 @@ pre,
 }
 .perf-chart .perf-hint {
   margin: 2px 0 var(--janus-space-2);
+}
+.perf-picker {
+  width: min(340px, calc(100vw - 32px));
+  padding: var(--janus-space-3);
+}
+@media (max-width: 600px) {
+  /* The header wraps on phones and the button lands on the left: open the
+     list rightward from it so it never runs off the screen's left edge. */
+  .menu.perf-picker {
+    left: 0;
+    right: auto;
+    width: min(340px, calc(100vw - 64px));
+  }
+}
+.perf-picker-head {
+  gap: var(--janus-space-2);
+  margin-bottom: var(--janus-space-2);
+}
+.perf-picker-list {
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+}
+.perf-picker-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--janus-space-2);
+  padding: 4px;
+  border-radius: var(--janus-radius-sm);
+  cursor: pointer;
+}
+.perf-picker-item:hover {
+  background: var(--janus-state-hover);
+}
+.sparkline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: var(--janus-space-2);
 }
 .line-legend {
   list-style: none;
@@ -433,7 +581,7 @@ pre,
   color: var(--janus-color-text-muted);
 }
 .model-card-description {
-  margin: calc(-1 * var(--janus-space-1)) 0 0;
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -445,23 +593,9 @@ pre,
    health state. A broken alias still falls through to the danger styling. */
 .model-card[data-managed='true'] {
   --model-card-accent: var(--janus-color-primary-bg);
-  /* Fewer stats than a catalog card: end at the content rather than
-     stretching to the row and leaving a void above the footer. */
-  align-self: start;
 }
 .model-card[data-managed='true'][data-health='down'] {
   --model-card-accent: var(--janus-color-danger-solid);
-}
-.model-card-foot {
-  margin-top: auto;
-  padding-top: var(--janus-space-2);
-  border-top: 1px solid var(--janus-color-border-default);
-  font-size: var(--janus-text-xs);
-  color: var(--janus-color-text-muted);
-  display: flex;
-  justify-content: space-between;
-  gap: var(--janus-space-2);
-  flex-wrap: wrap;
 }
 
 /* --- Buttons -------------------------------------------------------------- */
@@ -531,6 +665,22 @@ pre,
 }
 .btn-block {
   width: 100%;
+}
+
+/* --- Touch screens ----------------------------------------------------------
+   A finger needs more room than a mouse pointer. On a coarse pointer (phones,
+   tablets) the compact controls get a 40px tap area and plain checkboxes and
+   radios grow to 18px; mouse layouts are unchanged. Custom-drawn inputs
+   (.switch) are styled later in this file and keep their own size. */
+@media (pointer: coarse) {
+  .btn-sm {
+    min-height: 40px;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 18px;
+    height: 18px;
+  }
 }
 
 /* --- Form controls -------------------------------------------------------- */
@@ -673,6 +823,15 @@ pre,
   font-weight: 400;
   white-space: normal;
   min-width: 220px;
+  /* Model and grantee names, not header lettering: no capitals. */
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--janus-text-sm);
+  color: var(--janus-color-text-primary);
+}
+/* A model name never breaks at its hyphens ("local-llamacpp-" / "8b.gguf"). */
+.grants-group-title {
+  white-space: nowrap;
 }
 .grants-group-toggle {
   display: inline-flex;
@@ -1031,9 +1190,24 @@ pre,
 
 /* --- Tables --------------------------------------------------------------- */
 
+/* A table scrolls inside its card, both ways. The wrap is capped at the
+   window height so its horizontal scrollbar is on screen whenever the table
+   is (a long list used to put it under 1,300px of rows), and the sticky header
+   row stays visible while the rows scroll. */
 .table-wrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100dvh - var(--janus-topbar-height) - var(--janus-space-6));
+  overscroll-behavior-x: contain;
   border-radius: var(--janus-radius-lg);
+}
+@media (max-width: 767px) {
+  .table-wrap {
+    max-height: calc(100dvh - var(--janus-topbar-height) - var(--janus-bottom-nav-height) - var(--janus-space-4));
+  }
+}
+/* Drawers have their own header and scrolling body. */
+.drawer .table-wrap {
+  max-height: 65dvh;
 }
 table.data {
   width: 100%;
@@ -1214,12 +1388,423 @@ table.data tbody tr[data-selected='true'] {
   padding: var(--janus-space-5);
   overflow-y: auto;
   flex: 1;
+  /* Without this the body grows to its content and the panel clips the end
+     (the model drawer's "Use this model" snippet) instead of scrolling. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--janus-space-4);
 }
 .drawer-wide {
   width: min(760px, 100vw);
+}
+/* Model editor: price and limit fields side by side where there is room. */
+.model-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--janus-space-4);
+  align-items: start;
+}
+.model-meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  min-width: 0;
+}
+
+/* "Keep aligned to Janus price catalog" + reset, above the price lines. */
+.catalog-align {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  min-width: 0;
+  padding: var(--janus-space-3);
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+}
+.catalog-align .switch {
+  font-weight: 600;
+}
+.catalog-align-warning {
+  color: var(--janus-color-warning-fg);
+}
+/* A failed catalog preview: the reason, then Try again. */
+.catalog-preview-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--janus-space-2);
+  min-width: 0;
+  color: var(--janus-color-danger-fg);
+}
+.catalog-changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.catalog-changes li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--janus-space-1) var(--janus-space-3);
+  padding: var(--janus-space-2) var(--janus-space-3);
+  font-size: var(--janus-text-sm);
+}
+.catalog-changes li + li {
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+.catalog-change-line {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.catalog-change-values {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.catalog-tag {
+  display: block;
+  margin-top: 2px;
+}
+/* Pricing builder (model drawer): one row per price line — the rate, its
+   unit and condition, where it comes from, one action; the editor opens
+   full width under the row. */
+.price-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-3);
+  min-width: 0;
+}
+.price-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  overflow: hidden;
+}
+.price-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--janus-space-3);
+  row-gap: var(--janus-space-1);
+  align-items: center;
+  padding: var(--janus-space-3) var(--janus-space-4);
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+.price-row:first-child {
+  border-top: 0;
+}
+.price-row[data-pending] {
+  box-shadow: inset 3px 0 0 var(--janus-color-info-solid);
+}
+.price-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.price-rate {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.price-rate[data-unpriced] {
+  font-weight: 400;
+  color: var(--janus-color-text-muted);
+}
+.price-row[data-removing] .price-rate {
+  font-weight: 400;
+  color: var(--janus-color-danger-fg);
+}
+.price-row[data-removing] .price-unit,
+.price-row[data-removing] .price-when {
+  text-decoration: line-through;
+}
+.price-when {
+  color: var(--janus-color-text-secondary);
+}
+.price-source {
+  grid-column: 1 / -1;
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+  overflow-wrap: anywhere;
+}
+.price-source-admin .price-source-label {
+  color: var(--janus-color-info-fg);
+  font-weight: 600;
+}
+.price-edit,
+.price-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  min-width: 0;
+  padding: var(--janus-space-3);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-bg-surface-raised);
+}
+.price-edit {
+  grid-column: 1 / -1;
+  margin-top: var(--janus-space-2);
+}
+.price-add {
+  border: 1px solid var(--janus-color-border-default);
+}
+.price-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--janus-space-2);
+  min-width: 0;
+}
+.price-input > .input {
+  flex: 0 1 10rem;
+  min-width: 6rem;
+}
+.price-add-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
+  gap: var(--janus-space-3);
+  align-items: start;
+}
+.price-add-grid .price-input > .input {
+  flex: 1 1 6rem;
+}
+.price-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  padding: var(--janus-space-3);
+  border: 1px solid var(--janus-color-danger-border);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-danger-bg);
+}
+.price-remove {
+  color: var(--janus-color-danger-fg);
+}
+.price-fold {
+  margin: 0;
+  color: var(--janus-color-text-muted);
+}
+.price-fold-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--janus-color-text-link);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.price-history > summary {
+  cursor: pointer;
+}
+.price-history-list {
+  margin: var(--janus-space-2) 0 0;
+  padding-left: var(--janus-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+}
+.price-history-list ul {
+  margin: var(--janus-space-1) 0 0;
+  padding-left: var(--janus-space-4);
+}
+.model-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-2) var(--janus-space-4);
+  width: 100%;
+}
+
+/* Model capabilities: one row per capability. The label, its value with
+   where the value came from, and one action; the note and the editor take
+   the full width under them so nothing shares a narrow column. */
+.cap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-4);
+}
+.cap-measure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-2) var(--janus-space-4);
+  padding: var(--janus-space-3) var(--janus-space-4);
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-bg-surface-raised);
+}
+.cap-measure > [role='status'] {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.cap-help > summary,
+.cap-unknown > summary {
+  cursor: pointer;
+}
+.cap-help p {
+  margin: var(--janus-space-2) 0 0;
+}
+.cap-group {
+  display: flex;
+  flex-direction: column;
+  /* Rows lay out by the width of their own card, not the window: the same
+     list sits in a full page, a side drawer and a dialog. */
+  container-type: inline-size;
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  overflow: hidden;
+}
+.cap-group > h4 {
+  padding: var(--janus-space-2) var(--janus-space-4);
+  background: var(--janus-color-bg-surface-raised);
+  border-bottom: 1px solid var(--janus-color-border-default);
+}
+.cap-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr) auto;
+  column-gap: var(--janus-space-4);
+  row-gap: var(--janus-space-1);
+  align-items: center;
+  padding: var(--janus-space-3) var(--janus-space-4);
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+.cap-group > h4 + .cap-row {
+  border-top: 0;
+}
+.cap-label {
+  font-weight: 500;
+  min-width: 0;
+}
+.cap-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--janus-space-1) var(--janus-space-3);
+  min-width: 0;
+}
+.cap-value-text {
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+.cap-row[data-unknown] .cap-value-text {
+  font-weight: 400;
+  color: var(--janus-color-text-muted);
+}
+.cap-source {
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+  white-space: nowrap;
+}
+.cap-source-admin,
+.cap-source-pending {
+  color: var(--janus-color-info-fg);
+  font-weight: 600;
+}
+.cap-note,
+.cap-edit {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cap-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  margin-top: var(--janus-space-2);
+  padding: var(--janus-space-3);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-bg-surface-raised);
+}
+.cap-unknown {
+  border-top: 1px solid var(--janus-color-border-subtle);
+}
+.cap-unknown > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--janus-space-1) var(--janus-space-3);
+  padding: var(--janus-space-3) var(--janus-space-4);
+  font-size: var(--janus-text-sm);
+}
+.cap-unknown > summary {
+  list-style: none;
+  align-items: baseline;
+}
+.cap-unknown > summary::-webkit-details-marker {
+  display: none;
+}
+.cap-unknown > summary::before {
+  content: '▸';
+  color: var(--janus-color-text-muted);
+  transition: transform var(--janus-duration-fast, 120ms) ease;
+}
+.cap-unknown[open] > summary::before {
+  transform: rotate(90deg);
+}
+.cap-unknown-title {
+  font-weight: 500;
+}
+.cap-unknown-names {
+  color: var(--janus-color-text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cap-savebar {
+  position: sticky;
+  bottom: calc(-1 * var(--janus-space-5));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-2) var(--janus-space-4);
+  margin: 0 calc(-1 * var(--janus-space-5)) calc(-1 * var(--janus-space-5));
+  padding: var(--janus-space-3) var(--janus-space-5);
+  background: var(--janus-color-bg-surface);
+  border-top: 1px solid var(--janus-color-border-strong);
+}
+/* Narrow card (drawer, dialog): name over the answer and its source on the
+   left, the choice on the right, centered across both lines. */
+@container (max-width: 40rem) {
+  .cap-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--janus-space-1);
+  }
+  .cap-label {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .cap-value {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .cap-action {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .cap-note,
+  .cap-edit {
+    grid-column: 1 / -1;
+  }
+}
+/* A person's own plan model (Subscriptions only): Yes / No /
+   Use default per value. */
+.plan-cap-set button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Phone-width card: the choice gets its own line under the answer instead of
+   squeezing it. */
+@container (max-width: 26rem) {
+  .plan-cap .cap-row .plan-cap-set {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-self: start;
+  }
 }
 .drawer-heading {
   min-width: 0;
@@ -1288,26 +1873,34 @@ table.data tbody tr[data-selected='true'] {
 
 /* --- Tabs / segmented ----------------------------------------------------- */
 
+/* Segmented tabs and filters wrap onto a second row when they run out of
+   room (a 360px phone, a filter beside other fields) instead of scrolling
+   sideways with the last options hidden and no hint. Lines are filled at each
+   option's full width, so a label only breaks across lines when that one label
+   is wider than the whole control. */
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   padding: 3px;
   gap: 2px;
   background: var(--janus-color-bg-sunken);
   border: 1px solid var(--janus-color-border-default);
   border-radius: var(--janus-radius-md);
-  overflow-x: auto;
   max-width: 100%;
 }
 .segmented button,
 .segmented a {
   all: unset;
+  box-sizing: border-box;
+  max-width: 100%;
+  text-align: center;
   cursor: pointer;
   padding: 6px 12px;
   border-radius: var(--janus-radius-sm);
   font-size: var(--janus-text-xs);
   font-weight: 500;
   color: var(--janus-color-text-secondary);
-  white-space: nowrap;
+  overflow-wrap: break-word;
   transition: background-color var(--janus-duration-fast) var(--janus-ease-standard);
 }
 .segmented button:hover,
@@ -1319,6 +1912,23 @@ table.data tbody tr[data-selected='true'] {
 .segmented a[aria-current='page'] {
   background: var(--janus-color-primary-subtle);
   color: var(--janus-color-primary-on-subtle);
+}
+/* Phones: options share each row's width, so a wrapped control reads as a
+   tidy grid of buttons rather than a ragged line with one option dangling. */
+@media (max-width: 767px) {
+  .segmented button,
+  .segmented a {
+    flex: 1 0 auto;
+  }
+}
+@media (pointer: coarse) {
+  .segmented button,
+  .segmented a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+  }
 }
 
 /* --- Banner --------------------------------------------------------------- */
@@ -1354,6 +1964,102 @@ table.data tbody tr[data-selected='true'] {
   color: var(--janus-color-info-fg);
 }
 
+/* Keep the close button beside the title on phones; the title wraps instead. */
+.modal-header {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.modal-header h2 {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* --- Delete upstream dialog ---------------------------------------------- */
+
+/* One row per consequence; lists inside a row scroll instead of growing the dialog. */
+.delete-impact {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--janus-color-border-strong);
+  border-radius: var(--janus-radius-md);
+}
+.delete-impact > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--janus-space-2);
+  padding: var(--janus-space-3) var(--janus-space-4);
+  min-width: 0;
+}
+.delete-impact > li + li {
+  border-top: 1px solid var(--janus-color-border-default);
+}
+.delete-impact summary {
+  cursor: pointer;
+}
+.delete-impact details[open] summary {
+  margin-bottom: var(--janus-space-2);
+}
+.delete-impact .table-wrap {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.delete-impact-danger {
+  color: var(--janus-color-danger-fg);
+}
+.delete-impact-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--janus-text-sm);
+}
+.delete-impact-rows > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--janus-space-3);
+  padding: var(--janus-space-1) 0;
+  min-width: 0;
+}
+.delete-impact-alias {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.delete-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--janus-space-2);
+  font-size: var(--janus-text-sm);
+  cursor: pointer;
+}
+.delete-choice input {
+  margin-top: 3px;
+  flex: none;
+}
+.delete-choice-hint {
+  display: block;
+}
+/* The destructive way out sits apart from the impact list, in danger colors. */
+.delete-force {
+  padding: var(--janus-space-3) var(--janus-space-4);
+  border: 1px solid var(--janus-color-danger-border);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-danger-bg);
+  color: var(--janus-color-danger-fg);
+  font-weight: 600;
+}
+.delete-force .delete-choice-hint {
+  font-weight: 400;
+}
+.delete-impact-hint {
+  color: var(--janus-color-warning-fg);
+}
+.delete-check-failed {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
 /* --- Utility -------------------------------------------------------------- */
 
 .sr-only {
@@ -1386,6 +2092,20 @@ table.data tbody tr[data-selected='true'] {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+/* Multi-line clamp; the <Truncate lines={n}> component sets the full text as
+   the title. */
+.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+.clamp-2 {
+  -webkit-line-clamp: 2;
+}
+.clamp-3 {
+  -webkit-line-clamp: 3;
 }
 
 /* --- Security gateway ----------------------------------------------------- */
@@ -2060,7 +2780,10 @@ table.data tbody tr[data-selected='true'] {
 }
 .lookup-menu {
   position: absolute;
-  inset-inline: 0;
+  left: 0;
+  /* At least wide enough for a name and an email on one line each, never
+     wider than the window; useFitToViewport shifts it back inside the edge. */
+  width: max(100%, min(22rem, calc(100vw - 24px)));
   top: calc(100% + 4px);
   z-index: var(--janus-z-dropdown);
   margin: 0;
@@ -2088,6 +2811,12 @@ table.data tbody tr[data-selected='true'] {
 .lookup-option-detail {
   font-size: var(--janus-text-xs);
   color: var(--janus-color-text-muted);
+}
+.lookup-option-label,
+.lookup-option-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lookup-option-free .lookup-option-label {
   font-style: italic;
@@ -2150,6 +2879,12 @@ td:has(> .row-actions) {
     background-color var(--janus-duration-fast) var(--janus-ease-standard),
     color var(--janus-duration-fast) var(--janus-ease-standard);
 }
+@media (pointer: coarse) {
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
 .icon-btn:hover:not(:disabled),
 .icon-btn:focus-visible {
   background: var(--janus-state-hover);
@@ -2174,13 +2909,14 @@ td:has(> .row-actions) {
   outline: 2px solid var(--janus-color-primary-bg);
   outline-offset: 1px;
 }
-.icon-btn[data-tooltip]:hover::after,
-.icon-btn[data-tooltip]:focus-visible::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
+/* Icon-button tooltips are drawn by TooltipLayer in a portal on <body>, not as
+   a ::after on the button: row actions sit in a sticky cell (its own stacking
+   context), so a pseudo-element tooltip on the first row slid under the
+   sticky table header. Position is set inline (fixed, viewport coordinates). */
+.janus-tooltip {
+  position: fixed;
+  z-index: var(--janus-z-tooltip);
+  max-width: min(360px, calc(100vw - 8px));
   padding: 4px 8px;
   border-radius: var(--janus-radius-sm);
   background: var(--janus-color-bg-surface-overlay);
@@ -2189,7 +2925,9 @@ td:has(> .row-actions) {
   color: var(--janus-color-text-primary);
   font-size: var(--janus-text-2xs);
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
   pointer-events: none;
 }
 
@@ -2210,6 +2948,40 @@ table.data.data-compact th {
 }
 table.data.data-compact th button {
   display: inline;
+}
+/* <HeaderLabel>: a header wraps between words only; "sign-in" and the sort
+   arrow stay on one line. */
+.th-word {
+  white-space: nowrap;
+}
+/* <TopModel> and the service-token prefix line: the name takes the ellipsis,
+   "+N more" and the key prefix never do. */
+.cell-with-more {
+  display: inline-flex;
+  gap: 0.35em;
+  min-width: 0;
+  max-width: 240px;
+  vertical-align: middle;
+}
+table.data.data-compact td .cell-sub.cell-with-more {
+  display: flex;
+}
+.cell-with-more > .truncate {
+  min-width: 0;
+}
+/* <TimeCell>: request times stay on one line ("Nov 15, 3:42 PM"). */
+table.data td.cell-time {
+  white-space: nowrap;
+}
+/* SearchInput: wide enough for its placeholder; full width on a phone. */
+.search-input {
+  flex: 1 1 15.5rem;
+  min-width: min(100%, 15.5rem);
+  max-width: 26rem;
+}
+.search-input .input {
+  flex: 1;
+  min-width: 0;
 }
 table.data.data-compact td.cell-person {
   white-space: normal;
@@ -2300,13 +3072,6 @@ table.data .select-inline {
   display: none;
 }
 
-/* Segmented controls with many options wrap instead of clipping the last
-   option under the card edge. */
-.segmented.segmented-wrap {
-  flex-wrap: wrap;
-  overflow: visible;
-}
-
 /* Table toolbar above server-paginated tables: count on the left, page size right. */
 .table-toolbar {
   display: flex;
@@ -2325,7 +3090,56 @@ table.data:has(td > .row-actions) thead th:last-child {
   position: sticky;
   right: 0;
   background: var(--janus-color-bg-surface);
-  box-shadow: -8px 0 8px -8px rgba(0, 0, 0, 0.35);
+  /* A rule plus a shadow: what scrolls under the pinned column reads as
+     scrolled away, not cut off. (A real border-left stays behind on a sticky
+     cell in a border-collapse table, so the rule is an inset shadow.) */
+  box-shadow:
+    inset 1px 0 0 var(--janus-color-border-default),
+    -10px 0 10px -8px rgba(0, 0, 0, 0.45);
+}
+/* Phones: two or more row actions fold into one "More actions" menu
+   (RowActions), so the pinned column is one button wide. */
+.row-actions-inline {
+  display: contents;
+}
+.row-actions-more {
+  display: none;
+}
+@media (max-width: 767px) {
+  .row-actions-inline {
+    display: none;
+  }
+  .row-actions-more {
+    display: inline-grid;
+  }
+}
+.row-actions-menu {
+  position: fixed;
+  z-index: calc(var(--janus-z-tooltip) - 1);
+  display: grid;
+  min-width: 190px;
+  max-width: calc(100vw - 8px);
+  padding: 4px;
+  border: 1px solid var(--janus-color-border-default);
+  border-radius: var(--janus-radius-md);
+  background: var(--janus-color-bg-surface-overlay);
+  box-shadow: var(--janus-shadow-2);
+}
+.row-actions-menu > .icon-btn {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--janus-space-3);
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 0 var(--janus-space-3);
+  font: inherit;
+  font-size: var(--janus-text-sm);
+  text-align: left;
+}
+/* The label is the button's aria-label; show it next to the icon. */
+.row-actions-menu > .icon-btn::after {
+  content: attr(aria-label);
 }
 table.data:has(td > .row-actions) thead th:last-child {
   z-index: 2;
@@ -2969,11 +3783,10 @@ table.data tbody tr:hover td:has(> .row-actions) {
 }
 .routing-cell-note {
   max-width: 320px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  white-space: normal;
+}
+/* Router route names: room for a few words per line, not one. */
+.routing-table td.routing-route-list {
+  min-width: 200px;
 }
 .routing-table td.small {
   white-space: normal;
@@ -3250,7 +4063,9 @@ table.data tbody tr:hover td:has(> .row-actions) {
   border-radius: var(--janus-radius-lg);
   background: var(--janus-color-bg-surface);
   cursor: pointer;
-  transition: border-color 120ms, background 120ms;
+  transition:
+    border-color 120ms,
+    background 120ms;
 }
 .search-service:hover {
   border-color: var(--janus-color-border-strong);
@@ -3393,9 +4208,6 @@ table.data tbody tr:hover td:has(> .row-actions) {
   gap: var(--janus-space-2);
   margin-top: var(--janus-space-3);
 }
-.cs-cats .segmented {
-  flex-wrap: wrap;
-}
 .cs-cats th[scope='row'] {
   width: 38%;
 }
@@ -3414,6 +4226,7 @@ table.data tbody tr:hover td:has(> .row-actions) {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+  min-width: 180px;
   max-width: 340px;
 }
 .upstream-health-reason {

@@ -10,16 +10,23 @@ export function Continuation({
 }: {
   offset: number;
   limit: number;
-  count: number;
+  /** Rows on this page; undefined while the page has not loaded (or failed). */
+  count: number | undefined;
   hasMore: boolean;
   busy?: boolean;
   onPage: (offset: number) => void;
 }): ReactNode {
   return (
     <nav className="row-between" aria-label="Collection pages">
-      <span className="small muted">
-        {count ? `${offset + 1}–${offset + count}` : 'No rows on this page'} · newest first · total unknown
-      </span>
+      {/* Saying "No rows on this page" before the page loaded, or when it
+          failed, reads as an empty result next to a skeleton or an error. */}
+      {count === undefined ? (
+        <span />
+      ) : (
+        <span className="small muted">
+          {count ? `${offset + 1}–${offset + count}` : 'No rows on this page'} · newest first · total unknown
+        </span>
+      )}
       <div className="row">
         <button
           type="button"

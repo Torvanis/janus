@@ -8,7 +8,7 @@ go 1.26.3
 // release builds) to a patch release that fixes all stdlib vulnerabilities
 // currently flagged by govulncheck. Under GOTOOLCHAIN=local the toolchain
 // line is ignored, so it cannot brick the pinned pods.
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.3

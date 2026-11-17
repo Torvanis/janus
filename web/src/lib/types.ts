@@ -1,14 +1,16 @@
 /** Shapes returned by the Janus application API. */
 
 export interface Totals {
+  /**
+   * Input tokens: the whole prompt, cached tokens and cache writes included,
+   * as providers bill them (every provider). tokens_cached and the cache
+   * writes are parts of it; the canonical cache-hit rate is tokens_cached /
+   * tokens_in — see cacheHitRate() in lib/cache.ts.
+   */
   tokens_in: number;
   tokens_out: number;
   tokens_cached: number;
-  /**
-   * Summed prompt-cache write tokens (5-minute / 1-hour TTL entries). Together
-   * with tokens_in and tokens_cached these feed the canonical cache-hit rate —
-   * see cacheHitRate() in lib/cache.ts, the only place the formula lives.
-   */
+  /** Summed prompt-cache write tokens (5-minute / 1-hour TTL entries), part of tokens_in. */
   tokens_cache_write_5m: number;
   tokens_cache_write_1h: number;
   cost_nanousd: number;
@@ -75,8 +77,10 @@ export interface Me {
    */
   local_only?: boolean;
   /** Personal subscriptions are on for this organization (never offline). */
-  /** Janus Chat is available to this person (gateway switch, instance switch, access). */
-  chat_preview?: boolean;
+  /** Administration → Chat has Janus Chat on for this instance. */
+  chat_enabled?: boolean;
+  /** Janus Chat is available to this person (instance switch and access restriction). */
+  chat_available?: boolean;
   /** Why Chat is unavailable, when it is (instance off, not in the allowed groups). */
   chat_unavailable_reason?: string;
   personal_subscriptions?: boolean;
@@ -251,13 +255,45 @@ export function isTokenRevoked(token: Pick<ApiToken, 'revoked_at'>): boolean {
   return Boolean(token.revoked_at) && !token.revoked_at.startsWith('0001-01-01');
 }
 
+/** Revoked tokens older than this are hidden from the tokens list by default. */
+export const OLD_REVOKED_DAYS = 7;
+
+/**
+ * True when a token was revoked more than {@link OLD_REVOKED_DAYS} days before
+ * `now`. An unparseable timestamp counts as recent, so a token is never hidden
+ * because of a bad date.
+ */
+export function isLongRevoked(token: Pick<ApiToken, 'revoked_at'>, now: number = Date.now()): boolean {
+  if (!isTokenRevoked(token)) return false;
+  const revokedAt = Date.parse(token.revoked_at);
+  return Number.isFinite(revokedAt) && now - revokedAt > OLD_REVOKED_DAYS * 24 * 60 * 60 * 1000;
+}
+
 export type MetadataSource = 'admin' | 'upstream' | 'reference' | 'unknown';
+/**
+ * Where a value comes from, for display (server: store.SourceDetail): the
+ * label ("Admin override", "Provider API", "Janus price catalog 2026.11.16.1",
+ * "… (default for tts)") and, for catalog values, the page and date read.
+ */
+export interface MetadataSourceDetail {
+  label: string;
+  kind?: 'model' | 'default';
+  type?: string;
+  url?: string;
+  /** The day the price was read (catalog page, or the provider's API at the last discovery). */
+  read_at?: string;
+  /** Administrator prices: the day it was last set. */
+  set_at?: string;
+}
 export interface ModelMetadataField {
   value: number | null;
   source: MetadataSource;
+  /** Absent on older servers and for unknown values. */
+  source_detail?: MetadataSourceDetail;
   override: number | null;
   automatic_value: number | null;
   automatic_source: MetadataSource;
+  automatic_detail?: MetadataSourceDetail;
 }
 /**
  * A model's last-7-day figures (server: store.ModelActivity). Jobs exclude
@@ -291,17 +327,94 @@ export interface ModelPerformance {
   /** null where the bucket had nothing to measure (a gap, not a zero). */
   tokens_per_second_series: (number | null)[];
   input_tokens_series: (number | null)[];
+  /**
+   * Response figures; absent from servers older than this UI. Averages are
+   * null when nothing qualified. Time to first token counts successful
+   * streamed requests only.
+   */
+  avg_ttft_ms?: number | null;
+  ttft_ms_series?: (number | null)[];
+  avg_output_tokens?: number | null;
+  output_tokens_series?: (number | null)[];
+  /** False when the model reported no prompt-cache use: show "not reported", never 0%. */
+  cache_reported?: boolean;
+  /** Cached input ÷ all input, token-weighted, 0..1. */
+  cache_hit_rate?: number | null;
+  cache_hit_rate_series?: (number | null)[];
+}
+
+/** A model with traffic in the range, offered in the Overview's model picker. */
+export interface ModelPerformanceChoice {
+  key: string;
+  model_name: string;
+  upstream_name?: string;
+  requests: number;
 }
 
 export interface ModelPerformanceSeries {
   buckets: string[];
   bucket_seconds: number;
   models: ModelPerformance[];
+  /** Every model with traffic in the range, most requests first. Absent from older servers. */
+  available?: ModelPerformanceChoice[];
+}
+
+/** GET /api/v1/models/{id}/performance: one model's last seven days, org-wide aggregates. */
+export interface ModelPerformanceSummary {
+  model_id: string;
+  days: number;
+  buckets: string[];
+  bucket_seconds: number;
+  requests: number;
+  avg_ttft_ms: number | null;
+  ttft_samples: number;
+  ttft_ms_series: (number | null)[];
+  avg_output_tokens: number | null;
+  output_tokens_series: (number | null)[];
+  cache_reported: boolean;
+  cache_hit_rate: number | null;
+  cache_hit_rate_series: (number | null)[];
+}
+
+/**
+ * A model from the caller's own connected plan (GET /api/v1/models
+ * personal_models): my/<provider>/<model>, billed to their plan.
+ */
+export interface PersonalCatalogModel {
+  id: string;
+  owned_by: string;
+  janus?: {
+    native_name?: string;
+    /** What the plan model does (chat, image, video…), guessed from its id. */
+    modalities?: string[];
+    reasoning_efforts?: string[];
+    /** How Chat turns thinking off for it, when it can. */
+    thinking_off?: string;
+    /** The value in force per capability, with its source (default, provider, probe, admin). */
+    capabilities?: Record<string, import('./capabilities').CapabilityResolved>;
+    personal_subscription?: { provider: string; subscription_id: string };
+  };
 }
 
 export interface Model {
   metadata?: Record<string, ModelMetadataField>;
+  /** The capability values in force, by key (lib/capabilities.ts). Absent on older servers. */
+  capabilities?: Record<string, import('./capabilities').CapabilityResolved>;
+  capability_probe?: import('./capabilities').CapabilityProbeRun | null;
+  /**
+   * How Janus turns this model's thinking off: the switch it sends, 'never'
+   * when the model always thinks, absent when not known. The proxy acts on
+   * the same answer.
+   */
+  thinking_off?: string;
   metadata_warnings?: string[];
+  /** Admin list only: the provider quotes each call's cost, which is then the call's cost. */
+  cost_quoted?: boolean;
+  /**
+   * Keep aligned to the Janus price catalog: no administrator prices, and
+   * the prices follow the catalog (provider API prices still apply over it).
+   */
+  catalog_aligned?: boolean;
   id: string;
   upstream_id: string;
   upstream_name: string;
@@ -441,6 +554,8 @@ export interface UsageEvent {
   model: string;
   /** The managed model or router name the caller asked for, when different from model. */
   requested_model_name?: string;
+  /** Upstream that quoted this request's cost (token_accounting_method 'upstream_reported_cost'). */
+  cost_quoted_by?: string;
   endpoint_path: string;
   http_method: string;
   modality: string;
@@ -458,11 +573,25 @@ export interface UsageEvent {
    * priced by the rate card), 'upstream_reported_cost' (provider gave the
    * exact cost, e.g. X.ai cost_in_usd_ticks), 'byte_count_fallback' (text
    * response without usage, ~bytes/4), 'unmetered_modality' (media response
-   * without usage — a configuration gap, recorded at zero), 'not_billable'
-   * (error response, never costed).
+   * without usage — a configuration gap, recorded at zero), 'request_measured'
+   * (billed by a measured unit and its price line), 'measured_unpriced'
+   * (measured, but the model has no price line for the unit),
+   * 'billed_on_result' (a provider job billed when its result is fetched),
+   * 'not_billable' (error response or a job status check, never costed).
    */
   token_accounting_method: string;
+  /** What a request billed by a unit used: 'image', 'video_second', 'character', … */
+  billed_unit?: string;
+  billed_quantity?: number;
+  /** The price line that priced it. */
+  billed_line?: string;
   cost_nanousd: number;
+  /**
+   * Janus's own price for a call whose cost the provider quoted (the quote
+   * is cost_nanousd). Absent on every other call. 0 = Janus has no price
+   * for it.
+   */
+  estimated_cost_nanousd?: number;
   finish_reason: string;
   http_status: number;
   latency_ms: number;
@@ -1034,6 +1163,8 @@ interface AccountingGap {
   upstream_id: string;
   upstream_name: string;
   modality: string;
+  /** 'unmetered_modality' or 'measured_unpriced'. */
+  accounting?: string;
   requests: number;
   last_seen_at: string;
 }
@@ -1046,6 +1177,8 @@ export interface MeteringHealth {
     upstream_reported_cost: number;
     byte_estimated: number;
     unmetered: number;
+    measured?: number;
+    measured_unpriced?: number;
     gaps: AccountingGap[];
   };
 }
@@ -1899,4 +2032,50 @@ export interface ClassificationTestResult {
   tokens_in: number;
   tokens_out: number;
   cost_nanousd: number;
+}
+
+/** One row of the pricing accuracy report (a model, a provider, or all). */
+export interface PriceAccuracyGroup {
+  upstream_id?: string;
+  upstream_name?: string;
+  model_id?: string;
+  model?: string;
+  quoted_calls: number;
+  compared_calls: number;
+  quoted_nanousd: number;
+  estimate_nanousd: number;
+  /** Janus's price minus the quote. */
+  diff_nanousd: number;
+  /** diff over the quote, in percent; null when the quotes add up to $0. */
+  diff_percent: number | null;
+  within_1_percent: number;
+  within_5_percent: number;
+  /** Compared calls Janus priced at $0 while the provider charged. */
+  no_price_calls: number;
+  has_price_now?: boolean;
+}
+
+export interface PriceAccuracyCall {
+  id: string;
+  request_id: string;
+  created_at: string;
+  upstream_id: string;
+  upstream_name: string;
+  model_id: string;
+  model: string;
+  modality: string;
+  internal: boolean;
+  quoted_nanousd: number;
+  estimate_nanousd: number;
+  diff_nanousd: number;
+  diff_percent: number | null;
+}
+
+export interface PriceAccuracyReport {
+  start: string;
+  end: string;
+  totals: PriceAccuracyGroup;
+  models: PriceAccuracyGroup[];
+  providers: PriceAccuracyGroup[];
+  worst: PriceAccuracyCall[];
 }

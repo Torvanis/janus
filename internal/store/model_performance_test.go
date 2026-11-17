@@ -20,6 +20,9 @@ type perfRow struct {
 	ttfb       int
 	source     string
 	tps        float64
+	cached     int64
+	write5m    int64
+	app        string
 }
 
 func insertPerf(t *testing.T, s *Store, now time.Time, rows ...perfRow) {
@@ -35,6 +38,7 @@ func insertPerf(t *testing.T, s *Store, now time.Time, rows ...perfRow) {
 			HTTPStatus: r.status, ErrorCode: r.code, Streaming: r.streaming,
 			AccountingMode: accounting, TokensIn: r.in, TokensOut: r.out,
 			LatencyMs: r.latency, TTFBMs: r.ttfb, ThroughputSource: r.source, TokensOutPerSecond: r.tps,
+			TokensCached: r.cached, TokensCacheWrite5m: r.write5m, ClientApp: r.app,
 		}); err != nil {
 			t.Fatalf("insert usage event: %v", err)
 		}
@@ -152,7 +156,7 @@ func TestModelPerformanceSeries(t *testing.T) {
 		perfRow{model: "C", age: 15 * time.Minute, status: 403, code: "policy.model_not_granted"})
 	insertPerf(t, s, end, rows...)
 
-	got, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-4 * bucket), End: end}, bucket, 4, 1)
+	got, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-4 * bucket), End: end}, bucket, 4, PerfSelect{Top: 1})
 	if err != nil {
 		t.Fatalf("ModelPerformanceSeriesFor: %v", err)
 	}
@@ -187,7 +191,7 @@ func TestModelPerformanceSeries(t *testing.T) {
 		t.Errorf("avg input = %v, want 1625 ((1000+2000+3000+500)/4)", a.AvgInputTokens)
 	}
 
-	all, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-4 * bucket), End: end}, bucket, 4, 5)
+	all, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-4 * bucket), End: end}, bucket, 4, PerfSelect{Top: 5})
 	if err != nil {
 		t.Fatalf("ModelPerformanceSeriesFor top=5: %v", err)
 	}
@@ -266,7 +270,7 @@ func TestModelPerformanceSeriesMatchesPerEventPass(t *testing.T) {
 			latency: rng.Intn(30000), source: sources[rng.Intn(len(sources))], tps: float64(rng.Intn(200))})
 	}
 	insertPerf(t, s, end, rows...)
-	got, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-bucket * time.Duration(buckets)), End: end}, bucket, buckets, 10)
+	got, err := s.ModelPerformanceSeriesFor(context.Background(), UsageScope{Start: end.Add(-bucket * time.Duration(buckets)), End: end}, bucket, buckets, PerfSelect{Top: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

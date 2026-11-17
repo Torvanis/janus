@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/torvanis/janus/internal/adapter"
 )
 
 // Mistral connects a Mistral Vibe plan (formerly Le Chat Pro / Team). Mistral
@@ -46,6 +50,9 @@ func (m *Mistral) AdminNote() string {
 
 // AdapterType implements Provider.
 func (m *Mistral) AdapterType() string { return "openai_compatible" }
+
+// OwnsURL implements EndpointOwner: Mistral's API host.
+func (m *Mistral) OwnsURL(u *url.URL) bool { return sameOrigin(u, m.InferenceBaseURL()) }
 
 // InferenceBaseURL implements Provider.
 func (m *Mistral) InferenceBaseURL() string { return pick(m.APIURL, mistralAPIURL) }
@@ -98,6 +105,9 @@ func (m *Mistral) ListModels(ctx context.Context, client *http.Client, key strin
 				CompletionChat bool  `json:"completion_chat"`
 				Reasoning      *bool `json:"reasoning"`
 			} `json:"capabilities"`
+			// Raw is the whole row, read for what Mistral says the model
+			// takes (capabilities.vision, function_calling, audio).
+			Raw map[string]json.RawMessage `json:"-"`
 		} `json:"data"`
 	}
 	status, body, err := getJSON(ctx, client, strings.TrimRight(m.InferenceBaseURL(), "/")+"/models", key, &out)
@@ -111,6 +121,14 @@ func (m *Mistral) ListModels(ctx context.Context, client *http.Client, key strin
 	default:
 		return nil, fmt.Errorf("Mistral model list failed (HTTP %d): %s", status, oauthDetail(body))
 	}
+	var raw struct {
+		Data []map[string]json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(body, &raw) == nil && len(raw.Data) == len(out.Data) {
+		for i := range out.Data {
+			out.Data[i].Raw = raw.Data[i]
+		}
+	}
 	seen := map[string]bool{}
 	models := []ModelInfo{}
 	for _, d := range out.Data {
@@ -123,7 +141,7 @@ func (m *Mistral) ListModels(ctx context.Context, client *http.Client, key strin
 		if d.Capabilities.Reasoning != nil {
 			r = &Reasoning{Supported: boolPtr(*d.Capabilities.Reasoning)}
 		}
-		models = append(models, ModelInfo{ID: id, Reasoning: r})
+		models = append(models, ModelInfo{ID: id, Reasoning: r, Capabilities: adapter.RowCapabilities("mistral", d.Raw)})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil

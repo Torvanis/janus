@@ -190,6 +190,16 @@ func ErrUpstreamUnavailable(name string) *APIError {
 		"The upstream provider "+name+" could not be reached. Retry shortly; if this persists, contact a Janus administrator.")
 }
 
+// ErrUpstreamDisabled reports a request for a model whose upstream an
+// administrator has turned off. Same code and status as an unreachable
+// upstream (clients already handle it), with a message that says retrying
+// will not help. Such models are left out of /v1/models and the catalog.
+func ErrUpstreamDisabled(model, upstream string) *APIError {
+	return newError(http.StatusServiceUnavailable, CodeUpstreamDown, "server_error",
+		"The model "+model+" is not available because its upstream provider "+upstream+
+			" is turned off. Ask a Janus administrator, or call /v1/models to list the models available to you.")
+}
+
 // ErrPayloadTooLarge reports a request body that exceeds what the gateway can
 // buffer for an adapter that must rewrite it before forwarding.
 func ErrPayloadTooLarge(limit int64) *APIError {

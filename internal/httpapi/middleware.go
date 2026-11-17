@@ -99,14 +99,40 @@ func (r *responseRecorder) Flush() {
 func RequestContext() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A caller may bring its own correlation id, but the value is
+			// stored on usage rows, indexed, logged and exported: anything
+			// that is not a short plain token is replaced, not trusted.
 			id := r.Header.Get("X-Janus-Request-ID")
-			if id == "" {
+			if !validRequestID(id) {
 				id = store.NewID()
 			}
 			w.Header().Set("X-Janus-Request-ID", id)
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxRequestID, id)))
 		})
 	}
+}
+
+// maxRequestIDLen bounds a caller-supplied correlation id.
+const maxRequestIDLen = 128
+
+// validRequestID reports whether a caller-supplied X-Janus-Request-ID may be
+// used as is: 1 to 128 characters from letters, digits and . _ : -. That
+// covers UUIDs, ULIDs, trace ids and prefixed ids, and excludes anything a
+// spreadsheet, a log line or a database index could choke on.
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLen {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '_', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // AccessLog emits one structured line per request. Secrets are never included:
@@ -224,6 +250,12 @@ func RequireAdmin(next http.Handler) http.Handler {
 		user := UserFrom(r.Context())
 		if user == nil {
 			WriteError(w, r, ErrUnauthenticated())
+			return
+		}
+		// A disabled or deleted administrator holds no authority, whatever
+		// credential the request carries: the role alone is not enough.
+		if !user.IsActive {
+			WriteError(w, r, ErrUserDisabled())
 			return
 		}
 		if !user.IsAdmin() {

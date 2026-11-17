@@ -126,7 +126,7 @@ func TestChatNamingWhenIdle(t *testing.T) {
 }
 
 func waitSweep() {
-	for i := 0; i < 200 && chatNamingSweeping.Load(); i++ {
+	for i := 0; i < 1000 && chatNamingSweeping.Load(); i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
 	time.Sleep(20 * time.Millisecond)

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"github.com/torvanis/janus/internal/safehttp"
 	"io"
 	"net/http"
 	"slices"
@@ -40,6 +40,9 @@ import (
 //
 // What is learned is kept per model on this replica for a day and applied
 // to the next request up front, so the refusal costs one round trip once.
+// It only fills in where the model's capability record is silent: the
+// record comes first and a refusal never overrides it for other callers
+// (capability_shaping.go).
 // The change is recorded on the usage event (reasoning_adjustment) and in
 // the X-Janus-Reasoning-Adjusted header.
 
@@ -49,6 +52,7 @@ const maxQuirkRetries = 3
 type modelQuirks struct {
 	dropParams        []string // sampling hints the model refuses
 	toolsViaResponses bool     // chat completions refuse tools: use Responses
+	capRename         bool     // max_tokens is refused: send max_completion_tokens
 	learned           time.Time
 }
 
@@ -98,6 +102,10 @@ type catalogFit struct {
 	reasoning reasoningFit
 	dropped   []string
 	responses bool
+	// thinkingOff names the switch used in place of reasoning effort "none".
+	thinkingOff string
+	// capRenamed: max_tokens was sent as max_completion_tokens.
+	capRenamed bool
 }
 
 func (f catalogFit) label() string {
@@ -108,6 +116,12 @@ func (f catalogFit) label() string {
 	for _, p := range f.dropped {
 		parts = append(parts, p+"->omitted")
 	}
+	if f.thinkingOff != "" {
+		parts = append(parts, "none->"+f.thinkingOff)
+	}
+	if f.capRenamed {
+		parts = append(parts, "max_tokens->max_completion_tokens")
+	}
 	if f.responses {
 		parts = append(parts, "tools->responses")
 	}
@@ -115,35 +129,48 @@ func (f catalogFit) label() string {
 }
 
 // fitCatalogBody applies what is known about a catalog model to a chat
-// body before it is sent. It returns the body, whether the request must
-// go through the Responses API, and what changed.
-func (s *Server) fitCatalogBody(modelID string, body []byte, fit catalogFit) ([]byte, bool, catalogFit) {
+// body before it is sent: the model's capability record, and what this
+// replica learned from refusals where the record is silent. It returns the
+// body, whether the request must go through the Responses API, and what
+// changed.
+func (s *Server) fitCatalogBody(model *store.Model, body []byte, fit catalogFit) ([]byte, bool, catalogFit) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(body, &m) != nil {
 		return body, false, fit
 	}
-	q := s.modelQuirks(modelID)
+	q := s.modelQuirks(model.ID)
+	shape := shapeOf(model)
 	changed := false
-	if facts := s.routedReasoning(modelID); facts != nil {
-		requested := strings.ToLower(strings.TrimSpace(subscription.RequestedEffort(m)))
-		if fit.reasoning.requested == "" {
-			fit.reasoning.requested = requested
-		}
-		if requested != "" {
-			if sent, ch := facts.Fit(requested); ch {
-				subscription.SetEffort(m, sent)
-				fit.reasoning.sent = sent
-				changed = true
-			} else {
-				fit.reasoning.sent = requested
-			}
-		}
-	} else if fit.reasoning.requested == "" {
-		r := strings.ToLower(strings.TrimSpace(subscription.RequestedEffort(m)))
-		fit.reasoning = reasoningFit{requested: r, sent: r}
+	requested := strings.ToLower(strings.TrimSpace(subscription.RequestedEffort(m)))
+	if fit.reasoning.requested == "" {
+		fit.reasoning = reasoningFit{requested: requested, sent: requested}
 	}
-	for _, p := range q.dropParams {
-		if _, ok := m[p]; ok {
+	offName := thinkingOffSwitch(model)
+	offFields := thinkingOffFields(offName)
+	facts := s.modelReasoning(model)
+	if requested == "none" && offFields != nil {
+		// No reasoning was asked for, and this model's switch for that is
+		// not the effort value "none". It wins over a level list that
+		// holds "none": such a list says what the server accepts, while
+		// the switch was shown to turn reasoning off.
+		if applyThinkingOff(m, offFields) {
+			fit.reasoning.sent, fit.thinkingOff = requested, offName
+			changed = true
+		}
+	} else if least := leastEffort(facts); requested == "none" && offName == adapter.ThinkingOffNever && least != "" {
+		// The model always thinks: send the least it does.
+		subscription.SetEffort(m, least)
+		fit.reasoning.sent = least
+		changed = true
+	} else if facts != nil && requested != "" {
+		if sent, ch := facts.Fit(requested); ch {
+			subscription.SetEffort(m, sent)
+			fit.reasoning.sent = sent
+			changed = true
+		}
+	}
+	for _, p := range mergeDropped(shape, q.dropParams) {
+		if raw, ok := m[p]; ok && string(raw) != "null" {
 			delete(m, p)
 			changed = true
 			if !slices.Contains(fit.dropped, p) {
@@ -151,7 +178,12 @@ func (s *Server) fitCatalogBody(modelID string, body []byte, fit catalogFit) ([]
 			}
 		}
 	}
-	viaResponses := q.toolsViaResponses && hasTools(m)
+	if shape.capRename || (!shape.capKnown && q.capRename) {
+		if renameOutputCap(m) {
+			fit.capRenamed, changed = true, true
+		}
+	}
+	viaResponses := hasTools(m) && (shape.responses || (!shape.endpointKnown && q.toolsViaResponses))
 	if viaResponses {
 		fit.responses = true
 	}
@@ -172,24 +204,44 @@ type quirkRetry struct {
 }
 
 // learnCatalogRefusal reads a 400 from a catalog model and decides the fix:
-// a fitted reasoning value, a dropped sampling hint, or the Responses API.
-// ok is false when the error is about something Janus cannot fix.
-func (s *Server) learnCatalogRefusal(modelID, adapterType string, body, raw []byte, viaResponses bool, fit *catalogFit) (quirkRetry, bool) {
+// a fitted reasoning value, a dropped sampling hint, a renamed output limit,
+// or the Responses API. ok is false when the error is about something Janus
+// cannot fix.
+//
+// The fix always applies to this request. It is remembered for the next
+// one only where the model's capability record says nothing: where the
+// record speaks, a caller's refused request must not change how the model
+// is called for everyone, so the model is measured again instead.
+func (s *Server) learnCatalogRefusal(ctx context.Context, model *store.Model, adapterType string, body, raw []byte, viaResponses bool, fit *catalogFit) (quirkRetry, bool) {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(body, &m) != nil {
 		return quirkRetry{}, false
 	}
-	q := s.modelQuirks(modelID)
+	q := s.modelQuirks(model.ID)
+	shape := shapeOf(model)
+	fixed := func(retry quirkRetry) (quirkRetry, bool) {
+		s.probeAfterRefusal(ctx, model)
+		return retry, true
+	}
 	if !viaResponses && adapterType == "openai_compatible" && hasTools(m) && subscription.ToolsNeedResponses(raw) {
-		q.toolsViaResponses = true
-		s.rememberQuirks(modelID, q)
+		if !shape.endpointKnown {
+			q.toolsViaResponses = true
+			s.rememberQuirks(model.ID, q)
+		}
 		fit.responses = true
-		return quirkRetry{body: body, viaResponses: true}, true
+		return fixed(quirkRetry{body: body, viaResponses: true})
 	}
 	sent := strings.ToLower(strings.TrimSpace(subscription.RequestedEffort(m)))
 	if sent != "" {
-		if learned, ok := subscription.LearnFromRefusal(s.routedReasoning(modelID), sent, raw); ok {
-			s.rememberRoutedReasoning(modelID, learned)
+		recorded := profileReasoning(model)
+		prev := recorded
+		if prev == nil {
+			prev = s.routedReasoning(model.ID)
+		}
+		if learned, ok := subscription.LearnFromRefusal(prev, sent, raw); ok {
+			if recorded == nil {
+				s.rememberRoutedReasoning(model.ID, learned)
+			}
 			if fitted, changed := learned.Fit(sent); changed && fitted != sent {
 				subscription.SetEffort(m, fitted)
 				if fit.reasoning.requested == "" {
@@ -198,25 +250,53 @@ func (s *Server) learnCatalogRefusal(modelID, adapterType string, body, raw []by
 				fit.reasoning.sent = fitted
 				out, err := json.Marshal(m)
 				if err == nil {
-					return quirkRetry{body: out, viaResponses: viaResponses}, true
+					return fixed(quirkRetry{body: out, viaResponses: viaResponses})
 				}
 			}
 			return quirkRetry{}, false
 		}
 	}
 	if p := subscription.RefusedSamplingParam(raw, presentSampling(m)); p != "" {
-		if !slices.Contains(q.dropParams, p) {
-			q.dropParams = append(q.dropParams, p)
+		if !shape.refusedKnown {
+			if !slices.Contains(q.dropParams, p) {
+				q.dropParams = append(q.dropParams, p)
+			}
+			s.rememberQuirks(model.ID, q)
 		}
-		s.rememberQuirks(modelID, q)
 		delete(m, p)
 		fit.dropped = append(fit.dropped, p)
 		out, err := json.Marshal(m)
 		if err == nil {
-			return quirkRetry{body: out, viaResponses: viaResponses}, true
+			return fixed(quirkRetry{body: out, viaResponses: viaResponses})
+		}
+	}
+	if refusesMaxTokens(raw) && renameOutputCap(m) {
+		if !shape.capKnown {
+			q.capRename = true
+			s.rememberQuirks(model.ID, q)
+		}
+		fit.capRenamed = true
+		out, err := json.Marshal(m)
+		if err == nil {
+			return fixed(quirkRetry{body: out, viaResponses: viaResponses})
 		}
 	}
 	return quirkRetry{}, false
+}
+
+// refusesMaxTokens reports whether a provider's 400 refuses max_tokens and
+// points at max_completion_tokens (OpenAI reasoning models).
+func refusesMaxTokens(raw []byte) bool {
+	var e struct {
+		Error struct {
+			Param   string `json:"param"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) != nil {
+		return false
+	}
+	return strings.Contains(e.Error.Message, "max_completion_tokens") && (e.Error.Param == "max_tokens" || strings.Contains(e.Error.Message, "'max_tokens'"))
 }
 
 // resendFitted prepares and sends one fitted retry. It returns the new
@@ -269,18 +349,7 @@ func (s *Server) sendUpstream(ctx context.Context, out *http.Request, prepared *
 		// Same pooled transport; only the redirect policy differs.
 		fix := prepared.OnRedirect
 		c := *client
-		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("stopped after 10 redirects")
-			}
-			// Only follow the provider's own host with the credential.
-			if req.URL.Host != via[0].URL.Host {
-				req.Header.Del("Authorization")
-				return nil
-			}
-			fix(req.Header)
-			return nil
-		}
+		c.CheckRedirect = safehttp.CheckRedirect(fix)
 		client = &c
 	}
 	return doUpstream(client, out, event.Streaming, s.effectiveUpstreamTimeouts(ctx).Total)

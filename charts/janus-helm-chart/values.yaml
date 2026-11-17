@@ -5,7 +5,7 @@ nameOverride: ""
 fullnameOverride: ""
 image:
   repository: ghcr.io/torvanis/janus
-  tag: "2026.11.1"
+  tag: "2026.11.2"
   digest: sha256:0cc0c4996ee516bcf09daf147d456a16ec9a3358e6a4b7ea37a4b93e54a2310c
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -60,6 +60,14 @@ sqlite:
     storageClass: null
 service:
   port: 8080
+# Prometheus metrics. Janus serves GET /metrics on a port of its own
+# (JANUS_METRICS_ADDR), never on the http port, so the Ingress cannot expose
+# them. The ClusterIP Service publishes it as port "metrics" for scraping.
+# Metrics name every upstream and model and carry usage and spend totals:
+# keep the port inside the cluster. enabled: false turns the listener off.
+metrics:
+  enabled: true
+  port: 9464
 ingress:
   enabled: false
   className: ""

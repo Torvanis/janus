@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -44,6 +45,10 @@ func (a *OpenAICompatible) Discover(ctx context.Context, up Upstream, client *ht
 	if err != nil {
 		return nil, err
 	}
+	// Together lists its models as a bare array, not {"data": [...]}.
+	if t := bytes.TrimSpace(body); len(t) > 0 && t[0] == '[' {
+		body = append(append([]byte(`{"data":`), t...), '}')
+	}
 	var payload struct {
 		Data []struct {
 			ID            string `json:"id"`
@@ -66,6 +71,8 @@ func (a *OpenAICompatible) Discover(ctx context.Context, up Upstream, client *ht
 		Data []map[string]json.RawMessage `json:"data"`
 	}
 	_ = json.Unmarshal(body, &raw)
+	provider := CapabilityProvider(a.Type(), up.BaseURL)
+	richer := a.capabilityRows(ctx, up, client, provider)
 	out := make([]DiscoveredModel, 0, len(payload.Data))
 	for i, m := range payload.Data {
 		if m.ID == "" {
@@ -84,12 +91,125 @@ func (a *OpenAICompatible) Discover(ctx context.Context, up Upstream, client *ht
 		if ctxWindow < 0 {
 			ctxWindow = 0
 		}
-		rates, warnings := discoveryPrices(a.Type(), up, raw.Data[i])
+		rates, warnings := discoveryPrices(a.Type(), up, raw.Data[i], richerRow(richer, m.ID, a.Type()))
 		out = append(out, DiscoveredModel{
 			Name: m.ID, Modalities: guessModalities(m.ID), ContextWindow: ctxWindow, Rates: rates, MetadataWarnings: warnings,
+			Capabilities: mergeCapabilities(rowCapabilities(provider, raw.Data[i]), rowCapabilities(provider, richerRow(richer, m.ID, a.Type()))),
 		})
 	}
 	return append(out, a.discoverDecisionModels(ctx, up, client, out)...), nil
+}
+
+// capabilityRows fetches a provider's richer model list where the one at
+// /v1/models leaves capabilities out: xAI's language-models list carries
+// modalities, Cerebras publishes capabilities on a public list, and
+// llama.cpp reports what the loaded model and its chat template can do on
+// /props. Best effort: a failure costs the detail, never the discovery.
+func (a *OpenAICompatible) capabilityRows(ctx context.Context, up Upstream, client *http.Client, provider string) map[string]map[string]json.RawMessage {
+	endpoint := ""
+	switch {
+	case provider == "xai":
+		endpoint = joinURL(up.BaseURL, "/v1/language-models")
+	case provider == "cerebras":
+		endpoint = "https://api.cerebras.ai/public/v1/models"
+	case a.Type() == "llama_cpp":
+		return a.llamaCppProps(ctx, up, client)
+	default:
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	if up.APIKey != "" && provider != "cerebras" {
+		req.Header.Set("Authorization", "Bearer "+up.APIKey)
+	}
+	body, err := doDiscovery(client, req)
+	if err != nil {
+		return nil
+	}
+	return modelRows(body)
+}
+
+// richerRow finds a model's row in the richer list.
+func richerRow(rows map[string]map[string]json.RawMessage, id, adapterType string) map[string]json.RawMessage {
+	if row, ok := rows[id]; ok {
+		return row
+	}
+	if adapterType == "llama_cpp" && len(rows) == 1 {
+		for _, row := range rows {
+			return row
+		}
+	}
+	return nil
+}
+
+// llamaCppProps turns /props into one row per served model in the shape
+// rowCapabilities reads, keyed by the model's alias. A llama.cpp server
+// serves one loaded model, so richerRow applies the row to whatever id the
+// server lists it under.
+func (a *OpenAICompatible) llamaCppProps(ctx context.Context, up Upstream, client *http.Client) map[string]map[string]json.RawMessage {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, joinURL(up.BaseURL, "/props"), nil)
+	if err != nil {
+		return nil
+	}
+	if up.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+up.APIKey)
+	}
+	body, err := doDiscovery(client, req)
+	if err != nil {
+		return nil
+	}
+	var props struct {
+		ModelAlias string          `json:"model_alias"`
+		Modalities map[string]bool `json:"modalities"`
+		Caps       struct {
+			SupportsTools     *bool    `json:"supports_tools"`
+			SupportsToolCalls *bool    `json:"supports_tool_calls"`
+			SupportsEffort    *bool    `json:"supports_reasoning_effort"`
+			EffortLevels      []string `json:"reasoning_effort_levels"`
+		} `json:"chat_template_caps"`
+	}
+	if json.Unmarshal(body, &props) != nil || props.ModelAlias == "" {
+		return nil
+	}
+	row := map[string]any{}
+	if props.Modalities != nil {
+		in := []string{"text"}
+		for _, m := range []struct{ key, name string }{{"vision", "image"}, {"audio", "audio"}, {"video", "video"}} {
+			if props.Modalities[m.key] {
+				in = append(in, m.name)
+			}
+		}
+		row["input_modalities"] = in
+	}
+	caps := map[string]any{}
+	if props.Caps.SupportsToolCalls != nil {
+		caps["tools"] = *props.Caps.SupportsToolCalls
+	} else if props.Caps.SupportsTools != nil {
+		caps["tools"] = *props.Caps.SupportsTools
+	}
+	if props.Caps.SupportsEffort != nil {
+		if *props.Caps.SupportsEffort {
+			caps["reasoning_effort"] = props.Caps.EffortLevels
+		} else {
+			caps["reasoning"] = false
+		}
+	}
+	row["capabilities"] = caps
+	raw, err := json.Marshal(row)
+	if err != nil {
+		return nil
+	}
+	var out map[string]json.RawMessage
+	if json.Unmarshal(raw, &out) != nil {
+		return nil
+	}
+	return map[string]map[string]json.RawMessage{props.ModelAlias: out}
 }
 
 // openAIDecisionModels are OpenAI models served on /v1/decisions, with the
@@ -148,7 +268,7 @@ func (a *OpenAICompatible) discoverDecisionModels(ctx context.Context, up Upstre
 			if id == "" {
 				continue
 			}
-			rates, warnings := discoveryPrices(a.Type(), up, row)
+			rates, warnings := discoveryPrices(a.Type(), up, row, nil)
 			out = append(out, DiscoveredModel{Name: id, Modalities: []string{ModalityDecision}, ContextWindow: max(ctxLen, 0),
 				Rates: rates, MetadataWarnings: warnings, ClassifierRole: ClassifierRoleDecision})
 		}
@@ -353,6 +473,8 @@ func canonicalizeReasoning(msg map[string]json.RawMessage) bool {
 //   - X.ai: usage.cost_in_usd_ticks — the exact cost of the request, and on
 //     image generation the ONLY billing signal, since no token counts exist.
 //     Some responses carry it at the top level instead; both are accepted.
+//   - OpenRouter, Requesty, Perplexity, DeepInfra: a USD cost quote in the
+//     usage object (quoted_cost.go). Any quote is the call's cost.
 //   - Groq: usage.prompt_time / completion_time (seconds) — measured
 //     throughput.
 //   - llama.cpp server: a top-level timings block with prompt_per_second /
@@ -373,8 +495,20 @@ type openAIUsageEnvelope struct {
 		InputTokensDetails struct {
 			CachedTokens int64 `json:"cached_tokens"`
 		} `json:"input_tokens_details"`
+		// Reasoning tokens. OpenAI counts them inside completion/output
+		// tokens; X.ai counts them OUTSIDE (completion_tokens excludes them,
+		// total_tokens includes them) and bills them at the output rate.
+		CompletionTokensDetails struct {
+			ReasoningTokens int64 `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+		OutputTokensDetails struct {
+			ReasoningTokens int64 `json:"reasoning_tokens"`
+		} `json:"output_tokens_details"`
 		// X.ai: request cost in USD ticks (see xaiTicksPerNanoUSD).
 		CostInUSDTicks *int64 `json:"cost_in_usd_ticks"`
+		// OpenRouter / Requesty usage.cost, Perplexity usage.cost.total_cost,
+		// DeepInfra usage.estimated_cost (see quoted_cost.go).
+		quotedCostFields
 		// Whisper (/audio/transcriptions, /audio/translations) bills audio
 		// duration: {"type":"duration","seconds":4}. See parseOpenAIUsage.
 		UsageType string  `json:"type"`
@@ -445,6 +579,16 @@ func parseOpenAIUsage(body []byte) (Usage, bool) {
 		TokensOut:    max64(env.Usage.CompletionTokens, env.Usage.OutputTokens),
 		TokensCached: max64(env.Usage.PromptTokensDetails.CachedTokens, env.Usage.InputTokensDetails.CachedTokens),
 	}
+	// Output tokens are recorded as billed. When the provider's own total
+	// shows reasoning tokens sitting outside the completion count
+	// (total = prompt + completion + reasoning, as X.ai reports), they are
+	// added to the output: X.ai bills them at the output rate. Decided from
+	// the reported arithmetic, never from the provider's name; OpenAI's
+	// total (= prompt + completion) leaves the count unchanged.
+	if reasoning := max64(env.Usage.CompletionTokensDetails.ReasoningTokens, env.Usage.OutputTokensDetails.ReasoningTokens); reasoning > 0 &&
+		env.Usage.TotalTokens > 0 && env.Usage.TotalTokens == u.TokensIn+u.TokensOut+reasoning {
+		u.TokensOut += reasoning
+	}
 	if len(env.Choices) > 0 {
 		u.FinishReason = env.Choices[0].FinishReason
 	}
@@ -462,9 +606,11 @@ func parseOpenAIUsage(body []byte) (Usage, bool) {
 	if ticks == nil {
 		ticks = env.CostInUSDTicks
 	}
-	if ticks != nil && *ticks >= 0 {
-		u.CostNano = (*ticks + xaiTicksPerNanoUSD/2) / xaiTicksPerNanoUSD
-		u.CostReported = true
+	if ticks != nil {
+		u.CostNano, u.CostReported = quotedNanoFromTicks(*ticks)
+	}
+	if !u.CostReported {
+		u.CostNano, u.CostReported = env.Usage.quote()
 	}
 
 	switch {

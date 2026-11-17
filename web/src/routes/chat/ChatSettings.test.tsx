@@ -56,7 +56,14 @@ function mockGets(opts: { conversations?: unknown[]; conversation?: unknown; set
 
 function renderAt(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+  const me = {
+    id: 'u1',
+    active_team_id: '',
+    teams: [],
+    feature_flags: {},
+    chat_enabled: true,
+    chat_available: true,
+  } as unknown as Me;
   return render(
     <QueryClientProvider client={qc}>
       <SessionContext.Provider value={{ me, config: null, loading: false, error: null, refresh: () => {} }}>
@@ -208,6 +215,12 @@ describe('Chat history', () => {
         .getAllByRole('link')
         .map((a) => a.textContent)[0],
     ).toBe('Trip plan');
+    // A long title ellipsizes in the rail; the full one is the tooltip.
+    expect(
+      within(nav)
+        .getByRole('link', { name: /Groceries/ })
+        .getAttribute('title'),
+    ).toBe('Groceries');
   });
 
   it('renames, pins and deletes from the row menu', async () => {

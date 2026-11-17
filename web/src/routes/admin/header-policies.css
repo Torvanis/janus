@@ -1,0 +1,26 @@
+/* Policy rules → Headers: the "Where each policy applies" table. */
+
+/* A target row header is a name and a URL, not a column label: it reads in
+   normal case at body size, and wraps instead of stretching the table. */
+table.data.hp-targets tbody th {
+  font-size: var(--janus-text-sm);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--janus-color-text-primary);
+  white-space: normal;
+}
+
+/* A target's upstream URL under its name: as typed, wrapping after a "/"
+   rather than being cut at the cell edge. */
+.hp-target-detail {
+  max-width: 40ch;
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+/* The policy picker keeps room for a policy name: the table scrolls sideways
+   on a narrow window instead of squeezing the select to its first letters. */
+.hp-policy-select {
+  min-width: 16rem;
+}

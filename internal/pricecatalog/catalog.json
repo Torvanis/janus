@@ -1,0 +1,2901 @@
+{
+ "format": "janus-price-catalog/1",
+ "version": "2026.11.16.1",
+ "generated_at": "2026-11-16T00:00:00Z",
+ "publisher": "Janus",
+ "entries": [
+  {
+   "provider": "anthropic",
+   "model": "claude-fable-5",
+   "aliases": [
+    "claude-fable-5-latest"
+   ],
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 20000000000,
+    "rate_cache_write_5m_nanousd": 12500000000,
+    "rate_cached_nanousd": 1000000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_out_nanousd": 50000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-fable-5-1",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 20000000000,
+    "rate_cache_write_5m_nanousd": 12500000000,
+    "rate_cached_nanousd": 250000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_out_nanousd": 50000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-fable-5-2",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 16000000000,
+    "rate_cache_write_5m_nanousd": 10000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 8000000000,
+    "rate_out_nanousd": 40000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-haiku-4-5-20251001",
+   "aliases": [
+    "claude-haiku-4-5",
+    "claude-haiku-4-5-latest"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 2000000000,
+    "rate_cache_write_5m_nanousd": 1250000000,
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 1000000000,
+    "rate_out_nanousd": 5000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-haiku-5-5",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 200000000,
+    "rate_cache_write_1h_nanousd@prompt_over=100000": 1000000000,
+    "rate_cache_write_5m_nanousd": 125000000,
+    "rate_cache_write_5m_nanousd@prompt_over=100000": 625000000,
+    "rate_cached_nanousd": 10000000,
+    "rate_cached_nanousd@prompt_over=100000": 50000000,
+    "rate_in_nanousd": 100000000,
+    "rate_in_nanousd@prompt_over=100000": 500000000,
+    "rate_out_nanousd": 500000000,
+    "rate_out_nanousd@prompt_over=100000": 2500000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Prompts over 100,000 tokens (cache reads and writes included) bill every token at the higher prices."
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-mythos-5",
+   "aliases": [
+    "claude-mythos-5-latest"
+   ],
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 20000000000,
+    "rate_cache_write_5m_nanousd": 12500000000,
+    "rate_cached_nanousd": 1000000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_out_nanousd": 50000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-mythos-5-1",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 20000000000,
+    "rate_cache_write_5m_nanousd": 12500000000,
+    "rate_cached_nanousd": 250000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_out_nanousd": 50000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-mythos-5-2",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 16000000000,
+    "rate_cache_write_5m_nanousd": 10000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 8000000000,
+    "rate_out_nanousd": 40000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-1-20250805",
+   "aliases": [
+    "claude-opus-4-1"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 30000000000,
+    "rate_cache_write_5m_nanousd": 18750000000,
+    "rate_cached_nanousd": 1500000000,
+    "rate_in_nanousd": 15000000000,
+    "rate_out_nanousd": 75000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-20250514",
+   "aliases": [
+    "claude-opus-4-0"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 30000000000,
+    "rate_cache_write_5m_nanousd": 18750000000,
+    "rate_cached_nanousd": 1500000000,
+    "rate_in_nanousd": 15000000000,
+    "rate_out_nanousd": 75000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-5-20251101",
+   "aliases": [
+    "claude-opus-4-5"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-6",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-7",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-4-8",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-5",
+   "aliases": [
+    "claude-opus-5-latest"
+   ],
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-opus-5-5",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 8000000000,
+    "rate_cache_write_5m_nanousd": 5000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 4000000000,
+    "rate_out_nanousd": 20000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-sonnet-4-20250514",
+   "aliases": [
+    "claude-sonnet-4-0"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6000000000,
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-sonnet-4-5-20250929",
+   "aliases": [
+    "claude-sonnet-4-5"
+   ],
+   "type": "chat",
+   "context_window": 200000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6000000000,
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-sonnet-4-6",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6000000000,
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-sonnet-5",
+   "aliases": [
+    "claude-sonnet-5-latest"
+   ],
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 4000000000,
+    "rate_cache_write_5m_nanousd": 2500000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "model": "claude-sonnet-5-5",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cache_write_1h_nanousd": 4000000000,
+    "rate_cache_write_5m_nanousd": 2500000000,
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "au.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 2200000000,
+    "rate_cache_write_5m_nanousd": 1375000000,
+    "rate_cached_nanousd": 110000000,
+    "rate_in_nanousd": 1100000000,
+    "rate_out_nanousd": 5500000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-opus-4-1-20250805-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-opus-4-1-20250805-v1:0",
+    "au.anthropic.claude-opus-4-1-20250805-v1:0",
+    "eu.anthropic.claude-opus-4-1-20250805-v1:0",
+    "jp.anthropic.claude-opus-4-1-20250805-v1:0",
+    "us.anthropic.claude-opus-4-1-20250805-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_5m_nanousd": 18750000000,
+    "rate_cached_nanousd": 1500000000,
+    "rate_in_nanousd": 15000000000,
+    "rate_out_nanousd": 75000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-opus-4-20250514-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-opus-4-20250514-v1:0",
+    "au.anthropic.claude-opus-4-20250514-v1:0",
+    "eu.anthropic.claude-opus-4-20250514-v1:0",
+    "jp.anthropic.claude-opus-4-20250514-v1:0",
+    "us.anthropic.claude-opus-4-20250514-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_5m_nanousd": 18750000000,
+    "rate_cached_nanousd": 1500000000,
+    "rate_in_nanousd": 15000000000,
+    "rate_out_nanousd": 75000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-opus-4-5-20251101-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-opus-4-5-20251101-v1:0",
+    "au.anthropic.claude-opus-4-5-20251101-v1:0",
+    "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+    "jp.anthropic.claude-opus-4-5-20251101-v1:0",
+    "us.anthropic.claude-opus-4-5-20251101-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 11000000000,
+    "rate_cache_write_5m_nanousd": 6875000000,
+    "rate_cached_nanousd": 550000000,
+    "rate_in_nanousd": 5500000000,
+    "rate_out_nanousd": 27500000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-opus-5-5",
+   "aliases": [
+    "apac.anthropic.claude-opus-5-5",
+    "au.anthropic.claude-opus-5-5",
+    "eu.anthropic.claude-opus-5-5",
+    "jp.anthropic.claude-opus-5-5",
+    "us.anthropic.claude-opus-5-5"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 8800000000,
+    "rate_cache_write_5m_nanousd": 5500000000,
+    "rate_cached_nanousd": 220000000,
+    "rate_in_nanousd": 4400000000,
+    "rate_out_nanousd": 22000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-sonnet-4-20250514-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+    "au.anthropic.claude-sonnet-4-20250514-v1:0",
+    "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+    "jp.anthropic.claude-sonnet-4-20250514-v1:0",
+    "us.anthropic.claude-sonnet-4-20250514-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+   "aliases": [
+    "apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6600000000,
+    "rate_cache_write_5m_nanousd": 4125000000,
+    "rate_cached_nanousd": 330000000,
+    "rate_in_nanousd": 3300000000,
+    "rate_out_nanousd": 16500000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "anthropic.claude-sonnet-5-5",
+   "aliases": [
+    "apac.anthropic.claude-sonnet-5-5",
+    "au.anthropic.claude-sonnet-5-5",
+    "eu.anthropic.claude-sonnet-5-5",
+    "jp.anthropic.claude-sonnet-5-5",
+    "us.anthropic.claude-sonnet-5-5"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 4400000000,
+    "rate_cache_write_5m_nanousd": 2750000000,
+    "rate_cached_nanousd": 110000000,
+    "rate_in_nanousd": 2200000000,
+    "rate_out_nanousd": 11000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 2000000000,
+    "rate_cache_write_5m_nanousd": 1250000000,
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 1000000000,
+    "rate_out_nanousd": 5000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-haiku-5-5",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 200000000,
+    "rate_cache_write_1h_nanousd@prompt_over=100000": 1000000000,
+    "rate_cache_write_5m_nanousd": 125000000,
+    "rate_cache_write_5m_nanousd@prompt_over=100000": 625000000,
+    "rate_cached_nanousd": 10000000,
+    "rate_cached_nanousd@prompt_over=100000": 50000000,
+    "rate_in_nanousd": 100000000,
+    "rate_in_nanousd@prompt_over=100000": 500000000,
+    "rate_out_nanousd": 500000000,
+    "rate_out_nanousd@prompt_over=100000": 2500000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices. Prompts over 100,000 tokens bill at the higher prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-opus-4-5-20251101-v1:0",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 10000000000,
+    "rate_cache_write_5m_nanousd": 6250000000,
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 25000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-opus-5-5",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 8000000000,
+    "rate_cache_write_5m_nanousd": 5000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 4000000000,
+    "rate_out_nanousd": 20000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-sonnet-4-20250514-v1:0",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6000000000,
+    "rate_cache_write_5m_nanousd": 3750000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "bedrock",
+   "model": "global.anthropic.claude-sonnet-5-5",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 4000000000,
+    "rate_cache_write_5m_nanousd": 2500000000,
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+    "read_at": "2026-11-06"
+   },
+   "note": "Global cross-region profile; us-east-1 prices."
+  },
+  {
+   "provider": "cerebras",
+   "model": "gpt-oss-120b",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 350000000,
+    "rate_out_nanousd": 750000000
+   },
+   "source": {
+    "url": "https://www.cerebras.ai/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "cerebras",
+   "model": "qwen-3.8-27b",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 990000000,
+    "rate_out_nanousd": 1490000000
+   },
+   "source": {
+    "url": "https://www.cerebras.ai/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "deepseek",
+   "model": "deepseek-flash",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 6000000,
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 1200000000
+   },
+   "source": {
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "Peak price. DeepSeek bills half from 16:30 to 00:30 UTC and the response does not say which applied."
+  },
+  {
+   "provider": "deepseek",
+   "model": "deepseek-v4-pro",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 44000000,
+    "rate_in_nanousd": 1320000000,
+    "rate_out_nanousd": 3960000000
+   },
+   "source": {
+    "url": "https://api-docs.deepseek.com/quick_start/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "Peak price. DeepSeek bills half from 16:30 to 00:30 UTC and the response does not say which applied."
+  },
+  {
+   "provider": "fireworks",
+   "model": "accounts/fireworks/models/kimi-k3",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://docs.fireworks.ai/serverless/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "Standard tier."
+  },
+  {
+   "provider": "fireworks",
+   "model": "fireworks/qwen3-embedding-8b",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.fireworks.ai/guides/querying-embeddings-models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "fireworks",
+   "model": "fireworks/qwen3-reranker-8b",
+   "type": "rerank",
+   "lines": {
+    "rate_in_nanousd": 200000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.fireworks.ai/guides/querying-embeddings-models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-flash",
+   "type": "chat",
+   "context_window": 1048576,
+   "lines": {
+    "rate_cached_nanousd": 30000000,
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 2500000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Deprecated; routes to gemini-3.5-flash-lite from 2026-12-01. Audio input bills $1.00."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-flash-image",
+   "type": "image",
+   "lines": {
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-flash-lite",
+   "type": "chat",
+   "context_window": 1048576,
+   "lines": {
+    "rate_cached_nanousd": 10000000,
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 400000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Audio input bills $0.30."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-flash-preview-tts",
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text in, audio out (25 audio tokens per second)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-pro",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 125000000,
+    "rate_cached_nanousd@prompt_over=200000": 250000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_in_nanousd@prompt_over=200000": 2500000000,
+    "rate_out_nanousd": 10000000000,
+    "rate_out_nanousd@prompt_over=200000": 15000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Deprecated; routes to gemini-3.8-flash from 2026-12-01."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-2.5-pro-preview-tts",
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 1000000000,
+    "rate_out_nanousd": 20000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text in, audio out (25 audio tokens per second)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3-flash-preview",
+   "type": "chat",
+   "context_window": 1048576,
+   "lines": {
+    "rate_cached_nanousd": 50000000,
+    "rate_in_nanousd": 500000000,
+    "rate_out_nanousd": 3000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Audio input bills $1.00 (not reported apart from text here)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3-pro-image",
+   "type": "image",
+   "lines": {
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 120000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.1-flash-image",
+   "type": "image",
+   "lines": {
+    "rate_in_nanousd": 500000000,
+    "rate_out_nanousd": 60000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.1-flash-lite",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 25000000,
+    "rate_in_nanousd": 250000000,
+    "rate_out_nanousd": 1500000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Audio input bills $0.50 (not reported apart from text here)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.1-flash-lite-image",
+   "type": "image",
+   "lines": {
+    "rate_in_nanousd": 250000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.1-flash-tts-preview",
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 1000000000,
+    "rate_out_nanousd": 20000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text in, audio out (25 audio tokens per second)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.1-pro-preview",
+   "aliases": [
+    "gemini-3.1-pro-preview-customtools"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=200000": 400000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=200000": 4000000000,
+    "rate_out_nanousd": 12000000000,
+    "rate_out_nanousd@prompt_over=200000": 18000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.5-flash-lite",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 30000000,
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 2500000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.5-transcribe",
+   "type": "stt",
+   "lines": {
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 12000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Audio in (25 tokens per second), text out."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.6-flash",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 750000000,
+    "rate_out_nanousd": 3750000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Price through 2026-12-31; $1.50 in / $7.50 out / $0.15 cached from 2027-01-01."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.8-flash",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 750000000,
+    "rate_out_nanousd": 3750000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Price through 2026-12-31; $1.50 in / $7.50 out / $0.15 cached from 2027-01-01."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.8-flash-lite-tts",
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 500000000,
+    "rate_out_nanousd": 6000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Price through 2026-12-31; $1.00 in / $12.00 out from 2027-01-01. Text in, audio out (25 audio tokens per second)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-3.8-flash-tts",
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 500000000,
+    "rate_out_nanousd": 9000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Price through 2026-12-31; $1.00 in / $18.00 out from 2027-01-01. Text in, audio out (25 audio tokens per second)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-4-argon",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Introductory price through 2026-11-30; $4.00 in / $20.00 out / $0.20 cached from 2026-12-01."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-4-carbon",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Introductory price through 2026-11-30; $4.00 in / $20.00 out / $0.20 cached from 2026-12-01."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-4-hydrogen",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 1500000000,
+    "rate_out_nanousd": 7500000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "google",
+   "model": "gemini-decision-1",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Decisions API: input only, zero output tokens."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-embedding-001",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "google",
+   "model": "gemini-embedding-2",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 200000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text input price; image, audio and video input bill higher."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-nano-banana-2.1",
+   "type": "image",
+   "lines": {
+    "rate_in_nanousd": 1500000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+  },
+  {
+   "provider": "google",
+   "model": "gemini-omni-1.2-flash",
+   "type": "video",
+   "lines": {
+    "rate_in_nanousd": 1500000000,
+    "rate_out_nanousd": 12000000000
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "rate_out is the video output price (5,792 tokens per second of 720p video, about $0.07 per second)."
+  },
+  {
+   "provider": "groq",
+   "model": "canopylabs/orpheus-arabic-saudi",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 40000000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/text-to-speech/orpheus",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "canopylabs/orpheus-v1-english",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 22000000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/text-to-speech/orpheus",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "meta-llama/llama-prompt-guard-2-86m",
+   "type": "moderation",
+   "lines": {
+    "rate_in_nanousd": 40000000,
+    "rate_out_nanousd": 40000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "openai/gpt-oss-120b",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 600000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "openai/gpt-oss-20b",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 37000000,
+    "rate_in_nanousd": 75000000,
+    "rate_out_nanousd": 300000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/model/openai/gpt-oss-20b",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "openai/gpt-oss-safeguard-20b",
+   "type": "moderation",
+   "lines": {
+    "rate_cached_nanousd": 37000000,
+    "rate_in_nanousd": 75000000,
+    "rate_out_nanousd": 300000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/model/openai/gpt-oss-safeguard-20b",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "qwen/qwen3.8-27b",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 800000000,
+    "rate_out_nanousd": 4000000000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/model/qwen/qwen3.8-27b",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "groq",
+   "model": "whisper-large-v3",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 1850000
+   },
+   "source": {
+    "url": "https://console.groq.com/docs/speech-to-text",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "codestral-2508",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 30000000,
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 900000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "codestral-embed-2505",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "ministral-3b-2512",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 10000000,
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 100000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-embed-2312",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-large-4",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 70000000,
+    "rate_in_nanousd": 700000000,
+    "rate_out_nanousd": 2100000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-moderation-2603",
+   "type": "moderation",
+   "lines": {
+    "rate_in_nanousd": 0,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "Free."
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-ocr-2512",
+   "type": "chat",
+   "lines": {
+    "price_kpage_nanousd": 2000000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "OCR: $2 per 1,000 pages ($3 with annotations)."
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-ocr-4-1",
+   "aliases": [
+    "mistral-ocr-latest"
+   ],
+   "type": "chat",
+   "lines": {
+    "price_kpage_nanousd": 4000000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "OCR: $4 per 1,000 pages ($5 with annotations)."
+  },
+  {
+   "provider": "mistral",
+   "model": "mistral-small-2603",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 15000000,
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 600000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "voxtral-mini-transcribe-3-0",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 3500000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "voxtral-mini-transcribe-realtime-3-0",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 8000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "voxtral-mini-tts-3-0",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 13000000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "mistral",
+   "model": "voxtral-small-transcribe-3-0",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 4000000
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "moonshot",
+   "model": "kimi-k2.6",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 160000000,
+    "rate_in_nanousd": 950000000,
+    "rate_out_nanousd": 4000000000
+   },
+   "source": {
+    "url": "https://platform.kimi.ai/docs/pricing/chat",
+    "read_at": "2026-11-06"
+   },
+   "note": "Legacy; retiring end of December 2026."
+  },
+  {
+   "provider": "moonshot",
+   "model": "kimi-k3",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 6000000000,
+    "rate_cache_write_5m_nanousd": 3000000000,
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://platform.kimi.ai/docs/pricing/chat",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "moonshot",
+   "model": "kimi-k3.1-pro",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 4000000000,
+    "rate_cache_write_5m_nanousd": 2000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://platform.kimi.ai/docs/pricing/chat",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "moonshot",
+   "model": "kimi-k3.1-pro-highspeed",
+   "type": "chat",
+   "lines": {
+    "rate_cache_write_1h_nanousd": 8000000000,
+    "rate_cache_write_5m_nanousd": 4000000000,
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 4000000000,
+    "rate_out_nanousd": 20000000000
+   },
+   "source": {
+    "url": "https://platform.kimi.ai/docs/pricing/chat",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "chat-latest",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "chatgpt-image-latest",
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 32000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4.1",
+   "aliases": [
+    "gpt-4.1-2025-04-14"
+   ],
+   "type": "chat",
+   "context_window": 1047576,
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 8000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4.1-mini",
+   "aliases": [
+    "gpt-4.1-mini-2025-04-14"
+   ],
+   "type": "chat",
+   "context_window": 1047576,
+   "lines": {
+    "rate_cached_nanousd": 100000000,
+    "rate_in_nanousd": 400000000,
+    "rate_out_nanousd": 1600000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o",
+   "aliases": [
+    "gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20"
+   ],
+   "type": "chat",
+   "context_window": 128000,
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 2500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o-mini",
+   "aliases": [
+    "gpt-4o-mini-2024-07-18"
+   ],
+   "type": "chat",
+   "context_window": 128000,
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 600000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o-mini-transcribe",
+   "aliases": [
+    "gpt-4o-mini-transcribe-2025-03-20",
+    "gpt-4o-mini-transcribe-2025-12-15"
+   ],
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 3000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_out_nanousd": 5000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o-mini-tts",
+   "aliases": [
+    "gpt-4o-mini-tts-2025-03-20",
+    "gpt-4o-mini-tts-2025-12-15"
+   ],
+   "type": "tts",
+   "lines": {
+    "rate_in_nanousd": 600000000,
+    "rate_out_nanousd": 12000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Billed per token (text in, audio out); the speech endpoint reports no tokens, so requests stay measured but unpriced until a per-character line is set."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o-transcribe",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 6000000,
+    "rate_in_nanousd": 2500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-4o-transcribe-diarize",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 6000000,
+    "rate_in_nanousd": 2500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5",
+   "aliases": [
+    "gpt-5-2025-08-07"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 125000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5-mini",
+   "aliases": [
+    "gpt-5-mini-2025-08-07"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 25000000,
+    "rate_in_nanousd": 250000000,
+    "rate_out_nanousd": 2000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5-nano",
+   "aliases": [
+    "gpt-5-nano-2025-08-07"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 5000000,
+    "rate_in_nanousd": 50000000,
+    "rate_out_nanousd": 400000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5-pro",
+   "aliases": [
+    "gpt-5-pro-2025-10-06"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 15000000000,
+    "rate_out_nanousd": 120000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5-search-api",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 125000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.1",
+   "aliases": [
+    "gpt-5.1-2025-11-13"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 125000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.2",
+   "aliases": [
+    "gpt-5.2-2025-12-11"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 175000000,
+    "rate_in_nanousd": 1750000000,
+    "rate_out_nanousd": 14000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.2-pro",
+   "aliases": [
+    "gpt-5.2-pro-2025-12-11"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 21000000000,
+    "rate_out_nanousd": 168000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.3-codex",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 175000000,
+    "rate_in_nanousd": 1750000000,
+    "rate_out_nanousd": 14000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.4",
+   "aliases": [
+    "gpt-5.4-2026-03-05"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 250000000,
+    "rate_cached_nanousd@prompt_over=272000": 500000000,
+    "rate_in_nanousd": 2500000000,
+    "rate_in_nanousd@prompt_over=272000": 5000000000,
+    "rate_out_nanousd": 15000000000,
+    "rate_out_nanousd@prompt_over=272000": 22500000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.4-mini",
+   "aliases": [
+    "gpt-5.4-mini-2026-03-17"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 75000000,
+    "rate_in_nanousd": 750000000,
+    "rate_out_nanousd": 4500000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.4-nano",
+   "aliases": [
+    "gpt-5.4-nano-2026-03-17"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 20000000,
+    "rate_in_nanousd": 200000000,
+    "rate_out_nanousd": 1250000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.4-pro",
+   "aliases": [
+    "gpt-5.4-pro-2026-03-05"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 30000000000,
+    "rate_in_nanousd@prompt_over=272000": 60000000000,
+    "rate_out_nanousd": 180000000000,
+    "rate_out_nanousd@prompt_over=272000": 270000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.5",
+   "aliases": [
+    "gpt-5.5-2026-04-23"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_cached_nanousd@prompt_over=272000": 1000000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_in_nanousd@prompt_over=272000": 10000000000,
+    "rate_out_nanousd": 30000000000,
+    "rate_out_nanousd@prompt_over=272000": 45000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.5-pro",
+   "aliases": [
+    "gpt-5.5-pro-2026-04-23"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 30000000000,
+    "rate_in_nanousd@prompt_over=272000": 60000000000,
+    "rate_out_nanousd": 180000000000,
+    "rate_out_nanousd@prompt_over=272000": 270000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.6-luna",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 20000000,
+    "rate_cached_nanousd@prompt_over=272000": 40000000,
+    "rate_in_nanousd": 200000000,
+    "rate_in_nanousd@prompt_over=272000": 400000000,
+    "rate_out_nanousd": 1200000000,
+    "rate_out_nanousd@prompt_over=272000": 1800000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.6-sol",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 400000000,
+    "rate_cached_nanousd@prompt_over=272000": 800000000,
+    "rate_in_nanousd": 4000000000,
+    "rate_in_nanousd@prompt_over=272000": 8000000000,
+    "rate_out_nanousd": 20000000000,
+    "rate_out_nanousd@prompt_over=272000": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-5.6-terra",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=272000": 400000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=272000": 4000000000,
+    "rate_out_nanousd": 12000000000,
+    "rate_out_nanousd@prompt_over=272000": 18000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6-astra",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 1000000000,
+    "rate_cached_nanousd@prompt_over=272000": 2000000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_in_nanousd@prompt_over=272000": 20000000000,
+    "rate_out_nanousd": 50000000000,
+    "rate_out_nanousd@prompt_over=272000": 75000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6-astra-law",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 1000000000,
+    "rate_in_nanousd": 10000000000,
+    "rate_out_nanousd": 50000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6-luna",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 10000000,
+    "rate_cached_nanousd@prompt_over=272000": 20000000,
+    "rate_in_nanousd": 100000000,
+    "rate_in_nanousd@prompt_over=272000": 200000000,
+    "rate_out_nanousd": 500000000,
+    "rate_out_nanousd@prompt_over=272000": 750000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6-sol",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=272000": 400000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=272000": 4000000000,
+    "rate_out_nanousd": 10000000000,
+    "rate_out_nanousd@prompt_over=272000": 15000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6.1-sol",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 100000000,
+    "rate_cached_nanousd@prompt_over=272000": 200000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=272000": 4000000000,
+    "rate_out_nanousd": 10000000000,
+    "rate_out_nanousd@prompt_over=272000": 15000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-6.1-terra",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 50000000,
+    "rate_cached_nanousd@prompt_over=272000": 100000000,
+    "rate_in_nanousd": 1000000000,
+    "rate_in_nanousd@prompt_over=272000": 2000000000,
+    "rate_out_nanousd": 5000000000,
+    "rate_out_nanousd@prompt_over=272000": 7500000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-audio",
+   "aliases": [
+    "gpt-audio-2025-08-28"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 2500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-audio-1.5",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 2500000000,
+    "rate_out_nanousd": 10000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-audio-mini",
+   "aliases": [
+    "gpt-audio-mini-2025-12-15"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 600000000,
+    "rate_out_nanousd": 2400000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-1-mini",
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 8000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-1.5",
+   "aliases": [
+    "gpt-image-1.5-2025-12-16"
+   ],
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 32000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-2",
+   "aliases": [
+    "gpt-image-2-2026-04-21"
+   ],
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-2.5-flare",
+   "aliases": [
+    "gpt-image-2.5-flare-2026-09-08"
+   ],
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-2.5-sunburst",
+   "aliases": [
+    "gpt-image-2.5-sunburst-2026-09-08"
+   ],
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-2.6-flare",
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-image-2.6-sunburst",
+   "type": "image",
+   "lines": {
+    "rate_cached_nanousd": 1250000000,
+    "rate_in_nanousd": 5000000000,
+    "rate_out_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-live-transcribe",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 17000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-realtime-translate",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 34000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-realtime-whisper",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 17000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "gpt-transcribe",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 4500000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "o3",
+   "aliases": [
+    "o3-2025-04-16"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_out_nanousd": 8000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "o3-pro",
+   "aliases": [
+    "o3-pro-2025-06-10"
+   ],
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 20000000000,
+    "rate_out_nanousd": 80000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "omni-moderation-latest",
+   "aliases": [
+    "omni-moderation-2024-09-26"
+   ],
+   "type": "moderation",
+   "lines": {
+    "rate_in_nanousd": 0,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Free."
+  },
+  {
+   "provider": "openai",
+   "model": "text-embedding-3-large",
+   "type": "embedding",
+   "context_window": 8191,
+   "lines": {
+    "rate_in_nanousd": 130000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "text-embedding-3-small",
+   "type": "embedding",
+   "context_window": 8191,
+   "lines": {
+    "rate_in_nanousd": 20000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "text-embedding-ada-002",
+   "type": "embedding",
+   "context_window": 8191,
+   "lines": {
+    "rate_in_nanousd": 100000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "tts-1",
+   "aliases": [
+    "tts-1-1106"
+   ],
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "tts-1-hd",
+   "aliases": [
+    "tts-1-hd-1106"
+   ],
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 30000000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "openai",
+   "model": "whisper-1",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 6000000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "Qwen/Qwen3.5-9B",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 170000000,
+    "rate_out_nanousd": 250000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "canopylabs/orpheus-3b-0.1-ft",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "cartesia/sonic-3",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 65000000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 6000000,
+    "rate_in_nanousd": 300000000,
+    "rate_out_nanousd": 1200000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "hexgrad/Kokoro-82M",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 4000000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "moonshotai/Kimi-K3",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 300000000,
+    "rate_in_nanousd": 3000000000,
+    "rate_out_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+   "type": "chat",
+   "lines": {
+    "rate_in_nanousd": 150000000,
+    "rate_out_nanousd": 500000000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "openai/whisper-large-v3",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 1500000
+   },
+   "source": {
+    "url": "https://docs.together.ai/docs/serverless/models",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "together",
+   "model": "zai-org/GLM-5.3",
+   "type": "chat",
+   "lines": {
+    "rate_cached_nanousd": 260000000,
+    "rate_in_nanousd": 1400000000,
+    "rate_out_nanousd": 4400000000
+   },
+   "source": {
+    "url": "https://www.together.ai/pricing",
+    "read_at": "2026-11-06"
+   }
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.20-0309-non-reasoning",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=199999": 400000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_in_nanousd@prompt_over=199999": 2500000000,
+    "rate_out_nanousd": 2500000000,
+    "rate_out_nanousd@prompt_over=199999": 5000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.20-0309-reasoning",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=199999": 400000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_in_nanousd@prompt_over=199999": 2500000000,
+    "rate_out_nanousd": 2500000000,
+    "rate_out_nanousd@prompt_over=199999": 5000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.20-multi-agent-0309",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=199999": 400000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_in_nanousd@prompt_over=199999": 2500000000,
+    "rate_out_nanousd": 2500000000,
+    "rate_out_nanousd@prompt_over=199999": 5000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.3",
+   "type": "chat",
+   "context_window": 1000000,
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=199999": 400000000,
+    "rate_in_nanousd": 1250000000,
+    "rate_in_nanousd@prompt_over=199999": 2500000000,
+    "rate_out_nanousd": 2500000000,
+    "rate_out_nanousd@prompt_over=199999": 5000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.5",
+   "type": "chat",
+   "context_window": 500000,
+   "lines": {
+    "rate_cached_nanousd": 300000000,
+    "rate_cached_nanousd@prompt_over=199999": 600000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=199999": 4000000000,
+    "rate_out_nanousd": 6000000000,
+    "rate_out_nanousd@prompt_over=199999": 12000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.6",
+   "type": "chat",
+   "context_window": 500000,
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_cached_nanousd@prompt_over=199999": 1000000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=199999": 4000000000,
+    "rate_out_nanousd": 6000000000,
+    "rate_out_nanousd@prompt_over=199999": 12000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-4.7",
+   "type": "chat",
+   "context_window": 500000,
+   "lines": {
+    "rate_cached_nanousd": 500000000,
+    "rate_cached_nanousd@prompt_over=199999": 1000000000,
+    "rate_in_nanousd": 2000000000,
+    "rate_in_nanousd@prompt_over=199999": 4000000000,
+    "rate_out_nanousd": 6000000000,
+    "rate_out_nanousd@prompt_over=199999": 12000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-build-0.1",
+   "type": "chat",
+   "context_window": 256000,
+   "lines": {
+    "rate_cached_nanousd": 200000000,
+    "rate_cached_nanousd@prompt_over=199999": 400000000,
+    "rate_in_nanousd": 1000000000,
+    "rate_in_nanousd@prompt_over=199999": 2000000000,
+    "rate_out_nanousd": 2000000000,
+    "rate_out_nanousd@prompt_over=199999": 4000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Long-context prices apply once the prompt reaches 200,000 tokens."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-imagine-image",
+   "type": "image",
+   "lines": {
+    "price_image_nanousd": 20000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "1K and 2K output cost the same. Image inputs add $0.002 per image."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-imagine-image-2.0",
+   "type": "image",
+   "lines": {
+    "price_image_nanousd@quality=low,resolution=1.5k": 50000000,
+    "price_image_nanousd@quality=low,resolution=1k": 40000000,
+    "price_image_nanousd@quality=low,resolution=2k": 60000000,
+    "price_image_nanousd@quality=medium,resolution=1.5k": 70000000,
+    "price_image_nanousd@quality=medium,resolution=1k": 60000000,
+    "price_image_nanousd@quality=medium,resolution=2k": 80000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Image inputs (edits) add $0.01 per image."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-imagine-video",
+   "type": "video",
+   "lines": {
+    "price_video_second_nanousd@resolution=480p": 50000000,
+    "price_video_second_nanousd@resolution=720p": 70000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-imagine-video-1.5",
+   "type": "video",
+   "lines": {
+    "price_video_second_nanousd@resolution=1080p": 250000000,
+    "price_video_second_nanousd@resolution=480p": 80000000,
+    "price_video_second_nanousd@resolution=720p": 140000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+  },
+  {
+   "provider": "xai",
+   "model": "grok-imagine-video-1.5-lite",
+   "type": "video",
+   "lines": {
+    "price_video_second_nanousd@resolution=1080p": 140000000,
+    "price_video_second_nanousd@resolution=480p": 20000000,
+    "price_video_second_nanousd@resolution=720p": 30000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Per second of output by resolution. Image inputs add $0.01 per image."
+  }
+ ],
+ "defaults": [
+  {
+   "provider": "google",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 200000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://aistudio.google.com/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Priced as gemini-embedding-2 text input, Google's current embedding model."
+  },
+  {
+   "provider": "mistral",
+   "type": "moderation",
+   "lines": {
+    "rate_in_nanousd": 0,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://docs.mistral.ai/inference/pricing",
+    "read_at": "2026-11-06"
+   },
+   "note": "Mistral moderation is free."
+  },
+  {
+   "provider": "openai",
+   "type": "embedding",
+   "lines": {
+    "rate_in_nanousd": 20000000,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Priced as text-embedding-3-small, OpenAI's current general embedding price."
+  },
+  {
+   "provider": "openai",
+   "type": "moderation",
+   "lines": {
+    "rate_in_nanousd": 0,
+    "rate_out_nanousd": 0
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "OpenAI moderation models are free."
+  },
+  {
+   "provider": "openai",
+   "type": "stt",
+   "lines": {
+    "price_audio_minute_nanousd": 4500000
+   },
+   "source": {
+    "url": "https://developers.openai.com/api/docs/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "Priced as gpt-transcribe, OpenAI's current transcription model."
+  },
+  {
+   "provider": "xai",
+   "type": "tts",
+   "lines": {
+    "price_mchar_nanousd": 15000000000
+   },
+   "source": {
+    "url": "https://docs.x.ai/developers/pricing",
+    "read_at": "2026-11-16"
+   },
+   "note": "xAI Text to Speech: $15.00 per 1M characters."
+  }
+ ]
+}

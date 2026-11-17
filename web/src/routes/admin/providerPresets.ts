@@ -220,3 +220,27 @@ export function presetForUpstream(adapterType: string, baseURL: string): Provide
   if (adapterType === 'bedrock') return PROVIDER_PRESETS.find((p) => p.id === 'bedrock');
   return PROVIDER_PRESETS.find((p) => p.adapterType === adapterType && !p.baseURL);
 }
+
+/** Display names for adapter types when no provider preset matches the base URL. */
+const ADAPTER_LABELS: Record<string, string> = {
+  openai_compatible: 'OpenAI-compatible',
+  anthropic: 'Anthropic',
+  gemini: 'Google Gemini',
+  vertex: 'Google Vertex AI',
+  bedrock: 'AWS Bedrock',
+  vlm: 'vLLM',
+  llama_cpp: 'llama.cpp',
+  ollama: 'Ollama',
+  tei: 'Hugging Face TEI',
+};
+
+/**
+ * The provider name to show for an upstream or model, instead of the stored
+ * adapter type ("vlm", "llama_cpp"). A cloud provider recognised by its base URL
+ * gets that provider's name (OpenAI, Groq…); anything else gets the engine name.
+ */
+export function providerLabel(adapterType: string, baseURL = ''): string {
+  const preset = baseURL ? presetForUpstream(adapterType, baseURL) : undefined;
+  if (preset?.baseURL) return preset.label;
+  return ADAPTER_LABELS[adapterType] ?? adapterType;
+}

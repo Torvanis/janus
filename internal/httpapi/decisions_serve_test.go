@@ -273,14 +273,20 @@ func TestServedDecisionsPricingOptions(t *testing.T) {
 		}
 		h.server.InvalidateConfigCache()
 	}
-	// card ignores the reported charge: 300 input tokens x $0.042/M = 12,600 nano-USD.
+	// Owner ruling: a provider's quote is the call's cost even when the
+	// admin chose the card. The fake quotes 12,600 nano-USD (equal to 300
+	// input tokens x $0.042/M), so the mode tells which one was used.
 	set(store.DecisionSetting{CostSource: store.CostSourceCard, RequestFeeNano: 1_000})
-	if e := call(); e.CostNano != 12_600+1_000 || e.AccountingMode != usage.AccountingUpstream {
-		t.Fatalf("card + fee: %d %s", e.CostNano, e.AccountingMode)
+	if e := call(); e.CostNano != 12_600+1_000 || e.AccountingMode != usage.AccountingUpstreamCost {
+		t.Fatalf("card + fee under a quote: %d %s", e.CostNano, e.AccountingMode)
+	} else if e.EstimatedCostNano == nil || *e.EstimatedCostNano != 12_600+1_000 {
+		// Janus's own price beside the quote: the card (300 x $0.042/M)
+		// plus the same fee.
+		t.Fatalf("Janus's estimate of a quoted decision call = %v, want 13600", e.EstimatedCostNano)
 	}
 	set(store.DecisionSetting{CostSource: store.CostSourceNone, RequestFeeNano: 1_000})
-	if e := call(); e.CostNano != 0 {
-		t.Fatalf("none is free: %d", e.CostNano)
+	if e := call(); e.CostNano != 0 || e.EstimatedCostNano != nil {
+		t.Fatalf("none is free, nothing to compare: %d %v", e.CostNano, e.EstimatedCostNano)
 	}
 	set(store.DecisionSetting{CostSource: store.CostSourceProvider})
 	if e := call(); e.CostNano != 12_600 || e.AccountingMode != usage.AccountingUpstreamCost {

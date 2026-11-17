@@ -1,0 +1,35 @@
+{
+  "provider": "deepseek",
+  "entries": [
+    {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 1200000000,
+        "rate_cached_nanousd": 6000000
+      },
+      "source": {
+        "url": "https://api-docs.deepseek.com/quick_start/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "Peak price. DeepSeek bills half from 16:30 to 00:30 UTC and the response does not say which applied."
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1320000000,
+        "rate_out_nanousd": 3960000000,
+        "rate_cached_nanousd": 44000000
+      },
+      "source": {
+        "url": "https://api-docs.deepseek.com/quick_start/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "Peak price. DeepSeek bills half from 16:30 to 00:30 UTC and the response does not say which applied."
+    }
+  ]
+}

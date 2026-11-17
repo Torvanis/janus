@@ -34,7 +34,6 @@ export default defineConfig({
       '/auth': 'http://127.0.0.1:8080',
       '/v1': 'http://127.0.0.1:8080',
       '/healthz': 'http://127.0.0.1:8080',
-      '/metrics': 'http://127.0.0.1:8080',
     },
   },
   build: {
@@ -45,5 +44,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // CI runs the web suite next to two race-enabled Go jobs on shared
+    // runners; heavy render tests (chat, markdown) passed in 1-2s alone but
+    // crossed vitest's 5s default under that load. A hung test still fails.
+    testTimeout: 20_000,
+    setupFiles: ['./src/test-setup.ts'],
   },
 });

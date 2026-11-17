@@ -79,16 +79,10 @@ func (s *Server) chatRT() *chatRuntime {
 	return s.chat
 }
 
-func (s *Server) chatEnabled() bool { return s.Config != nil && s.Config.ChatPreview }
-
 func (s *Server) mountChatRoutes(pr chi.Router) {
 	pr.Route("/chat", func(cr chi.Router) {
 		cr.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if !s.chatEnabled() {
-					WriteError(w, r, ErrNotFoundf("chat"))
-					return
-				}
 				if SessionFrom(r.Context()) == nil {
 					WriteError(w, r, ErrForbidden("Janus Chat is used from the web app; API clients call /v1/chat/completions directly."))
 					return
@@ -318,7 +312,8 @@ type chatConversationBody struct {
 	Pinned *bool   `json:"pinned"`
 	// Instructions apply to this conversation only (after the user's own).
 	Instructions *string `json:"instructions"`
-	// ReasoningEffort: "" (model default), low, medium or high.
+	// ReasoningEffort: "" (model default), or none, minimal, low, medium,
+	// high, xhigh, max.
 	ReasoningEffort *string `json:"reasoning_effort"`
 	// Temporary is set at creation only: never listed, never searchable,
 	// removed once idle for a day.
@@ -337,7 +332,7 @@ func (s *Server) applyChatConversationBody(c *store.ChatConversation, body chatC
 	if body.ReasoningEffort != nil {
 		v := strings.ToLower(strings.TrimSpace(*body.ReasoningEffort))
 		if !validChatEffort(v) {
-			return ErrInvalidRequest("Thinking effort must be low, medium, high or empty for the model's default").WithParam("reasoning_effort")
+			return ErrInvalidRequest("Thinking effort must be none, minimal, low, medium, high, xhigh, max, or empty for the model's default").WithParam("reasoning_effort")
 		}
 		c.ReasoningEffort = v
 	}
@@ -758,7 +753,7 @@ func (s *Server) chatStartReply(r *http.Request, user *store.User, token *store.
 	ctx := r.Context()
 	// Fit the branch into the model's context window: the oldest turns go
 	// first, the new question always stays. The count is shown in the thread.
-	build := &chatHistoryBuild{s: s, vision: s.chatVision(ctx, model), model: model, user: user}
+	build := &chatHistoryBuild{s: s, vision: s.chatVision(ctx, user, model), model: model, user: user}
 	wire := s.chatHistory(ctx, build, byID, branchAtts, userMsgID)
 	var tools []string
 	var imageModel string
@@ -1106,7 +1101,7 @@ func (s *Server) runChat(ctx context.Context, run *store.ChatRun, live *chatLive
 	box.judge = s.chatToolJudgeFor(ctx, user, plan, live)
 	// Sound and video this model cannot take become text first.
 	box.convertMedia(ctx, history)
-	box.judge.judgeMediaText(ctx, history)
+	judgedMedia := box.judge.judgeMediaText(ctx, history)
 	maxRounds := chatMaxToolRounds
 	if plan.Research {
 		box.maxSearch, maxRounds = chatResearchSearchRounds, chatResearchToolRounds
@@ -1139,7 +1134,7 @@ func (s *Server) runChat(ctx context.Context, run *store.ChatRun, live *chatLive
 				agent = chatResearchClientApp
 			}
 		}
-		req, err := chatProxyRequest(chatToolOutputJudged(ctx), user, token, id, agent, payload)
+		req, err := chatProxyRequest(chatToolOutputJudged(ctx, judgedMedia), user, token, id, agent, payload)
 		if err != nil {
 			s.chatFail(run, live, "chat.internal", "The reply could not be started.")
 			return nil, false

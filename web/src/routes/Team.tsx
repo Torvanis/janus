@@ -271,7 +271,7 @@ function MemberRoster({
             {initials(row.name)}
           </span>
           <span className="roster-id">
-            <span className="roster-name truncate" title={row.email || row.name}>
+            <span className="roster-name truncate" title={row.email ? `${row.name}\n${row.email}` : row.name}>
               {row.name}
             </span>
             {row.role !== 'member' ? <span className="roster-role">{row.role}</span> : null}

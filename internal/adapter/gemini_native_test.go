@@ -70,3 +70,91 @@ func TestGeminiNativeStreamRelaysErrors(t *testing.T) {
 		t.Fatalf("relayed = %q", s)
 	}
 }
+
+// "No thinking" on Gemini's native API is a thinking budget of 0: off where
+// the model can turn it off, least thinking where it cannot. It used to
+// fall through to the model's default thinking.
+func TestGeminiNativeNoThinking(t *testing.T) {
+	g := &Gemini{openai: &OpenAICompatible{name: "gemini"}}
+	config := func(model, effort string) string {
+		t.Helper()
+		body := `{"model":"` + model + `","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"web_search"}]` + effort + `}`
+		p, err := g.Prepare(Upstream{BaseURL: "https://generativelanguage.googleapis.com", APIKey: "k"}, &Request{Path: "/v1/chat/completions", Model: model, Body: []byte(body)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			Gen struct {
+				Thinking json.RawMessage `json:"thinkingConfig"`
+			} `json:"generationConfig"`
+		}
+		_ = json.Unmarshal(p.Body, &out)
+		return string(out.Gen.Thinking)
+	}
+	for _, c := range []struct{ model, effort, want string }{
+		{"gemini-2.5-flash", `,"reasoning_effort":"none"`, `{"includeThoughts":true,"thinkingBudget":0}`},
+		{"gemini-3.8-flash", `,"reasoning_effort":"none"`, `{"includeThoughts":true,"thinkingBudget":0}`},
+		{"gemini-2.5-flash", ``, `{"includeThoughts":true}`},
+		// 2.x refuses any thinkingLevel on the native API (live: 400
+		// "Thinking level is not supported for this model."): each level is
+		// the budget Google's OpenAI-compatible route maps it to.
+		{"gemini-2.5-flash", `,"reasoning_effort":"minimal"`, `{"includeThoughts":true,"thinkingBudget":1024}`},
+		{"gemini-2.5-flash", `,"reasoning_effort":"low"`, `{"includeThoughts":true,"thinkingBudget":1024}`},
+		{"gemini-2.5-pro", `,"reasoning_effort":"medium"`, `{"includeThoughts":true,"thinkingBudget":8192}`},
+		{"models/gemini-2.5-flash-lite", `,"reasoning_effort":"high"`, `{"includeThoughts":true,"thinkingBudget":24576}`},
+		{"gemini-2.5-flash", `,"reasoning_effort":"xhigh"`, `{"includeThoughts":true,"thinkingBudget":24576}`},
+		// Later families take the level itself.
+		{"gemini-3.8-flash", `,"reasoning_effort":"low"`, `{"includeThoughts":true,"thinkingLevel":"low"}`},
+		{"gemini-4-argon", `,"reasoning_effort":"high"`, `{"includeThoughts":true,"thinkingLevel":"high"}`},
+		{"gemini-4-argon", `,"reasoning_effort":"xhigh"`, `{"includeThoughts":true}`},
+	} {
+		if got := config(c.model, c.effort); got != c.want {
+			t.Errorf("%s%s: %s, want %s", c.model, c.effort, got, c.want)
+		}
+	}
+}
+
+func TestCarriesThinkingOff(t *testing.T) {
+	for _, c := range []struct {
+		adapterType, off string
+		want             bool
+	}{
+		{"anthropic", ThinkingOffDisabled, true},
+		{"anthropic", ThinkingOffEffortNone, false},
+		{"gemini", ThinkingOffBudgetZero, true},
+		{"openai_compatible", ThinkingOffDisabled, false},
+		{"ollama", ThinkingOffThink, false},
+	} {
+		if got := CarriesThinkingOff(c.adapterType, c.off); got != c.want {
+			t.Errorf("%s %s: %v", c.adapterType, c.off, got)
+		}
+	}
+}
+
+// The adapters CarriesSoundAndVideo rules out are the ones whose request
+// mapping cannot carry the parts: Anthropic and the ChatGPT-plan
+// translator refuse them, Bedrock's Converse mapping turns them into text.
+func TestCarriesSoundAndVideo(t *testing.T) {
+	for _, part := range []string{
+		`{"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}`,
+		`{"type":"video_url","video_url":{"url":"data:video/mp4;base64,AAAAGGZ0eXA="}}`,
+	} {
+		body := []byte(`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"what is in it?"},` + part + `]}]}`)
+		if _, err := chatToMessages(body); err == nil {
+			t.Errorf("anthropic carried %s", part)
+		}
+		if _, _, err := chatToResponses(body, "m"); err == nil {
+			t.Errorf("codex carried %s", part)
+		}
+		out, err := chatToConverse(body)
+		if err != nil || !strings.Contains(string(out), `\"type\"`) {
+			t.Errorf("bedrock should flatten the part into text: %s %v", out, err)
+		}
+	}
+	for adapterType, want := range map[string]bool{"anthropic": false, CodexAdapterType: false, "bedrock": false, "tei": false,
+		"gemini": true, "openai_compatible": true, "vlm": true, "llama_cpp": true, "ollama": true, "vertex": true, CopilotAdapterType: true} {
+		if got := CarriesSoundAndVideo(adapterType); got != want {
+			t.Errorf("%s: %v, want %v", adapterType, got, want)
+		}
+	}
+}

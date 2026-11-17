@@ -59,6 +59,7 @@
 .chat-list-scroll {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   margin: 0 -4px;
   padding: 0 4px;
@@ -79,6 +80,9 @@
   margin: 0;
   padding: 0;
   display: grid;
+  /* One column as wide as the rail: without it the implicit column sized to
+     the longest nowrap title and pushed the ⋯ buttons out of view. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
 }
 .chat-list-item {
@@ -123,6 +127,9 @@
   min-height: 0;
 }
 .chat-toolbar {
+  /* Queried by the meter/tool rules below: the toolbar's width depends on
+     the rails beside it, not on the window. */
+  container: chat-toolbar / inline-size;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -146,7 +153,8 @@
 }
 .chat-title {
   flex: 1;
-  min-width: 0;
+  /* The meter and tools give way before the chat's own name does. */
+  min-width: min(7rem, 40%);
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
@@ -158,7 +166,10 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 0.78rem;
   color: var(--janus-color-text-muted);
   font-variant-numeric: tabular-nums;
@@ -746,6 +757,23 @@
 .chat-composer-spacer {
   flex: 1;
 }
+/* A narrow composer (phones, or rails open on a tablet; set by ChatPage):
+   the model name keeps its room, the Tools button drops its word. */
+.chat-composer-bar-compact {
+  gap: 6px;
+}
+.chat-composer-bar-compact .chat-composer-spacer {
+  margin-right: -6px;
+}
+.chat-composer-bar-compact .chat-tray-button {
+  padding: 0 9px;
+}
+.chat-composer-bar-compact .chat-tray-button-label {
+  display: none;
+}
+.chat-composer-bar-compact .chat-picker-button {
+  padding: 0 8px 0 10px;
+}
 .chat-send {
   display: grid;
   place-items: center;
@@ -858,23 +886,11 @@
   background: none;
   color: var(--janus-color-text-muted);
   cursor: pointer;
-  opacity: 0;
-}
-.chat-list-item:hover .chat-list-more,
-.chat-list-item.active .chat-list-more,
-.chat-menu.open .chat-list-more,
-.chat-list-more:focus-visible {
-  opacity: 1;
 }
 .chat-list-more:hover,
 .chat-menu.open .chat-list-more {
   background: var(--janus-color-bg-surface-hover);
   color: var(--janus-color-text-primary);
-}
-@media (hover: none) {
-  .chat-list-more {
-    opacity: 0.7;
-  }
 }
 .chat-menu-pop {
   position: absolute;
@@ -1024,6 +1040,33 @@
   }
   .chat-effort-chip {
     display: none;
+  }
+}
+
+/* The meter gives way in steps as the toolbar narrows (rails open, tablet):
+   "$0 this chat · context 16% of 262,144" → "$0 this chat · 16%" → "$0 · 16%".
+   The full figures stay in the titles. */
+@container chat-toolbar (max-width: 640px) {
+  .chat-ctx-of,
+  .chat-tool-label {
+    display: none;
+  }
+  .chat-tool {
+    padding: 0 8px;
+  }
+}
+@container chat-toolbar (max-width: 480px) {
+  .chat-meter-long {
+    display: none;
+  }
+  .chat-meter {
+    gap: 8px;
+  }
+  .chat-ctx {
+    gap: 6px;
+  }
+  .chat-ctx-bar {
+    width: 32px;
   }
 }
 
@@ -2339,6 +2382,15 @@
 .chat-file-full:hover,
 .chat-file-full:focus-visible {
   opacity: 1;
+}
+.chat-file-blocked {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--janus-color-border-subtle);
+  background: var(--janus-color-warning-bg);
+  color: var(--janus-color-warning-fg);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 .chat-file-preview iframe {
   display: block;

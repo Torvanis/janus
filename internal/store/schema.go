@@ -866,6 +866,17 @@ var migrations = []migration{
 	trustStoreMigration,
 	securityPolicyMigration,
 	chatNamingMigration,
+	upstreamObjectMigration,
+	upstreamObjectJobMigration,
+	secgwMatchHashIndexMigration,
+	modelCapabilitiesMigration,
+	priceLinesMigration,
+	measuredUsageMigration,
+	subscriptionCapabilitiesMigration,
+	cacheDisjointMigration,
+	tokensInAsBilledMigration,
+	quotedEstimateMigration,
+	chatGAMigration,
 }
 
 // migrationAdvisoryLockKey is the pg_advisory_lock key that serializes

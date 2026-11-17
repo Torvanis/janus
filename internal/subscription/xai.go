@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/torvanis/janus/internal/adapter"
 )
 
 // xAI publishes subscription sign-in for third-party agents (SuperGrok and
@@ -66,6 +68,12 @@ func (x *XAI) AdminNote() string {
 
 // AdapterType implements Provider: api.x.ai speaks the OpenAI wire format.
 func (x *XAI) AdapterType() string { return "openai_compatible" }
+
+// OwnsURL implements EndpointOwner: xAI's sign-in host and its API host.
+func (x *XAI) OwnsURL(u *url.URL) bool {
+	return sameOrigin(u, pick(x.DeviceURL, xaiDeviceURL), pick(x.TokenURL, xaiTokenURL), pick(x.UserinfoURL, xaiUserinfoURL),
+		pick(x.RevokeURL, xaiRevokeURL), x.InferenceBaseURL())
+}
 
 // InferenceBaseURL implements Provider.
 func (x *XAI) InferenceBaseURL() string { return pick(x.InferenceURL, xaiInferenceURL) }
@@ -209,6 +217,58 @@ func (x *XAI) Account(ctx context.Context, client *http.Client, accessToken stri
 
 // Models implements Provider.
 func (x *XAI) Models(ctx context.Context, client *http.Client, accessToken string) ([]string, error) {
+	infos, err := x.ListModels(ctx, client, accessToken)
+	return idsOf(infos), err
+}
+
+// ListModels implements ModelLister. /models names what the plan can call;
+// /language-models (the list xAI's own docs describe) says what each chat
+// model takes in (input_modalities). The second list is read best-effort:
+// if the plan's sign-in cannot read it, the models are listed without.
+func (x *XAI) ListModels(ctx context.Context, client *http.Client, accessToken string) ([]ModelInfo, error) {
+	names, err := x.modelNames(ctx, client, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	caps := x.languageModelCaps(ctx, client, accessToken)
+	out := make([]ModelInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, ModelInfo{ID: n, Capabilities: caps[n]})
+	}
+	return out, nil
+}
+
+// languageModelCaps reads /language-models into capabilities per model id
+// and alias. Any failure is an empty answer.
+func (x *XAI) languageModelCaps(ctx context.Context, client *http.Client, accessToken string) map[string]adapter.Capabilities {
+	var out struct {
+		Models []map[string]json.RawMessage `json:"models"`
+		Data   []map[string]json.RawMessage `json:"data"`
+	}
+	status, _, err := getJSON(ctx, client, strings.TrimRight(x.InferenceBaseURL(), "/")+"/language-models", accessToken, &out)
+	if err != nil || status != http.StatusOK {
+		return nil
+	}
+	caps := map[string]adapter.Capabilities{}
+	for _, row := range append(out.Models, out.Data...) {
+		c := adapter.RowCapabilities("xai", row)
+		if len(c) == 0 {
+			continue
+		}
+		var id string
+		var aliases []string
+		_ = json.Unmarshal(row["id"], &id)
+		_ = json.Unmarshal(row["aliases"], &aliases)
+		for _, name := range append([]string{id}, aliases...) {
+			if name = strings.TrimSpace(name); name != "" {
+				caps[name] = c
+			}
+		}
+	}
+	return caps
+}
+
+func (x *XAI) modelNames(ctx context.Context, client *http.Client, accessToken string) ([]string, error) {
 	var out struct {
 		Data []struct {
 			ID string `json:"id"`

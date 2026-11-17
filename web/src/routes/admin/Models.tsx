@@ -1,7 +1,15 @@
 import { Collection } from '../../components/Collection';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { hasRateCard, listAdminModels, patchModel, type ModelRatePatch } from '../../api/client';
+import {
+  bulkResetModelsToCatalog,
+  hasAdminPrices,
+  hasRateCard,
+  listAdminModels,
+  patchModel,
+  previewBulkCatalogReset,
+  type ModelRatePatch,
+} from '../../api/client';
 import { isRenamedModel, publicModelName, type Model } from '../../lib/types';
 import { formatDate, formatModelRate, formatTokenCount, modalityLabel } from '../../lib/format';
 import { sortCollection } from '../../lib/collections';
@@ -12,7 +20,10 @@ import { t, type MessageKey } from '../../lib/i18n';
 import { useLocalOnly } from '../../app/session';
 import { Link } from 'react-router-dom';
 import { FilterSelect, SearchInput, SortHeader } from '../shared';
+import { CapabilityProbeControls } from './CapabilityProbeControls';
+import { CatalogPreviewStatus } from './CatalogAlignment';
 import { ModelDrawer } from './ModelDrawer';
+import { ModelsTabs } from './ModelsTabs';
 
 export function AdminModelsPage(): ReactNode {
   // Local-only mode (JANUS_LOCAL_ONLY): pricing is meaningless, so the rate
@@ -30,8 +41,13 @@ export function AdminModelsPage(): ReactNode {
   const [sortParam, setSort] = useUrlState('sort', 'model_asc');
   const sort = LEGACY_SORTS[sortParam] ?? sortParam;
   const [editing, setEditing] = useState<Model | null>(null);
+  // ?edit=<model id> opens that model's editor (Pricing accuracy links
+  // "Set prices" here).
+  const [editId, setEditId] = useUrlState('edit', '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'enabled' | 'disabled' | null>(null);
+  // Bulk "Reset to Janus price catalog" / "Keep aligned".
+  const [catalogBulk, setCatalogBulk] = useState<'reset' | 'align' | null>(null);
   const debounced = useDebounced(search);
 
   // The whole catalog is loaded once (a few hundred rows) and filtered,
@@ -52,6 +68,12 @@ export function AdminModelsPage(): ReactNode {
   });
 
   const all = useMemo(() => models.data?.models ?? [], [models.data]);
+  useEffect(() => {
+    if (!editId || !models.data) return;
+    const target = models.data.models.find((m) => m.id === editId);
+    if (target) setEditing(target);
+    setEditId('');
+  }, [editId, models.data, setEditId]);
 
   // Each filter is a predicate; a filter's option counts apply every OTHER
   // filter, so the numbers say what picking that option would show.
@@ -132,6 +154,28 @@ export function AdminModelsPage(): ReactNode {
   const sharedNameTotal = [...sharedNameCounts.values()].filter((n) => n > 1).length;
 
   const selectedModels = filtered.filter((model) => selected.has(model.id));
+  const selectedIds = selectedModels.map((model) => model.id);
+  const catalogPlan = useQuery({
+    queryKey: ['admin', 'catalog-bulk-plan', catalogBulk, selectedIds.join(',')],
+    queryFn: () => previewBulkCatalogReset(selectedIds, catalogBulk === 'align'),
+    enabled: catalogBulk !== null && selectedIds.length > 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const catalogApply = useMutation({
+    mutationFn: () => bulkResetModelsToCatalog(selectedIds, catalogBulk === 'align'),
+    onSuccess: (res) => {
+      setCatalogBulk(null);
+      setSelected(new Set());
+      toast(t('adminModels.catalogAlign.bulkDone', { count: res.counts.reset ?? 0 }));
+      void queryClient.invalidateQueries({ queryKey: ['admin'] });
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+    },
+    onError: (error: Error) => toast(error.message, 'danger'),
+  });
+  const planResults = catalogPlan.data?.results ?? [];
+  const willChange = planResults.filter((r) => r.outcome === 'would_reset');
+  const skipped = planResults.filter((r) => r.outcome !== 'would_reset');
   const unpricedSelected = bulkAction === 'enabled' && !localOnly ? selectedModels.filter((model) => !hasRateCard(model)) : [];
 
   return (
@@ -142,6 +186,11 @@ export function AdminModelsPage(): ReactNode {
           <p className="page-subtitle">{t(localOnly ? 'adminModels.subtitleLocalOnly' : 'adminModels.subtitle')}</p>
         </div>
       </header>
+      <ModelsTabs active="catalog" />
+
+      <CapabilityProbeControls
+        enabledChatModels={all.filter((model) => model.status === 'enabled' && model.modalities.includes('chat')).length}
+      />
 
       {sharedNameTotal > 0 ? (
         <div className="banner banner-info" role="status" data-testid="shared-name-notice">
@@ -259,6 +308,16 @@ export function AdminModelsPage(): ReactNode {
             <button type="button" className="btn btn-sm" onClick={() => setBulkAction('disabled')}>
               {t('tables.disable')}
             </button>
+            {localOnly ? null : (
+              <>
+                <button type="button" className="btn btn-sm" onClick={() => setCatalogBulk('reset')}>
+                  {t('adminModels.catalogAlign.bulkReset')}
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setCatalogBulk('align')}>
+                  {t('adminModels.catalogAlign.bulkAlign')}
+                </button>
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -378,7 +437,10 @@ export function AdminModelsPage(): ReactNode {
                             </td>
                             {localOnly ? null : (
                               <>
-                                <td className="num small">{formatModelRate(model, 'rate_in_nanousd')}</td>
+                                <td className="num small">
+                                  {formatModelRate(model, 'rate_in_nanousd')}
+                                  <PricingTag model={model} />
+                                </td>
                                 <td className="num small">{formatModelRate(model, 'rate_out_nanousd')}</td>
                               </>
                             )}
@@ -476,8 +538,98 @@ export function AdminModelsPage(): ReactNode {
         confirmLabel={bulkAction === 'enabled' ? t('adminModels.enableModels') : t('adminModels.disableModels')}
         busy={patch.isPending}
       />
+
+      <ConfirmDialog
+        open={catalogBulk !== null}
+        onClose={() => setCatalogBulk(null)}
+        onConfirm={() => catalogApply.mutate()}
+        danger={false}
+        busy={catalogApply.isPending}
+        confirmDisabled={!catalogPlan.data || willChange.length === 0}
+        title={t(
+          catalogBulk === 'align' ? 'adminModels.catalogAlign.bulkAlignTitle' : 'adminModels.catalogAlign.bulkResetTitle',
+          { count: selectedModels.length },
+        )}
+        consequence={t(
+          catalogBulk === 'align' ? 'adminModels.catalogAlign.bulkAlignBody' : 'adminModels.catalogAlign.bulkResetBody',
+        )}
+        confirmLabel={t(catalogBulk === 'align' ? 'adminModels.catalogAlign.confirmAlign' : 'adminModels.catalogAlign.confirm')}
+      >
+        {catalogPlan.data ? null : <CatalogPreviewStatus query={catalogPlan} />}
+        {catalogPlan.data ? (
+          <div className="stack" style={{ gap: 'var(--janus-space-2)' }} data-testid="catalog-bulk-plan">
+            {willChange.length === 0 ? (
+              <p className="small" style={{ margin: 0 }}>
+                {t('adminModels.catalogAlign.bulkNothing')}
+              </p>
+            ) : (
+              <>
+                <p className="small" style={{ margin: 0 }}>
+                  {t(
+                    catalogBulk === 'align' ? 'adminModels.catalogAlign.bulkWillAlign' : 'adminModels.catalogAlign.bulkWillReset',
+                    {
+                      count: willChange.length,
+                    },
+                  )}
+                </p>
+                {catalogBulk === 'reset' ? (
+                  <ul className="catalog-changes">
+                    {willChange.map((r) => (
+                      <li key={r.model_id}>
+                        {r.changed_lines > 0
+                          ? t('adminModels.catalogAlign.bulkPriceLines', { name: r.model ?? r.model_id, count: r.changed_lines })
+                          : t('adminModels.catalogAlign.bulkNoPriceChange', { name: r.model ?? r.model_id })}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
+            {skipped.length > 0 ? (
+              <>
+                <p className="small" style={{ margin: 0 }}>
+                  {t('adminModels.catalogAlign.bulkSkipped', { count: skipped.length })}
+                </p>
+                <ul className="catalog-changes">
+                  {skipped.map((r) => (
+                    <li key={r.model_id}>
+                      <span className="catalog-change-line">{r.model ?? r.model_id}</span>
+                      <span className="small muted">
+                        {r.outcome === 'not_found'
+                          ? t('adminModels.catalogAlign.bulkNotFound')
+                          : r.reason === 'prices_would_change'
+                            ? t('adminModels.catalogAlign.bulkWouldChange')
+                            : r.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
+}
+
+/** Under the input rate: whether the prices follow the Janus price catalog. */
+function PricingTag({ model }: { model: Model }): ReactNode {
+  if (model.catalog_aligned) {
+    return (
+      <span className="catalog-tag small muted" title={t('adminModels.catalogAlign.alignedTitle')}>
+        {t('adminModels.catalogAlign.badgeAligned')}
+      </span>
+    );
+  }
+  if (hasAdminPrices(model)) {
+    return (
+      <span className="catalog-tag small muted" title={t('adminModels.catalogAlign.customTitle')}>
+        {t('adminModels.catalogAlign.badgeCustom')}
+      </span>
+    );
+  }
+  return null;
 }
 
 /** What a catalog model is for: callers' chat, typed decisions, or a guard. */

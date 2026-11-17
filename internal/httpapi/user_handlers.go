@@ -78,8 +78,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"endpoint": s.Config.PublicURL + "/v1",
 		// Local-only mode (JANUS_LOCAL_ONLY): the SPA hides every
 		// cost/spend/pricing surface when true.
-		"local_only":   s.Config.LocalOnly,
-		"chat_preview": chatOK,
+		"local_only": s.Config.LocalOnly,
+		// chat_enabled is Administration → Chat's on/off switch for the
+		// instance; chat_available is whether this person may use Chat
+		// (that switch plus any access restriction). Shared chats open
+		// whenever chat_enabled is true.
+		"chat_enabled":   s.chatAdmin(r.Context()).Enabled,
+		"chat_available": chatOK,
 		// Why Chat is unavailable (instance off / not in the allowed
 		// groups), so the SPA can explain instead of hiding silently.
 		"chat_unavailable_reason": chatWhy,
@@ -217,6 +222,19 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// A new credential is always on the record, with how it was asked for: a
+	// token minted with another token (allowed, for automation that rotates
+	// its own credentials) names the token that minted it.
+	created := map[string]any{"description": token.Description, "prefix": token.Prefix, "created_with": "browser session"}
+	if token.TeamID != "" {
+		created["team_id"] = token.TeamID
+	}
+	if via := TokenFrom(r.Context()); via != nil {
+		created["created_with"] = "api token"
+		created["created_with_token_id"] = via.ID
+		created["created_with_token_prefix"] = via.Prefix
+	}
+	s.audit(r, "token_created", "token", token.ID, nil, created)
 	WriteJSON(w, http.StatusCreated, map[string]any{
 		"token": token,
 		// Returned exactly once: only the digest is persisted.
@@ -278,6 +296,67 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"id": id, "revoked_at": time.Now().UTC()})
 }
 
+// handleReissueToken mints a new token with the same name and context as an
+// existing one and returns its value once, like create. When revoke_old is
+// true and the old token is still active it is revoked in the same
+// transaction. Browser session only (the same rule as changing a token's
+// team): a leaked key must not be able to rotate itself out from under its
+// owner. Owner only: an admin would otherwise receive someone else's secret.
+func (s *Server) handleReissueToken(w http.ResponseWriter, r *http.Request) {
+	if SessionFrom(r.Context()) == nil || TokenFrom(r.Context()) != nil {
+		WriteError(w, r, ErrForbidden("Sign in to Janus to re-issue a token."))
+		return
+	}
+	var body struct {
+		RevokeOld bool `json:"revoke_old"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	user := UserFrom(r.Context())
+	res, err := s.Store.ReissueToken(r.Context(), chi.URLParam(r, "id"), user.ID, body.RevokeOld)
+	if errors.Is(err, store.ErrNotFound) {
+		WriteError(w, r, ErrNotFoundf("That token"))
+		return
+	}
+	var invalid *store.ValidationError
+	if errors.As(err, &invalid) && invalid.Field == "team_id" {
+		WriteError(w, r, ErrInvalidRequest("You are no longer an active member of this token's team, so it cannot be re-issued there. Create a new token in another context instead.").WithParam("team_id"))
+		return
+	}
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if res.RevokedOld {
+		// Revocation must be immediate, so the credential cache is dropped at once.
+		s.InvalidateTokenCache()
+	}
+	// The same two records as create and revoke, so the Audit page's existing
+	// filters find them; each names the other token.
+	created := map[string]any{
+		"description": res.Token.Description, "prefix": res.Token.Prefix, "created_with": "browser session",
+		"reissued_from": res.Old.ID, "reissued_from_prefix": res.Old.Prefix,
+	}
+	if res.Token.TeamID != "" {
+		created["team_id"] = res.Token.TeamID
+	}
+	s.audit(r, "token_created", "token", res.Token.ID, nil, created)
+	if res.RevokedOld {
+		s.audit(r, "token_revoked", "token", res.Old.ID,
+			map[string]any{"revoked": false},
+			map[string]any{"revoked": true, "reason": "reissued", "replaced_by": res.Token.ID, "replaced_by_prefix": res.Token.Prefix})
+	}
+	WriteJSON(w, http.StatusCreated, map[string]any{
+		"token": res.Token,
+		// Returned exactly once: only the digest is persisted.
+		"value":       res.Plaintext,
+		"warning":     "Copy this value now. Janus stores only a hash and cannot show it again.",
+		"revoked_old": res.RevokedOld,
+	})
+}
+
 // --- Models ------------------------------------------------------------------
 
 // handleListModels returns the models the caller may use, filtered by grants.
@@ -310,6 +389,11 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	if err := s.attachModelActivity(r.Context(), catalog); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	// The same answer the proxy acts on, so Chat offers "Off" exactly
+	// where it will be honored.
+	for _, m := range catalog.Models {
+		m.ThinkingOff = thinkingOffSwitch(m)
 	}
 	// The caller's own connected plans (my/<provider>/<model>), the same
 	// list /v1/models appends. They are not grants and never depend on the
@@ -386,6 +470,90 @@ func (s *Server) attachModelActivity(ctx context.Context, catalog GrantedCatalog
 	return nil
 }
 
+// modelPerfDays and modelPerfBucket shape a model's figures on the user's
+// model pop-up: a seven-day average plus one point per day.
+const (
+	modelPerfDays   = 7
+	modelPerfBucket = 24 * time.Hour
+)
+
+// ModelPerformanceSummary is one model's response figures for the user
+// catalog: org-wide aggregates only (no per-user rows), the same definitions
+// as the admin Overview's model charts (store.ModelPerformance).
+type ModelPerformanceSummary struct {
+	ModelID       string     `json:"model_id"`
+	Days          int        `json:"days"`
+	Buckets       []string   `json:"buckets"`
+	BucketSeconds int64      `json:"bucket_seconds"`
+	Requests      int64      `json:"requests"`
+	AvgTTFTMs     *float64   `json:"avg_ttft_ms"`
+	TTFTSamples   int64      `json:"ttft_samples"`
+	TTFTSer       []*float64 `json:"ttft_ms_series"`
+	AvgOutput     *float64   `json:"avg_output_tokens"`
+	OutputSer     []*float64 `json:"output_tokens_series"`
+	CacheReported bool       `json:"cache_reported"`
+	CacheHitRate  *float64   `json:"cache_hit_rate"`
+	CacheHitSer   []*float64 `json:"cache_hit_rate_series"`
+}
+
+// handleModelPerformance serves GET /api/v1/models/{id}/performance: the
+// last seven days of time to first token, output size and cache hit rate for
+// one model the caller can see. {id} is a model id or a managed model id (an
+// alias shows its current target's figures, like the catalog's activity).
+// Anything outside the caller's catalog, including a model a Family profile
+// blocks, is a 404, so the endpoint never confirms a model exists.
+func (s *Server) handleModelPerformance(w http.ResponseWriter, r *http.Request) {
+	user := UserFrom(r.Context())
+	id := chi.URLParam(r, "id")
+	catalog, err := s.grantedCatalog(r.Context(), user, nil)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	s.childFilterCatalog(r.Context(), user, &catalog, nil)
+	modelID := ""
+	for _, m := range catalog.Models {
+		if m.ID == id {
+			modelID = m.ID
+		}
+	}
+	for _, mm := range catalog.Managed {
+		if mm.ID == id {
+			modelID = mm.TargetModelID
+		}
+	}
+	if modelID == "" {
+		WriteError(w, r, ErrNotFoundf("Model"))
+		return
+	}
+	out, err := cachedRead(&s.perfCache, "model_performance:"+modelID, func() (ModelPerformanceSummary, error) {
+		now := time.Now().UTC()
+		series, err := s.Store.ModelPerformanceSeriesFor(r.Context(),
+			store.UsageScope{Start: now.Add(-modelPerfBucket * modelPerfDays), End: now},
+			modelPerfBucket, modelPerfDays, store.PerfSelect{ModelIDs: []string{modelID}, OnlyChosen: true})
+		if err != nil {
+			return ModelPerformanceSummary{}, err
+		}
+		sum := ModelPerformanceSummary{
+			ModelID: modelID, Days: modelPerfDays, Buckets: series.Buckets, BucketSeconds: series.BucketSeconds,
+			TTFTSer: make([]*float64, modelPerfDays), OutputSer: make([]*float64, modelPerfDays), CacheHitSer: make([]*float64, modelPerfDays),
+		}
+		if len(series.Models) == 1 {
+			m := series.Models[0]
+			sum.Requests = m.Requests
+			sum.AvgTTFTMs, sum.TTFTSamples, sum.TTFTSer = m.AvgTTFTMs, m.TTFTSamples, m.TTFTSer
+			sum.AvgOutput, sum.OutputSer = m.AvgOutputTokens, m.OutputTokensSer
+			sum.CacheReported, sum.CacheHitRate, sum.CacheHitSer = m.CacheReported, m.CacheHitRate, m.CacheHitSer
+		}
+		return sum, nil
+	})
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
 // GrantedCatalog is everything a principal may address: real models and
 // managed aliases, each already labeled with how access was obtained.
 type GrantedCatalog struct {
@@ -403,6 +571,13 @@ type GrantedCatalog struct {
 // rather than advertised as usable. Broken aliases are an admin's problem to
 // see (the admin console badges them), not something to offer to callers who
 // would only get an error.
+//
+// The same goes for upstreams: a model whose upstream is disabled is left
+// out even when granted (store.Model.Live), and so is a managed model none of
+// whose targets is live (store.ManagedModel.ServesLive; a router counts when
+// its default or any route can serve). Grants are untouched, so re-enabling
+// the upstream brings everything back. A request that names a hidden model
+// still fails exactly as before (upstream unavailable).
 func (s *Server) grantedCatalog(ctx context.Context, user *store.User, serviceToken *store.ServiceToken) (GrantedCatalog, error) {
 	subject := store.GrantSubject{}
 	if serviceToken != nil {
@@ -424,11 +599,15 @@ func (s *Server) grantedCatalog(ctx context.Context, user *store.User, serviceTo
 	}
 
 	out := GrantedCatalog{Models: []*store.Model{}, Managed: []*store.ManagedModel{}}
-	models, err := s.Store.ListModels(ctx, store.ModelFilter{Status: store.ModelEnabled})
+	// Every live model, granted or not: managed models are judged by
+	// their targets, which the caller need not hold a grant on.
+	models, err := s.Store.ListModels(ctx, store.ModelFilter{Status: store.ModelEnabled, Live: true})
 	if err != nil {
 		return GrantedCatalog{}, err
 	}
+	live := make(map[string]bool, len(models))
 	for _, m := range models {
+		live[m.ID] = true
 		if source, ok := granted[m.ID]; ok {
 			m.GrantSource = source
 			out.Models = append(out.Models, m)
@@ -438,15 +617,54 @@ func (s *Server) grantedCatalog(ctx context.Context, user *store.User, serviceTo
 	if err != nil {
 		return GrantedCatalog{}, err
 	}
+	liveTarget := s.liveManagedRule(ctx, managed, live)
 	for _, mm := range managed {
 		source, ok := granted[mm.ID]
-		if !ok || !mm.Servable {
+		if !ok || !mm.Servable || !liveTarget(mm) {
 			continue
 		}
 		mm.GrantSource = source
 		out.Managed = append(out.Managed, mm)
 	}
 	return out, nil
+}
+
+// liveManagedRule returns the test grantedCatalog applies to each enabled
+// managed model: can any of its targets serve, given which catalog models
+// are live? Everything is read from the lists already loaded (routers' route
+// tables come through the revision-tagged config cache), so the catalog stays
+// a fixed number of queries whatever its size.
+func (s *Server) liveManagedRule(ctx context.Context, managed []*store.ManagedModel, live map[string]bool) func(*store.ManagedModel) bool {
+	byID := make(map[string]*store.ManagedModel, len(managed))
+	for _, mm := range managed {
+		byID[mm.ID] = mm
+	}
+	isLive := func(id string) bool { return live[id] }
+	// aliasLive judges a non-router managed model (alias or pool).
+	aliasLive := func(mm *store.ManagedModel) bool {
+		return mm.Kind != store.ManagedKindRouter && mm.ServesLive(isLive)
+	}
+	return func(mm *store.ManagedModel) bool {
+		if mm.Kind != store.ManagedKindRouter {
+			return aliasLive(mm)
+		}
+		_, cfg, err := s.routerConfig(ctx, mm.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			// A storage blip must not hide a router that may well serve.
+			s.Logger.WarnContext(ctx, "router config unavailable; listing router", "router", mm.Name, "error", err.Error())
+			return true
+		}
+		for _, id := range store.RouterModelIDs(mm, cfg) {
+			if live[id] {
+				return true
+			}
+			// Disabled aliases are not in byID: they cannot serve a route.
+			if target, ok := byID[id]; ok && target.Status == store.ManagedModelEnabled && aliasLive(target) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 func (s *Server) grantedModels(r *http.Request, user *store.User) ([]*store.Model, error) {
@@ -480,7 +698,11 @@ func (s *Server) requestFilter(r *http.Request, user *store.User) store.RequestF
 		// Usage-insights labels are an admin view of org traffic.
 		Classified: adminOnly(user, r.URL.Query().Get("classified")),
 	}
-	if r.URL.Query().Get("range") != "" {
+	// request_id=<id> finds one request (the pricing accuracy report and
+	// Security link to it). A request id names one request whenever it ran,
+	// so the time range does not apply.
+	f.RequestID = r.URL.Query().Get("request_id")
+	if r.URL.Query().Get("range") != "" && f.RequestID == "" {
 		f.Start, f.End = start, end
 	}
 	// The gateway's own classifier calls are hidden unless asked for: they
@@ -709,9 +931,10 @@ func (s *Server) handleExportRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
-	// The cache-write columns sit next to tokens_cached so the canonical cache
-	// hit rate — tokens_cached / (tokens_in + tokens_cache_write_5m +
-	// tokens_cache_write_1h) — is reproducible from the exported rows alone.
+	// tokens_in is the whole prompt (cached tokens and cache writes
+	// included, as providers bill them); the cache columns beside it are its
+	// parts, so the canonical cache hit rate — tokens_cached / tokens_in — is
+	// reproducible from the exported rows alone.
 	// requested_model records the managed-model alias the caller addressed,
 	// when one was used. It sits beside "model" (which always carries the
 	// underlying model that actually ran) so an export can answer both
@@ -724,13 +947,13 @@ func (s *Server) handleExportRequests(w http.ResponseWriter, r *http.Request) {
 	_ = cw.Write(header)
 	for _, e := range events {
 		row := []string{
-			e.CreatedAt.Format(time.RFC3339), e.ModelName, e.RequestedModelName, e.Modality, strconv.Itoa(e.HTTPStatus),
+			e.CreatedAt.Format(time.RFC3339), csvSafe(e.ModelName), csvSafe(e.RequestedModelName), csvSafe(e.Modality), strconv.Itoa(e.HTTPStatus),
 			strconv.Itoa(e.LatencyMs), strconv.FormatInt(e.TokensIn, 10), strconv.FormatInt(e.TokensOut, 10),
 			strconv.FormatInt(e.TokensCached, 10), strconv.FormatInt(e.TokensCacheWrite5m, 10),
-			strconv.FormatInt(e.TokensCacheWrite1h, 10), fmt.Sprintf("%.6f", usage.USD(e.CostNano)), e.ErrorCode, e.RequestID, e.TeamIDs, requestChargedTeamLabel(e),
+			strconv.FormatInt(e.TokensCacheWrite1h, 10), fmt.Sprintf("%.6f", usage.USD(e.CostNano)), csvSafe(e.ErrorCode), csvSafe(e.RequestID), csvSafe(e.TeamIDs), csvSafe(requestChargedTeamLabel(e)),
 		}
 		if crossUser {
-			row = append([]string{row[0], e.UserEmail, e.UserName, e.ServiceTokenName}, row[1:]...)
+			row = append([]string{row[0], csvSafe(e.UserEmail), csvSafe(e.UserName), csvSafe(e.ServiceTokenName)}, row[1:]...)
 		}
 		_ = cw.Write(row)
 	}
@@ -970,7 +1193,7 @@ func (s *Server) handleGlobalDashboard(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	newModels, err := s.Store.ListModels(r.Context(), store.ModelFilter{Status: store.ModelEnabled, Sort: "discovered"})
+	newModels, err := s.Store.ListModels(r.Context(), store.ModelFilter{Status: store.ModelEnabled, Live: true, Sort: "discovered"})
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -1134,6 +1357,30 @@ func (s *Server) handleMarkNotificationsRead(w http.ResponseWriter, r *http.Requ
 
 // --- Docs feedback -----------------------------------------------------------
 
+const (
+	docsFeedbackPerAddressPerMin = 6
+	docsFeedbackTotalPerMin      = 120
+	maxDocsPageLen               = 200
+)
+
+// validDocsPage reports whether page looks like a documentation path: short,
+// and made of path characters only.
+func validDocsPage(page string) bool {
+	if page == "" || len(page) > maxDocsPageLen {
+		return false
+	}
+	for i := 0; i < len(page); i++ {
+		c := page[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '/', c == '-', c == '_', c == '.', c == '#':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) handleDocsFeedback(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Page    string `json:"page"`
@@ -1144,13 +1391,25 @@ func (s *Server) handleDocsFeedback(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	if strings.TrimSpace(body.Page) == "" {
-		WriteError(w, r, ErrInvalidRequest("A page identifier is required.").WithParam("page"))
+	// The documentation is readable before sign-in, so this is the one
+	// write an anonymous caller can make. It is bounded three ways: how
+	// often one address may post, how often anyone may, and how much one
+	// post may store.
+	now := time.Now()
+	if ok, _ := s.RateLimits.Allow("docs-feedback:"+s.clientIP(r), docsFeedbackPerAddressPerMin, now); !ok {
+		WriteError(w, r, newError(http.StatusTooManyRequests, "rate_limited", "rate_limit_error", "Too much feedback from this address. Try again in a minute."))
 		return
 	}
-	if len(body.Note) > 1000 {
-		body.Note = body.Note[:1000]
+	if ok, _ := s.RateLimits.Allow("docs-feedback:all", docsFeedbackTotalPerMin, now); !ok {
+		WriteError(w, r, newError(http.StatusTooManyRequests, "rate_limited", "rate_limit_error", "Feedback is busy right now. Try again in a minute."))
+		return
 	}
+	body.Page = strings.TrimSpace(body.Page)
+	if !validDocsPage(body.Page) {
+		WriteError(w, r, ErrInvalidRequest("A page identifier is required: a documentation path of at most 200 characters.").WithParam("page"))
+		return
+	}
+	body.Note = truncate(body.Note, 1000)
 	// Feedback is deliberately anonymous: no user id is recorded.
 	if err := s.Store.AddDocsFeedback(r.Context(), body.Page, body.Helpful, body.Note); err != nil {
 		WriteError(w, r, err)

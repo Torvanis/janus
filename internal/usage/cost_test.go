@@ -50,9 +50,10 @@ func TestComputeCost(t *testing.T) {
 	}
 }
 
-// TestComputeCostAll covers the five-dimension cost formula:
+// TestComputeCostAll covers the five-dimension cost formula, where In is the
+// whole prompt and cached and the cache writes are parts of it:
 //
-//	(in − cached)·rate_in + cached·rate_cached + out·rate_out
+//	(in − cached − cw5m − cw1h)·rate_in + cached·rate_cached + out·rate_out
 //	  + cw5m·rate_cw5m + cw1h·rate_cw1h
 //
 // with a single truncating division, including zero rates, zero cache-write
@@ -72,7 +73,7 @@ func TestComputeCostAll(t *testing.T) {
 		},
 		{
 			name:   "zero rates price nothing regardless of tokens",
-			tokens: TokenCounts{In: 1_000_000, Out: 1_000_000, Cached: 500_000, CacheWrite5m: 100_000, CacheWrite1h: 50_000},
+			tokens: TokenCounts{In: 1_150_000, Out: 1_000_000, Cached: 500_000, CacheWrite5m: 100_000, CacheWrite1h: 50_000},
 			// Rates zero-valued: a self-hosted model priced at $0 costs $0.
 			wantNano: 0,
 		},
@@ -86,22 +87,21 @@ func TestComputeCostAll(t *testing.T) {
 		},
 		{
 			name:     "zero cache-write rates with cache-write tokens reported is a no-op",
-			tokens:   TokenCounts{In: 1500, Out: 700, Cached: 500, CacheWrite5m: 10_000, CacheWrite1h: 5_000},
+			tokens:   TokenCounts{In: 16_500, Out: 700, Cached: 500, CacheWrite5m: 10_000, CacheWrite1h: 5_000},
 			rates:    base,
 			wantNano: (1000*10*NanoPerUSD + 500*1*NanoPerUSD + 700*30*NanoPerUSD) / TokensPerRateUnit,
 		},
 		{
-			name:   "mixed 5m and 1h cache writes are additive to input",
-			tokens: TokenCounts{In: 1_000_000, CacheWrite5m: 10_000, CacheWrite1h: 5_000},
+			name:   "mixed 5m and 1h cache writes are parts of the prompt at their own rates",
+			tokens: TokenCounts{In: 1_015_000, CacheWrite5m: 10_000, CacheWrite1h: 5_000},
 			rates: Rates{InNano: 10 * NanoPerUSD,
 				CacheWrite5mNano: 10 * NanoPerUSD, CacheWrite1hNano: 5 * NanoPerUSD},
 			// 1M fresh in @ $10/M = $10; 10k cw5m @ $10/M = $0.10; 5k cw1h @ $5/M = $0.025.
-			// Cache writes never reduce the fresh-input count.
 			wantNano: 10*NanoPerUSD + 100_000_000 + 25_000_000,
 		},
 		{
 			name:   "large rates at fifty dollars per million tokens do not overflow",
-			tokens: TokenCounts{In: 1_000_000, Out: 1_000_000, Cached: 500_000, CacheWrite5m: 100_000, CacheWrite1h: 50_000},
+			tokens: TokenCounts{In: 1_150_000, Out: 1_000_000, Cached: 500_000, CacheWrite5m: 100_000, CacheWrite1h: 50_000},
 			rates: Rates{InNano: 50_000_000_000, OutNano: 50_000_000_000, CachedNano: 25_000_000_000,
 				CacheWrite5mNano: 1_000_000_000, CacheWrite1hNano: 500_000_000},
 			// 500k fresh @ $50/M = $25,000; 500k cached @ $25/M = $12,500;
@@ -110,7 +110,7 @@ func TestComputeCostAll(t *testing.T) {
 		},
 		{
 			name:   "anthropic-shaped fable 5 request",
-			tokens: TokenCounts{In: 200_000, Out: 8_000, Cached: 150_000, CacheWrite5m: 40_000, CacheWrite1h: 12_000},
+			tokens: TokenCounts{In: 252_000, Out: 8_000, Cached: 150_000, CacheWrite5m: 40_000, CacheWrite1h: 12_000},
 			rates: Rates{InNano: 10 * NanoPerUSD, OutNano: 50 * NanoPerUSD, CachedNano: 1 * NanoPerUSD,
 				CacheWrite5mNano: NanoFromUSD(12.50), CacheWrite1hNano: 20 * NanoPerUSD},
 			// 50k fresh @ $10/M + 150k cached @ $1/M + 8k out @ $50/M
@@ -159,11 +159,11 @@ func TestComputeCostAllMatchesLegacyWithoutCacheWrites(t *testing.T) {
 }
 
 // TestComputeCostAllClampsCachedLikeLegacy locks the clamp semantics: cached
-// tokens larger than input are clamped, never credited, exactly as before —
+// tokens larger than the rest of the prompt are clamped, never credited —
 // and cache-write tokens are unaffected by the clamp.
 func TestComputeCostAllClampsCachedLikeLegacy(t *testing.T) {
 	rates := Rates{InNano: 10 * NanoPerUSD, CachedNano: 1 * NanoPerUSD, CacheWrite5mNano: 2 * NanoPerUSD}
-	got := ComputeCostAll(TokenCounts{In: 1000, Cached: 5000, CacheWrite5m: 1000}, rates)
+	got := ComputeCostAll(TokenCounts{In: 2000, Cached: 5000, CacheWrite5m: 1000}, rates)
 	// 0 fresh, 1000 cached @ $1/M, 1000 cw5m @ $2/M.
 	want := (1000*1*NanoPerUSD + 1000*2*NanoPerUSD) / int64(TokensPerRateUnit)
 	if got != want {

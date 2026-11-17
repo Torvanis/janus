@@ -15,7 +15,10 @@ package stream
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 	"strings"
+
+	"github.com/torvanis/janus/internal/secgw/jsontext"
 )
 
 // Match is a detector hit on a channel's accumulated text.
@@ -67,6 +70,9 @@ type Holdback struct {
 	pending  []frame
 	channels map[string]*channel
 	cut      bool
+	// reported is the matched text already reported from the deltas, so a
+	// frame that repeats the whole text does not report it a second time.
+	reported map[string]bool
 	// Released is the count of bytes handed back by Feed/Flush.
 	Released int64
 }
@@ -104,9 +110,18 @@ func (h *Holdback) Feed(raw []byte) Result {
 	}
 	f := frame{raw: raw}
 	h.extractDeltas(&f)
+	res := Result{}
+	if len(f.deltas) == 0 {
+		// A frame that repeats finished text (the Responses API sends the
+		// whole text again when a part, an item and the response end) is
+		// checked as it stands: the deltas it repeats were redacted on
+		// their way out, and this copy must not undo that.
+		if h.scanWhole(&f, &res) {
+			return res
+		}
+	}
 	h.pending = append(h.pending, f)
 
-	res := Result{}
 	// A frame with no text delta (keepalive, [DONE], the blank line that
 	// terminates an SSE event, a usage-only chunk) has nothing to scan,
 	// but it must not overtake frames queued ahead of it: releasing the
@@ -149,6 +164,7 @@ func (h *Holdback) Feed(raw []byte) Result {
 				continue
 			}
 			res.Matches = append(res.Matches, m)
+			h.remember(string(ch.buf), m)
 			if m.Block {
 				h.cut = true
 				h.pending = nil
@@ -305,16 +321,21 @@ func splitSSE(raw []byte) (payload, prefix, suffix []byte, ok bool) {
 	return rest, raw[:prefixLen], raw[len(trimmed):], true
 }
 
-// extractDeltas parses a chat.completion.chunk frame and records every text
-// contribution to its channel buffers.
+// extractDeltas reads a stream frame and records every piece of text it
+// adds to a channel. It knows the streaming dialects that reach a caller:
+// chat completions (and legacy completions), the Responses API, Anthropic
+// messages and Gemini.
 func (h *Holdback) extractDeltas(f *frame) {
 	payload, _, _, ok := splitSSE(f.raw)
 	if !ok {
 		return
 	}
 	var chunk struct {
+		Type string `json:"type"`
+		// Chat completions and legacy completions.
 		Choices []struct {
-			Index int `json:"index"`
+			Index int     `json:"index"`
+			Text  *string `json:"text"`
 			Delta struct {
 				Content          *string `json:"content"`
 				ReasoningContent *string `json:"reasoning_content"`
@@ -326,12 +347,31 @@ func (h *Holdback) extractDeltas(f *frame) {
 				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
+		// Responses API: {"type":"response.output_text.delta","delta":"…"}.
+		// Anthropic: {"type":"content_block_delta","delta":{"text":"…"}}.
+		Delta        json.RawMessage `json:"delta"`
+		ItemID       string          `json:"item_id"`
+		OutputIndex  int             `json:"output_index"`
+		ContentIndex int             `json:"content_index"`
+		Index        int             `json:"index"`
+		// Gemini.
+		Candidates []struct {
+			Index   int `json:"index"`
+			Content struct {
+				Parts []struct {
+					Text *string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return
 	}
 	for ci, c := range chunk.Choices {
 		base := "c" + itoa(c.Index)
+		if c.Text != nil && *c.Text != "" {
+			h.append(f, base, *c.Text, []string{"choices", itoa(ci), "text"})
+		}
 		if c.Delta.Content != nil && *c.Delta.Content != "" {
 			h.append(f, base, *c.Delta.Content, []string{"choices", itoa(ci), "delta", "content"})
 		}
@@ -345,6 +385,115 @@ func (h *Holdback) extractDeltas(f *frame) {
 			}
 		}
 	}
+	switch {
+	case strings.HasPrefix(chunk.Type, "response.") && strings.HasSuffix(chunk.Type, ".delta") && chunk.Type != "response.audio.delta":
+		// Every text-bearing Responses delta (output text, refusal,
+		// reasoning, tool arguments, audio transcript) has this shape; the
+		// channel is the part it adds to.
+		var text string
+		if json.Unmarshal(chunk.Delta, &text) == nil && text != "" {
+			h.append(f, "r"+itoa(chunk.OutputIndex)+":"+itoa(chunk.ContentIndex)+":"+chunk.ItemID+":"+chunk.Type, text, []string{"delta"})
+		}
+	case chunk.Type == "content_block_delta":
+		var d struct {
+			Text        *string `json:"text"`
+			PartialJSON *string `json:"partial_json"`
+			Thinking    *string `json:"thinking"`
+		}
+		if json.Unmarshal(chunk.Delta, &d) == nil {
+			base := "a" + itoa(chunk.Index)
+			if d.Text != nil && *d.Text != "" {
+				h.append(f, base, *d.Text, []string{"delta", "text"})
+			}
+			if d.PartialJSON != nil && *d.PartialJSON != "" {
+				h.append(f, base+":t", *d.PartialJSON, []string{"delta", "partial_json"})
+			}
+			if d.Thinking != nil && *d.Thinking != "" {
+				h.append(f, base+":r", *d.Thinking, []string{"delta", "thinking"})
+			}
+		}
+	}
+	for ci, c := range chunk.Candidates {
+		for pi, p := range c.Content.Parts {
+			if p.Text != nil && *p.Text != "" {
+				h.append(f, "g"+itoa(c.Index), *p.Text, []string{"candidates", itoa(ci), "content", "parts", itoa(pi), "text"})
+			}
+		}
+	}
+}
+
+// remember notes the text of a match found in the deltas.
+func (h *Holdback) remember(full string, m Match) {
+	if m.Offset < 0 || m.Offset+m.Length > len(full) {
+		return
+	}
+	if h.reported == nil {
+		h.reported = map[string]bool{}
+	}
+	h.reported[full[m.Offset:m.Offset+m.Length]] = true
+}
+
+// scanWhole checks a Responses API frame that carries finished text rather
+// than a delta. A blocking match cuts the stream (it reports true, with res
+// filled in); a redact match is rewritten in the frame; an observe match is
+// reported unless the deltas already reported the same text.
+func (h *Holdback) scanWhole(f *frame, res *Result) bool {
+	payload, prefix, suffix, ok := splitSSE(f.raw)
+	if !ok || !bytes.Contains(payload, []byte(`"response.`)) {
+		return false
+	}
+	doc, ok := jsontext.Parse(payload)
+	if !ok {
+		return false
+	}
+	if root, _ := doc.Root().(map[string]any); root == nil {
+		return false
+	} else if kind, _ := root["type"].(string); !strings.HasPrefix(kind, "response.") {
+		return false
+	}
+	for _, t := range doc.Texts {
+		text := t.Value
+		matches := h.Scan("frame", text, 0)
+		sort.SliceStable(matches, func(a, b int) bool { return matches[a].Offset < matches[b].Offset })
+		// Right to left, so a rewrite does not move the matches before it.
+		for i := len(matches) - 1; i >= 0; i-- {
+			m := matches[i]
+			if m.Offset < 0 || m.Offset+m.Length > len(t.Value) {
+				continue
+			}
+			found := t.Value[m.Offset : m.Offset+m.Length]
+			switch {
+			case m.Block:
+				res.Matches = append(res.Matches, m)
+				h.cut = true
+				h.pending = nil
+				res.Cut = true
+				res.Blocked = &matches[i]
+				return true
+			case m.Observe:
+				if !h.reported[found] {
+					res.Matches = append(res.Matches, m)
+					h.remember(t.Value, m)
+				}
+			default:
+				// The deltas this repeats were counted when they were
+				// redacted; a first sighting is counted here.
+				if !h.reported[found] {
+					res.Matches = append(res.Matches, m)
+					res.Redactions++
+					h.remember(t.Value, m)
+				}
+				text = text[:m.Offset] + m.Replacement + text[m.Offset+m.Length:]
+			}
+		}
+		doc.Set(t, text)
+	}
+	if doc.Changed() {
+		if enc, err := doc.Marshal(); err == nil {
+			f.raw = append(append(append([]byte{}, prefix...), enc...), suffix...)
+		}
+	}
+	return false
 }
 
 func (h *Holdback) append(f *frame, name, text string, path []string) {

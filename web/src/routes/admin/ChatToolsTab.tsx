@@ -312,7 +312,7 @@ export function ToolsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
         </Field>
         <Field
           label="Describe videos with"
-          hint="Models that do not watch video get a description of attached videos from this model (one that watches video — set Sees video in Models), made once per file."
+          hint="Models that do not watch video get a description of attached videos from this model (one whose capabilities say it watches video: Models → the model → Capabilities), made once per file."
         >
           <select
             className="select"

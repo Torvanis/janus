@@ -85,6 +85,61 @@ func (c LDAPConfig) serviceBind(conn *ldap.Conn) error {
 	return conn.Bind(c.BindDN, c.BindPassword)
 }
 
+// ErrLoginDomain means a Windows-style DOMAIN\name sign-in named a domain
+// this directory does not answer for (or no default domain is set, so no
+// Windows domain is known). Callers answer it exactly like a wrong password.
+var ErrLoginDomain = errors.New("the Windows domain in the sign-in name is not this directory's")
+
+// WindowsDomain is the NetBIOS name DOMAIN\name sign-ins must use: the
+// configured one, or else the first label of the default domain, upper-cased
+// and cut to 15 characters the way Active Directory derives it
+// (corp.example.com -> CORP). Empty when neither is set.
+func WindowsDomain(defaultDomain, windowsDomain string) string {
+	if w := strings.TrimSpace(windowsDomain); w != "" {
+		return strings.ToUpper(w)
+	}
+	d := strings.TrimPrefix(strings.TrimSpace(defaultDomain), "@")
+	if d == "" {
+		return ""
+	}
+	label, _, _ := strings.Cut(d, ".")
+	if len(label) > 15 {
+		label = label[:15]
+	}
+	return strings.ToUpper(label)
+}
+
+// QualifyLogin turns what a person typed into the one full sign-in name the
+// directory is searched with, so all three forms are the same person:
+//
+//	ada                  -> ada@corp.example.com
+//	CORP\ada             -> ada@corp.example.com (CORP matched case-insensitively)
+//	ada@corp.example.com -> unchanged
+//
+// windowsDomain may be empty (derived from defaultDomain). With no default
+// domain, bare names come back as typed (trimmed). A DOMAIN\name whose
+// domain does not match, or any DOMAIN\name with no default domain, returns
+// the trimmed name and ErrLoginDomain.
+func QualifyLogin(login, defaultDomain, windowsDomain string) (string, error) {
+	login = strings.TrimSpace(login)
+	domain := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(defaultDomain), "@"))
+	if prefix, name, ok := strings.Cut(login, `\`); ok {
+		want := WindowsDomain(domain, windowsDomain)
+		if domain == "" || want == "" || !strings.EqualFold(strings.TrimSpace(prefix), want) {
+			return login, ErrLoginDomain
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, `@\`) {
+			return login, ErrLoginDomain
+		}
+		return name + "@" + domain, nil
+	}
+	if login == "" || domain == "" || strings.Contains(login, "@") {
+		return login, nil
+	}
+	return login + "@" + domain, nil
+}
+
 // Authenticate finds the user with UserFilter ({login} substituted), binds
 // as that DN with the supplied password, then reads attributes and groups.
 func (c LDAPConfig) Authenticate(ctx context.Context, login, password string) (*LDAPUser, error) {

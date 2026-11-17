@@ -352,30 +352,32 @@ function ChildSafetyEditor({ doc }: { doc: FamilyDoc }): ReactNode {
             Nothing yet.
           </p>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">When</th>
-                <th scope="col">Who</th>
-                <th scope="col">What happened</th>
-                <th scope="col">Categories</th>
-              </tr>
-            </thead>
-            <tbody>
-              {doc.recent.map((v) => (
-                <tr key={v.id}>
-                  <td>{formatDateTime(v.created_at)}</td>
-                  <td>{v.user_label || v.user_id}</td>
-                  <td>
-                    <Badge tone={v.action === 'supported' ? 'info' : 'warning'}>
-                      {(v.rule_id ?? '') === 'final_answer' ? 'Answer held back' : (EVENT_LABEL[v.action] ?? v.action)}
-                    </Badge>
-                  </td>
-                  <td className="small">{(v.rule_names ?? []).join(', ')}</td>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Who</th>
+                  <th scope="col">What happened</th>
+                  <th scope="col">Categories</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {doc.recent.map((v) => (
+                  <tr key={v.id}>
+                    <td>{formatDateTime(v.created_at)}</td>
+                    <td>{v.user_label || v.user_id}</td>
+                    <td>
+                      <Badge tone={v.action === 'supported' ? 'info' : 'warning'}>
+                        {(v.rule_id ?? '') === 'final_answer' ? 'Answer held back' : (EVENT_LABEL[v.action] ?? v.action)}
+                      </Badge>
+                    </td>
+                    <td className="small">{(v.rule_names ?? []).join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
       {dirty ? (
@@ -434,63 +436,69 @@ function ChildrenCard({
       {rows.length === 0 ? (
         <p className="muted small">No one yet.</p>
       ) : (
-        <table className="table" aria-label="Children and groups">
-          <thead>
-            <tr>
-              <th scope="col">Child or group</th>
-              <th scope="col">Age range</th>
-              <th scope="col" style={{ width: 48 }}>
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => {
-              const name = labels[a.scope_id] ?? a.name ?? a.scope_id;
-              return (
-                <tr key={`${a.scope_type}:${a.scope_id}`}>
-                  <th scope="row" style={{ fontWeight: 500 }}>
-                    {name} {a.scope_type === 'team' ? <Badge tone="neutral">group</Badge> : null}
-                  </th>
-                  <td>
-                    <select
-                      className="select page-size"
-                      aria-label={`Age range for ${name}`}
-                      value={a.profile_id}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          assignments: d.assignments.map((x) =>
-                            x.scope_type === a.scope_type && x.scope_id === a.scope_id ? { ...x, profile_id: e.target.value } : x,
-                          ),
-                        }))
-                      }
-                    >
-                      {draft.profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <IconButton
-                      icon="delete"
-                      danger
-                      label={`Remove ${name}`}
-                      onClick={() =>
-                        setDraft((d) => ({
-                          ...d,
-                          assignments: d.assignments.filter((x) => !(x.scope_type === a.scope_type && x.scope_id === a.scope_id)),
-                        }))
-                      }
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table className="table" aria-label="Children and groups">
+            <thead>
+              <tr>
+                <th scope="col">Child or group</th>
+                <th scope="col">Age range</th>
+                <th scope="col" style={{ width: 48 }}>
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => {
+                const name = labels[a.scope_id] ?? a.name ?? a.scope_id;
+                return (
+                  <tr key={`${a.scope_type}:${a.scope_id}`}>
+                    <th scope="row" style={{ fontWeight: 500 }}>
+                      {name} {a.scope_type === 'team' ? <Badge tone="neutral">group</Badge> : null}
+                    </th>
+                    <td>
+                      <select
+                        className="select page-size"
+                        aria-label={`Age range for ${name}`}
+                        value={a.profile_id}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            assignments: d.assignments.map((x) =>
+                              x.scope_type === a.scope_type && x.scope_id === a.scope_id
+                                ? { ...x, profile_id: e.target.value }
+                                : x,
+                            ),
+                          }))
+                        }
+                      >
+                        {draft.profiles.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <IconButton
+                        icon="delete"
+                        danger
+                        label={`Remove ${name}`}
+                        onClick={() =>
+                          setDraft((d) => ({
+                            ...d,
+                            assignments: d.assignments.filter(
+                              (x) => !(x.scope_type === a.scope_type && x.scope_id === a.scope_id),
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       <div className="cs-add" role="group" aria-label="Add children">
         <div className="segmented" role="radiogroup" aria-label="Add">

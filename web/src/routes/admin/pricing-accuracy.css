@@ -1,0 +1,84 @@
+/* Administration → Models → Pricing accuracy. */
+
+.pricing-accuracy .pa-heading {
+  font-size: var(--janus-text-md);
+  margin: 0;
+  padding: var(--janus-space-4) var(--janus-space-4) var(--janus-space-2);
+}
+.pricing-accuracy .pa-note {
+  margin: 0;
+  padding: 0 var(--janus-space-4) var(--janus-space-4);
+}
+.pricing-accuracy .pa-table td.num,
+.pricing-accuracy .pa-table th.num {
+  text-align: right;
+  white-space: nowrap;
+}
+/* Row headers carry the model name, its provider and the flag: let them wrap. */
+.pricing-accuracy .pa-table tbody th {
+  white-space: normal;
+  min-width: 180px;
+  font-weight: 500;
+}
+.pricing-accuracy .pa-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pricing-accuracy .pa-name .mono {
+  overflow-wrap: anywhere;
+}
+.pricing-accuracy .pa-flag {
+  margin-top: var(--janus-space-1);
+  font-weight: 400;
+}
+.pricing-accuracy .pa-diff-near {
+  color: var(--janus-color-warning-fg);
+}
+.pricing-accuracy .pa-diff-far {
+  color: var(--janus-color-danger-fg);
+}
+
+/* Phones: one block per row (name first, then labeled figures), so every
+   figure is readable without scrolling the table sideways. */
+@media (max-width: 720px) {
+  .pricing-accuracy .pa-table thead {
+    display: none;
+  }
+  .pricing-accuracy .pa-table,
+  .pricing-accuracy .pa-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .pricing-accuracy .pa-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--janus-space-1) var(--janus-space-3);
+    padding: var(--janus-space-3) var(--janus-space-4);
+    border-top: 1px solid var(--janus-color-border-subtle);
+  }
+  .pricing-accuracy .pa-table tbody th,
+  .pricing-accuracy .pa-table td.pa-not-compared,
+  .pricing-accuracy .pa-table td.pa-link {
+    grid-column: 1 / -1;
+  }
+  .pricing-accuracy .pa-table th,
+  .pricing-accuracy .pa-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    text-align: left;
+  }
+  .pricing-accuracy .pa-table td.num,
+  .pricing-accuracy .pa-table th.num {
+    text-align: left;
+    white-space: normal;
+  }
+  .pricing-accuracy .pa-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: var(--janus-text-xs);
+    color: var(--janus-color-text-muted);
+  }
+}

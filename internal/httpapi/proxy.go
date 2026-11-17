@@ -7,16 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/torvanis/janus/internal/safehttp"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/authz"
 	"github.com/torvanis/janus/internal/config"
+	"github.com/torvanis/janus/internal/endpoints"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/secgw"
 	"github.com/torvanis/janus/internal/secgw/stream"
@@ -81,11 +84,14 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bodyOverflows := int64(len(body)) > maxInMemoryBody
-	modelName := extractModelName(body, r)
+	// The model is read from where the provider will read it, and a body two
+	// parsers could read differently is refused (see model_source.go).
+	reqModel, modelErr := resolveRequestModel(body, bodyOverflows, r)
+	modelName := reqModel.Name
 
 	event := &store.UsageEvent{
-		ModelName:    modelName,
-		EndpointPath: r.URL.Path, HTTPMethod: r.Method,
+		ModelName:    truncate(modelName, 256),
+		EndpointPath: truncate(r.URL.Path, 512), HTTPMethod: r.Method,
 		Modality:     usage.ModalityForPath(r.URL.Path),
 		RequestBytes: int64(len(body)),
 		UserAgent:    truncate(r.Header.Get("User-Agent"), 1024),
@@ -108,6 +114,10 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.trustsForwardedFor(r) {
 		event.XForwardedFor = truncate(r.Header.Get("X-Forwarded-For"), 512)
+	}
+	if modelErr != nil {
+		s.rejectProxyEvent(w, r, modelErr, event, started)
+		return
 	}
 	// A Janus Chat call: the browser's user agent and referer, the reply it
 	// belongs to, and whether it is a sub-call of that reply.
@@ -192,6 +202,80 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		quotaSubjectID = user.ID
 	}
 
+	// 0. Only classified paths are forwarded, and a stored provider object is
+	//    reachable only by the caller that created it (proxy_objects.go).
+	//    Personal plans use the caller's own provider credential, so the
+	//    path rules apply to them and the ownership rules do not.
+	if !endpoints.CleanPath(r.URL) {
+		s.rejectProxyEvent(w, r, ErrInvalidRequest("The request path is not valid."), event, started)
+		return
+	}
+	ep := endpoints.Classify(r.Method, r.URL.Path)
+	if ep.Class == endpoints.Refused {
+		s.rejectProxyEvent(w, r, errEndpointNotOffered(r.Method, r.URL.Path, ep.Why), event, started)
+		return
+	}
+	ownerType, ownerID := objectOwner(user, serviceToken)
+	var track *objectTrack
+	if (ep.Class == endpoints.Tracked || ep.Creates != "") && !subscription.IsPersonalModel(modelName) {
+		track = &objectTrack{ep: ep, ownerType: ownerType, ownerID: ownerID}
+		switch {
+		case ep.NeedsOwnedObject():
+			record, rerr := s.Store.OwnedUpstreamObject(ctx, ownerType, ownerID, ep.ObjectID)
+			if rerr != nil && !errors.Is(rerr, store.ErrNotFound) {
+				s.rejectProxyEvent(w, r, ErrInternal(), event, started)
+				return
+			}
+			if rerr != nil || record.Kind != ep.Family {
+				s.rejectProxyEvent(w, r, errObjectNotFound(ep.Family), event, started)
+				return
+			}
+			track.record = record
+		case ep.Family == endpoints.FamilyBatch && ep.Op == endpoints.OpCreate && !reqModel.FromBody:
+			// A batch names no model of its own; it runs where its input
+			// file is, which must be the caller's.
+			var named struct {
+				InputFileID string `json:"input_file_id"`
+			}
+			_ = json.Unmarshal(body, &named)
+			file, ferr := s.Store.OwnedUpstreamObject(ctx, ownerType, ownerID, named.InputFileID)
+			if ferr != nil && !errors.Is(ferr, store.ErrNotFound) {
+				s.rejectProxyEvent(w, r, ErrInternal(), event, started)
+				return
+			}
+			if ferr != nil || file.Kind != endpoints.FamilyFile {
+				s.rejectProxyEvent(w, r, errObjectNotFound(endpoints.FamilyFile), event, started)
+				return
+			}
+			track.home = file
+		case ep.Op == endpoints.OpList && modelName == "":
+			// No model named: the list is the caller's own objects, which
+			// live wherever the caller created them.
+			homes, herr := s.Store.ObjectHomes(ctx, ownerType, ownerID, ep.Family)
+			if herr != nil {
+				s.rejectProxyEvent(w, r, ErrInternal(), event, started)
+				return
+			}
+			switch len(homes) {
+			case 0:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(emptyList))
+				return
+			case 1:
+				track.home = homes[0]
+			default:
+				s.rejectProxyEvent(w, r, ErrInvalidRequest("Your "+familyLabel(ep.Family)+"s were created with more than one provider. Name a model with the X-Janus-Model header to choose which provider to list.").WithParam("model"), event, started)
+				return
+			}
+		}
+		if pin := track.pinned(); pin != nil && !reqModel.FromBody {
+			// The object decides which model serves; no model need be named.
+			modelName = pin.RequestedModel
+			event.ModelName = truncate(modelName, 256)
+		}
+	}
+
 	// 1. Policy blocking rules run first: they are the cheapest check and are
 	//    evaluated before any grant or quota work.
 	rules, err := s.cachedBlockingRules(ctx)
@@ -250,7 +334,22 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// (Security Gateway, quotas, relay, metering) is shared.
 	var personal *personalRoute
 	var resolved store.ResolvedModel
-	if subscription.IsPersonalModel(modelName) {
+	pin := track.pinned()
+	if reqModel.FromBody {
+		pin = nil // the body named a model: resolved as usual, checked against the object below
+	}
+	if pin != nil {
+		// A call on a stored object is served by the model that created it:
+		// the object exists only at that model's upstream. Aliases, pools
+		// and fallbacks are not re-evaluated; the grant is, below.
+		pinnedModel, perr := s.Store.ModelByID(ctx, pin.ModelID)
+		if perr != nil || pinnedModel.Status != store.ModelEnabled {
+			s.rejectProxyEvent(w, r, ErrModelNotGranted(modelName), event, started)
+			return
+		}
+		resolved.Model = pinnedModel
+		err = nil
+	} else if subscription.IsPersonalModel(modelName) {
 		route, apiErr := s.resolvePersonalRoute(ctx, user, serviceToken, modelName)
 		if apiErr != nil {
 			s.rejectProxyEvent(w, r, apiErr, event, started)
@@ -382,11 +481,32 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if resolved.ViaManagedModel() {
 		accessID = resolved.Managed.ID
 	}
+	if pin != nil {
+		// What the caller was granted when the object was created: the
+		// model itself, or the managed model that led to it.
+		accessID = pin.AccessID
+		if accessID != model.ID {
+			event.ManagedModelID, event.RequestedModelName = accessID, pin.RequestedModel
+		}
+	}
 	if _, ok := granted[accessID]; !ok && (personal != nil || !chatNamingGrantFree(r, modelName)) {
 		// Chat naming with the administrator's naming model is a system
 		// task: only that request, for exactly that model, skips the grant.
 		s.rejectProxyEvent(w, r, ErrModelNotGranted(modelName), event, started)
 		return
+	}
+	if track != nil && track.record != nil && model.UpstreamID != track.record.UpstreamID {
+		// The body named a model at another provider than the object's.
+		s.rejectProxyEvent(w, r, errObjectNotFound(ep.Family), event, started)
+		return
+	}
+	if personal == nil && !bodyOverflows && strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "json") {
+		// A request may refer to stored objects (a file to read, a stored
+		// response to continue): only the caller's own.
+		if apiErr := s.checkReferences(ctx, ownerType, ownerID, body); apiErr != nil {
+			s.rejectProxyEvent(w, r, apiErr, event, started)
+			return
+		}
 	}
 	if resolved.FellBack {
 		// The caller can see the substitution; the request log records the
@@ -431,7 +551,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// A bodyless request (a video job's status check or download: GET
 	// /v1/videos/{id}) names its model in X-Janus-Model or ?model= for
 	// routing only; there is nothing to rewrite and nothing to refuse.
-	if modelName != model.Name && len(body) > 0 {
+	// A body that names no model (the model came from a header, or from the
+	// stored object the path names) has nothing to rewrite either.
+	if reqModel.FromBody && modelName != model.Name && len(body) > 0 {
 		if bodyOverflows {
 			s.rejectProxyEvent(w, r, errAliasRewriteImpossible(modelName, model.Name,
 				"the request body is too large for the gateway to buffer and rewrite"), event, started)
@@ -527,11 +649,43 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			body = dec.Body
 		}
 		secgwActionHeader(w, dec.Action, dec.Redactions)
+		// Registered now, so what the checks found is recorded even when
+		// the request then fails (the provider is down, a quota refuses
+		// it). The hook is replaced with the full list, including what the
+		// reply adds, when the request completes.
+		s.attachSecgwViolations(event, secgwEff.Policy, secgwViolations)
 	}
 	// 3b'. Family safety: the built-in Community policy, for covered users
 	//      only, independent of (and after) every Business policy, so it
 	//      judges the text the upstream will actually see.
 	familyOn := secgwEng.FamilyCovers(event.UserID)
+	if track != nil && ep.Op == endpoints.OpCreate && endpoints.IsJob(ep.Family) {
+		// A job runs on after this call and is metered when it ends.
+		detail := jobDetailFor(event)
+		if ep.Family == endpoints.FamilyBatch {
+			// The models a batch uses are named inside its input file,
+			// where no grant check has looked yet.
+			var apiErr *APIError
+			var inLines []secgw.Violation
+			detail, apiErr = s.batchPreflight(ctx, body, model, granted, secgwEng, event, groupIDs, ownerType, ownerID, &inLines)
+			if len(inLines) > 0 {
+				secgwViolations = append(secgwViolations, inLines...)
+				event.SecgwViolations = secgw.Recorded(secgwViolations)
+				if event.SecgwAction == "" {
+					event.SecgwAction = store.SecgwActionObserved
+				}
+			}
+			if apiErr != nil {
+				if apiErr.Code == CodeSecurityBlocked {
+					event.SecgwAction = store.SecgwActionBlocked
+				}
+				s.attachSecgwViolations(event, secgwEff.Policy, secgwViolations)
+				s.rejectProxyEvent(w, r, apiErr, event, started)
+				return
+			}
+		}
+		track.detail = &detail
+	}
 	// childInstr is what Child Safety adds to this request's prompt (the
 	// age range's base text, the tutor rule, matched categories); it goes
 	// on the final body after every guard and routing pass has read the
@@ -849,7 +1003,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			apiKey = token
 		} else {
 			upstream, err = s.cachedUpstreamByID(ctx, model.UpstreamID)
-			if err != nil || !upstream.Enabled {
+			if err == nil && !upstream.Enabled {
+				s.rejectProxyEvent(w, r, ErrUpstreamDisabled(modelName, model.UpstreamName), event, started)
+				return
+			}
+			if err != nil {
 				s.rejectProxyEvent(w, r, ErrUpstreamUnavailable(model.UpstreamName), event, started)
 				return
 			}
@@ -883,7 +1041,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// tools that only work through the Responses API).
 		if personal == nil && !bodyOverflows && isChat {
 			var viaResponses bool
-			body, viaResponses, cfit = s.fitCatalogBody(model.ID, body, catalogFit{})
+			body, viaResponses, cfit = s.fitCatalogBody(model, body, catalogFit{})
 			if viaResponses && upstream.AdapterType == "openai_compatible" {
 				providerAdapter = adapter.ResponsesFallback()
 			}
@@ -921,6 +1079,9 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			hpTargetType, hpTargetID = store.HeaderTargetPersonal, personal.provider.ID()
 		}
 		headerRW := s.applyHeaderPolicy(ctx, callerHeaders, hpTargetType, hpTargetID)
+		// What a request billed by images, seconds or characters will use,
+		// read from what the caller sent; priced in applyUsage.
+		event.Measured, event.StatusCheck, event.BilledOnResult = measureRequest(r.Method, event.EndpointPath, body, adapter.MetadataProvider(upstream.AdapterType, upstream.BaseURL))
 		adapterReq = &adapter.Request{
 			Method: r.Method, Path: r.URL.Path, Header: callerHeaders,
 			// Model is always the native upstream name: adapters that embed the
@@ -956,7 +1117,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 				s.rejectProxyEvent(w, r, ErrPayloadTooLarge(maxInMemoryBody), event, started)
 				return
 			}
-			outboundBody = io.MultiReader(bytes.NewReader(body), bodyRemainder)
+			outboundBody = io.MultiReader(bytes.NewReader(body), reqModel.guardTail(bodyRemainder))
 			outboundLength = r.ContentLength // -1 (chunked) when the client did not declare one
 			if outboundLength == 0 {
 				outboundLength = -1
@@ -980,11 +1141,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			route.begin(s.poolRegistry())
 		}
 		resp, err = s.sendUpstream(ctx, outbound, prepared, event, adapterReq.Body)
+		if errors.Is(err, errModelFieldRepeated) {
+			// The caller's own body was cut off; the upstream is not at fault.
+			s.rejectProxyEvent(w, r, errAmbiguousModel("the \"model\" field appears more than once"), event, started)
+			return
+		}
 		if err != nil {
 			s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "unreachable").Inc()
 			trace.Child("upstream.call", telemetry.SpanKindClient, upstreamStart, time.Now(),
 				telemetry.String("upstream", upstream.Name), telemetry.String("error", "unreachable"))
-			if route != nil && !clientGone(ctx, err) {
+			if route != nil && !clientGone(ctx, err) && !slowBufferedReply(event, err) {
 				s.poolFailure(ctx, route, "unreachable: "+err.Error())
 				if !bodyOverflows && route.advanceTo(poolMemberEligible) {
 					model = s.poolRetry(ctx, route, event)
@@ -1057,8 +1223,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if personal == nil && pendRoute != nil && pendRoute.thinkingSent != "" && resp.StatusCode == http.StatusBadRequest && !bodyOverflows {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxRefusalBody))
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
-		if learned, ok := subscription.LearnFromRefusal(s.routedReasoning(model.ID), pendRoute.thinkingSent, raw); ok {
-			s.rememberRoutedReasoning(model.ID, learned)
+		if learned, ok := subscription.LearnFromRefusal(s.modelReasoning(model), pendRoute.thinkingSent, raw); ok {
+			if profileReasoning(model) == nil {
+				s.rememberRoutedReasoning(model.ID, learned)
+			}
+			s.probeAfterRefusal(ctx, model)
 			if refit, fit := fitReasoningBody(body, &learned); fit.sent != pendRoute.thinkingSent {
 				retryReq := *adapterReq
 				retryReq.Body = refit
@@ -1095,7 +1264,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < maxQuirkRetries && resp.StatusCode == http.StatusBadRequest; i++ {
 			raw := readRefusal(resp)
 			_, viaResponses := providerAdapter.(*adapter.OpenAIResponses)
-			retry, ok := s.learnCatalogRefusal(model.ID, upstream.AdapterType, adapterReq.Body, raw, viaResponses, &cfit)
+			retry, ok := s.learnCatalogRefusal(ctx, model, upstream.AdapterType, adapterReq.Body, raw, viaResponses, &cfit)
 			if !ok {
 				break
 			}
@@ -1137,13 +1306,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	rates := usage.Rates{
 		InNano: model.RateInNano, OutNano: model.RateOutNano, CachedNano: model.RateCachedNano,
 		CacheWrite5mNano: model.RateCacheWrite5mNano, CacheWrite1hNano: model.RateCacheWrite1hNano,
+		Lines: model.PriceLines(),
 	}
 	card := s.cachedRateCard(ctx, model.ID)
 	if card.OK {
-		rates = usage.Rates{
-			InNano: card.In, OutNano: card.Out, CachedNano: card.Cached,
-			CacheWrite5mNano: card.CacheWrite5m, CacheWrite1hNano: card.CacheWrite1h,
-		}
+		rates = card.rates()
 	}
 
 	if personal != nil {
@@ -1165,6 +1332,16 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// stream_format: sse); the recorded event reflects how the response was
 	// actually relayed, which is what the throughput derivation keys on.
 	event.Streaming = streaming
+
+	// Stored objects: record the owner of what was just created, filter a
+	// list to the caller's own, note a delete. Before anything is relayed.
+	s.interceptTracked(ctx, track, resp, model, accessID, modelName)
+	if ep.Class == endpoints.Tracked && ep.Creates != endpoints.FamilyVideo && !event.StatusCheck {
+		// Reading, listing, uploading and deleting stored objects, and
+		// starting a job that is metered when it ends, run no inference.
+		// Without this their JSON replies were costed as generated text.
+		event.AccountingMode = usage.AccountingNone
+	}
 
 	var extracted adapter.Usage
 	// family is the Family safety reply gate for a covered user.
@@ -1375,7 +1552,7 @@ func (s *Server) buildUpstreamClient(timeouts config.UpstreamTimeouts) *http.Cli
 		t.IdleConnTimeout = 90 * time.Second
 		t.ForceAttemptHTTP2 = true
 	}}
-	return &http.Client{Transport: transport, Timeout: timeouts.Total}
+	return &http.Client{Transport: transport, Timeout: timeouts.Total, CheckRedirect: safehttp.CheckRedirect(nil)}
 }
 
 // applyUsage fills token counts and cost from the upstream's report, or falls
@@ -1383,9 +1560,13 @@ func (s *Server) buildUpstreamClient(timeouts config.UpstreamTimeouts) *http.Cli
 //
 // Precedence:
 //
-//  1. A provider-reported COST (X.ai cost_in_usd_ticks) is the exact bill and
-//     wins outright; token counts, if any, are kept for the record but the
-//     rate card is not consulted. AccountingUpstreamCost.
+//  1. A provider-QUOTED cost (xAI cost_in_usd_ticks, OpenRouter/Requesty
+//     usage.cost, Perplexity usage.cost.total_cost, DeepInfra
+//     usage.estimated_cost, LiteLLM x-litellm-response-cost) is the exact
+//     bill and wins outright, over the rate card AND over administrator
+//     price lines (owner ruling); token counts, if any, are kept for the
+//     record. AccountingUpstreamCost. Only a personal subscription (paid by
+//     its owner) and local-only mode record $0 instead.
 //  2. Provider-reported token counts priced by the rate card.
 //     AccountingUpstream.
 //  3. Text-shaped modality with no usage: ~bytes/4. AccountingBytes.
@@ -1410,14 +1591,21 @@ func (s *Server) buildUpstreamClient(timeouts config.UpstreamTimeouts) *http.Cli
 // value means event.ResponseBytes. Streams pass the generated text they
 // carried, never their raw SSE bytes (see streamTextCounter).
 func (s *Server) applyUsage(event *store.UsageEvent, extracted adapter.Usage, rates usage.Rates, outputBytes int64) {
+	if event.AccountingMode == usage.AccountingNone {
+		return // marked up front as a call that runs no inference
+	}
 	s.applyUsageMetered(event, extracted, rates, outputBytes)
 	if event.SubscriptionID != "" {
 		// A personal subscription is paid by its owner, not the
 		// organization. Some providers (xAI) still report a list-price
 		// cost; it is not the organization's spend and is not recorded.
 		event.CostNano = 0
+		event.EstimatedCostNano = nil
 		if event.AccountingMode == usage.AccountingUpstreamCost {
 			event.AccountingMode = usage.AccountingUpstream
+			if !s.Config.LocalOnly {
+				event.CostStatus = "known_free"
+			}
 		}
 	}
 }
@@ -1431,7 +1619,34 @@ func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Us
 		event.CostNano = extracted.CostNano
 		if s.Config.LocalOnly {
 			event.CostNano = 0
+			return
 		}
+		// The provider priced the call itself, so it is priced even when the
+		// model has no rate card (an OpenRouter router, xAI video): it must
+		// not count as "unpriced" in reports. A quoted $0 is a known price.
+		event.CostStatus = "priced"
+		if event.CostNano == 0 {
+			event.CostStatus = "known_free"
+		}
+		// What was measured is a fact about the call whoever priced it.
+		if m := event.Measured; m != nil && !event.BilledOnResult {
+			event.BilledUnit, event.BilledQuantity = m.Unit(), m.Quantity
+		}
+		// Janus's own price for the same call, kept beside the quote for
+		// the pricing accuracy report. It never changes what is billed.
+		if estimate, ok := janusEstimate(event, extracted, rates); ok {
+			event.EstimatedCostNano = &estimate
+		}
+		return
+	case event.StatusCheck:
+		// Asked how a provider job is going, or fetched its result: no
+		// inference ran on this request. The job is billed where it
+		// started, or here when the provider reports its cost on the
+		// finished job (xAI video: case above). Tokens are never read here.
+		event.TokensIn, event.TokensOut, event.TokensCached = 0, 0, 0
+		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
+		event.AccountingMode = usage.AccountingNone
+		event.CostNano = 0
 		return
 	case extracted.Reported:
 		event.TokensIn, event.TokensOut, event.TokensCached = extracted.TokensIn, extracted.TokensOut, extracted.TokensCached
@@ -1461,6 +1676,12 @@ func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Us
 		// cost formula degrades to exactly the pre-cache-write arithmetic.
 		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
 		event.AccountingMode = usage.AccountingBytes
+	case event.Measured != nil:
+		// Billed by a measured unit (images, seconds, characters) and
+		// priced below.
+		event.TokensIn, event.TokensOut, event.TokensCached = 0, 0, 0
+		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
+		event.AccountingMode = usage.AccountingMeasured
 	default:
 		event.TokensIn, event.TokensOut, event.TokensCached = 0, 0, 0
 		event.TokensCacheWrite5m, event.TokensCacheWrite1h = 0, 0
@@ -1479,20 +1700,85 @@ func (s *Server) applyUsageMetered(event *store.UsageEvent, extracted adapter.Us
 		}
 		return
 	}
+	if m := event.Measured; m != nil {
+		event.BilledUnit, event.BilledQuantity = m.Unit(), m.Quantity
+	}
 	if s.Config.LocalOnly {
 		// Local-only mode (JANUS_LOCAL_ONLY): cost tracking is off, so the
 		// event records zero cost while token counts stay fully metered.
 		event.CostNano = 0
 		return
 	}
-	event.CostNano = usage.ComputeCostAll(usage.TokenCounts{
+	counts := usage.TokenCounts{
 		In: event.TokensIn, Out: event.TokensOut, Cached: event.TokensCached,
 		CacheWrite5m: event.TokensCacheWrite5m, CacheWrite1h: event.TokensCacheWrite1h,
-		CachedDisjoint: extracted.CachedDisjoint,
-	}, rates)
+	}
+	// A provider that charges more for long prompts charges the whole
+	// request at the higher rates once the whole prompt (TokensIn, cache
+	// reads and writes included) passes the threshold; a model without such
+	// lines keeps its rates.
+	event.CostNano = usage.TokenPrice(counts, rates)
 	// Hosted tool fees (web searches at the provider's per-call price) are
 	// part of what the request cost.
 	event.CostNano += extracted.ToolFeeNano
+	s.priceMeasured(event, rates)
+}
+
+// janusEstimate is what Janus would have charged for a call whose cost the
+// provider quoted: the same arithmetic as an unquoted call (token rates for
+// the prompt's size, hosted tool fees, the measured unit's line) at the
+// rates in force now. 0 means Janus has no price that applies: the model has
+// no rate card or no line for what was measured. ok is false for a job
+// result (an xAI video poll quoting the finished job): Janus measured the
+// job where it started, so this request alone has nothing to price and no
+// estimate is recorded rather than a misleading $0.
+func janusEstimate(event *store.UsageEvent, extracted adapter.Usage, rates usage.Rates) (int64, bool) {
+	if event.StatusCheck && event.Measured == nil && event.TokensIn == 0 && event.TokensOut == 0 {
+		return 0, false
+	}
+	counts := usage.TokenCounts{
+		In: event.TokensIn, Out: event.TokensOut, Cached: event.TokensCached,
+		CacheWrite5m: event.TokensCacheWrite5m, CacheWrite1h: event.TokensCacheWrite1h,
+	}
+	nano := usage.TokenPrice(counts, rates) + extracted.ToolFeeNano
+	if m := event.Measured; m != nil && !event.BilledOnResult {
+		if unit, _, ok := rates.PriceUnit(*m); ok {
+			nano += unit
+		}
+	}
+	return nano, true
+}
+
+// priceMeasured adds the cost of a measured unit (images, seconds of video,
+// characters) at the model's price line for it. Tokens the provider also
+// reported keep their own price: the line covers the unit, the rates the
+// tokens. A unit the model has no line for is recorded as measured and
+// unpriced when nothing else priced the request.
+func (s *Server) priceMeasured(event *store.UsageEvent, rates usage.Rates) {
+	m := event.Measured
+	if m == nil {
+		return
+	}
+	if event.BilledOnResult {
+		// The provider reports this job's cost when its result is fetched;
+		// billing the start too would charge it twice.
+		if event.AccountingMode == usage.AccountingMeasured {
+			event.AccountingMode = usage.AccountingOnResult
+		}
+		return
+	}
+	nano, key, ok := rates.PriceUnit(*m)
+	if ok {
+		event.CostNano += nano
+		event.BilledLine = key
+		return
+	}
+	if event.AccountingMode == usage.AccountingMeasured {
+		event.AccountingMode = usage.AccountingMeasuredUnpriced
+		if s.Metrics != nil && s.Metrics.UnmeteredRequests != nil {
+			s.Metrics.UnmeteredRequests.WithLabelValues(event.UpstreamID, event.ModelName, event.Modality).Inc()
+		}
+	}
 }
 
 // chooseGrantedCandidate returns the first of preferred+alternatives that the
@@ -1542,12 +1828,11 @@ func applyThroughput(event *store.UsageEvent, extracted adapter.Usage, upstreamE
 		inWindow, outWindow = ttfb, upstreamElapsed-ttfb
 	}
 	// Input speed counts only what the provider processed: cache reads are
-	// excluded (and cache writes included) so a mostly-cached prompt does not
+	// excluded (cache writes stay in) so a mostly-cached prompt does not
 	// report a prefill rate the model never achieved.
 	event.TokensInPerSecond = usage.TokensPerSecond(usage.ProcessedInputTokens(usage.TokenCounts{
 		In: event.TokensIn, Cached: event.TokensCached,
 		CacheWrite5m: event.TokensCacheWrite5m, CacheWrite1h: event.TokensCacheWrite1h,
-		CachedDisjoint: extracted.CachedDisjoint,
 	}), inWindow)
 	event.TokensOutPerSecond = usage.TokensPerSecond(event.TokensOut, outWindow)
 	event.ThroughputSource = usage.ThroughputCalculated
@@ -1672,6 +1957,11 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 	}
 	event.ResponseBytes = int64(len(payload))
 	extracted, _ := providerAdapter.ExtractUsage(payload)
+	if resp.StatusCode < 300 {
+		// A cost quoted in a response header (a LiteLLM proxy's
+		// x-litellm-response-cost) when the body quoted none.
+		extracted.ApplyHeaderQuote(resp.Header)
+	}
 
 	// Metering has read the provider's native body; now translate it into
 	// the OpenAI shape the caller speaks (a no-op for OpenAI-wire providers).
@@ -1691,6 +1981,7 @@ func (s *Server) relayBuffered(w http.ResponseWriter, resp *http.Response, provi
 		return extracted
 	}
 	payload = translated
+	refineFromResponse(event.Measured, payload)
 
 	// Security Gateway, egress. The body is OpenAI-shaped now, so one scan
 	// covers every provider. A block replaces the body with the refusal
@@ -2134,7 +2425,6 @@ func (s *Server) streamExceededLimit(ctx context.Context, event *store.UsageEven
 			pendingCost = usage.ComputeCostAll(usage.TokenCounts{
 				In: u.TokensIn, Out: u.TokensOut, Cached: u.TokensCached,
 				CacheWrite5m: u.TokensCacheWrite5m, CacheWrite1h: u.TokensCacheWrite1h,
-				CachedDisjoint: u.CachedDisjoint,
 			}, rates)
 		}
 	}
@@ -2367,6 +2657,12 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, ErrTokenInvalid(""))
 		return
 	}
+	// Bearer callers are checked when the token resolves; a browser session
+	// reaches here too, and a disabled person's session lists nothing.
+	if user != nil && !user.IsActive {
+		WriteError(w, r, ErrUserDisabled())
+		return
+	}
 	catalog, err := s.grantedCatalog(r.Context(), user, serviceToken)
 	if err != nil {
 		WriteError(w, r, err)
@@ -2387,6 +2683,13 @@ func (s *Server) handleProxyModels(w http.ResponseWriter, r *http.Request) {
 			"context_window": m.ContextWindow,
 			"managed":        false,
 			"kind":           "chat",
+		}
+		// The accepted reasoning_effort values, when known (an empty list:
+		// the model takes none). Anything else a client sends is fitted.
+		if facts := profileReasoning(m); facts != nil {
+			if efforts := facts.Efforts(); efforts != nil {
+				info["reasoning_efforts"] = efforts
+			}
 		}
 		if m.ClassifierRole == store.ClassifierRoleDecision {
 			// Decision models are called on the decision endpoints, in
@@ -2526,36 +2829,6 @@ func clientAppName(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("HTTP-Referer"))
 }
 
-// extractModelName finds the target model without disturbing the forwarded body.
-func extractModelName(body []byte, r *http.Request) string {
-	if len(body) > 0 && strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "json") {
-		var probe struct {
-			Model string `json:"model"`
-		}
-		if err := json.Unmarshal(body, &probe); err == nil && probe.Model != "" {
-			return probe.Model
-		}
-	}
-	if v := r.URL.Query().Get("model"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Janus-Model"); v != "" {
-		return v
-	}
-	// Multipart uploads (audio transcription, image edits) carry the model as a
-	// form field; scan the raw prologue rather than parsing the whole payload.
-	if idx := bytes.Index(body, []byte("name=\"model\"")); idx >= 0 {
-		rest := body[idx:]
-		if start := bytes.Index(rest, []byte("\r\n\r\n")); start >= 0 {
-			rest = rest[start+4:]
-			if end := bytes.Index(rest, []byte("\r\n")); end > 0 {
-				return string(bytes.TrimSpace(rest[:end]))
-			}
-		}
-	}
-	return ""
-}
-
 // usesHostedTools reports a request that asks the provider to run tools
 // itself (any tool type other than a client-side function).
 func usesHostedTools(body []byte) bool {
@@ -2661,9 +2934,17 @@ func stripPort(addr string) string {
 	return host
 }
 
+// truncate caps v at n bytes without cutting a character in half, and
+// replaces bytes that are not valid UTF-8. Header values arrive as raw bytes;
+// a row holding an invalid sequence is refused by PostgreSQL, which would
+// drop the usage record of a request that was already served.
 func truncate(v string, n int) string {
+	v = strings.ToValidUTF8(v, "\uFFFD")
 	if len(v) <= n {
 		return v
+	}
+	for n > 0 && !utf8.RuneStart(v[n]) {
+		n--
 	}
 	return v[:n]
 }

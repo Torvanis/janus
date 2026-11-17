@@ -64,8 +64,11 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 
 	r.Get("/admin/models", s.handleAdminListModels)
 	r.Patch("/admin/models/{id}", s.handlePatchModel)
-	r.Get("/admin/ratecards/reference", s.handleReferenceRatecards)
-	r.Post("/admin/ratecards/apply", s.handleApplyReferenceRatecards)
+	r.Get("/admin/models/{id}/price-history", s.handleModelPriceHistory)
+	s.mountModelCatalogPricingRoutes(r)
+	s.mountModelCapabilityRoutes(r)
+	s.mountCapabilityProbeRoutes(r)
+	s.mountPriceCatalogRoutes(r)
 
 	r.Get("/admin/grants", s.handleListGrants)
 	r.Post("/admin/grants", s.gateCreate("grant", s.handleCreateGrant))
@@ -148,6 +151,7 @@ func (s *Server) mountAdminRoutes(r chi.Router) {
 	r.Get("/admin/requests/{id}/download", s.handleDownloadRequestCapture)
 	r.Get("/admin/requests/{id}/security", s.handleRequestSecurity)
 	r.Get("/admin/analytics", s.handleAnalytics)
+	r.Get("/admin/pricing/accuracy", s.handlePricingAccuracy)
 
 	// Feature-flag endpoints: GET lists every flag in store.DefaultFeatureFlags
 	// (including spend_emphasis, which controls the default dashboard metric);
@@ -195,6 +199,27 @@ func encodeAuditValue(v any) string {
 // overviewPerfModels is how many of the most-used models the Overview's
 // performance charts plot.
 const overviewPerfModels = 5
+
+// overviewPerfMaxChosen caps an admin's own choice of models (?models=):
+// more overlaid lines than this cannot be told apart.
+const overviewPerfMaxChosen = 8
+
+// perfModelIDs parses a comma-separated ?models= list, dropping blanks and
+// duplicates and keeping at most overviewPerfMaxChosen.
+func perfModelIDs(raw string) []string {
+	var out []string
+	for _, id := range strings.Split(raw, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(out, id) {
+			continue
+		}
+		out = append(out, id)
+		if len(out) == overviewPerfMaxChosen {
+			break
+		}
+	}
+	return out
+}
 
 func addTotals(a, b store.Totals) store.Totals {
 	a.TokensIn += b.TokensIn
@@ -305,11 +330,15 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 		run(func() error {
 			// Performance of the most-used models, on the same buckets as
 			// the org trend so the charts line up.
-			modelPerformance, err := s.Store.ModelPerformanceSeriesFor(ctx, scope, bucket, buckets, overviewPerfModels)
+			// ?models= plots the admin's own choice instead of the top
+			// models; Available lists every model with traffic for the
+			// picker.
+			pick := store.PerfSelect{Top: overviewPerfModels, ModelIDs: perfModelIDs(r.URL.Query().Get("models"))}
+			modelPerformance, err := s.Store.ModelPerformanceSeriesFor(ctx, scope, bucket, buckets, pick)
 			if err != nil {
 				return err
 			}
-			if len(modelPerformance.Models) > 0 {
+			if len(modelPerformance.Models) > 0 || len(modelPerformance.Available) > 0 {
 				upstreams, err := s.Store.ListUpstreams(ctx)
 				if err != nil {
 					return err
@@ -320,6 +349,9 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) {
 				}
 				for i := range modelPerformance.Models {
 					modelPerformance.Models[i].UpstreamName = names[modelPerformance.Models[i].UpstreamID]
+				}
+				for i := range modelPerformance.Available {
+					modelPerformance.Available[i].UpstreamName = names[modelPerformance.Available[i].UpstreamID]
 				}
 			}
 			set("model_performance", modelPerformance)
@@ -600,6 +632,10 @@ func (s *Server) handleUpdateUpstream(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
+	if body.APIKey == "" && existing.HasAPIKey && !sameDestination(existing.BaseURL, body.BaseURL) {
+		WriteError(w, r, errSecretNeedsReentry("API key", "api_key"))
+		return
+	}
 	encrypted, mask := "", ""
 	if body.APIKey != "" {
 		if encrypted, err = s.Cipher.Encrypt(body.APIKey); err != nil {
@@ -845,7 +881,45 @@ func (s *Server) handleAdminListModels(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	ups, err := s.Store.ListUpstreams(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	quotes := make(map[string]bool, len(ups))
+	for _, up := range ups {
+		quotes[up.ID] = adapter.QuotesCallCost(up.BaseURL)
+	}
+	for _, m := range models {
+		m.CostQuoted = quotes[m.UpstreamID]
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{"models": models, "counts": counts, "modalities": modalityCatalog()})
+}
+
+// markCostQuoted fills the read-time CostQuoted flag on one model.
+func (s *Server) markCostQuoted(r *http.Request, m *store.Model) {
+	if up, err := s.Store.UpstreamByID(r.Context(), m.UpstreamID); err == nil {
+		m.CostQuoted = adapter.QuotesCallCost(up.BaseURL)
+	}
+}
+
+// handleModelPriceHistory lists a model's saved prices, newest first: one
+// entry per change, with the price lines in force with it.
+func (s *Server) handleModelPriceHistory(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := s.Store.ModelByID(r.Context(), id); errors.Is(err, store.ErrNotFound) {
+		WriteError(w, r, ErrNotFoundf("That model"))
+		return
+	} else if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	versions, err := s.Store.RateCardHistory(r.Context(), id, 100)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 // maxModelDisplayNameLength bounds admin-set model display names. Native model
@@ -874,7 +948,17 @@ func (s *Server) handlePatchModel(w http.ResponseWriter, r *http.Request) {
 		RateCached       modelPatchValue[float64] `json:"rate_cached_usd_per_mtok"`
 		RateCacheWrite5m modelPatchValue[float64] `json:"rate_cache_write_5m_usd_per_mtok"`
 		RateCacheWrite1h modelPatchValue[float64] `json:"rate_cache_write_1h_usd_per_mtok"`
-		EffectiveFrom    string                   `json:"effective_from"`
+		// PriceLines sets or clears price lines (usage/lines.go) in USD: a
+		// number is the administrator's price, null goes back to the
+		// automatic one. Token-rate lines are per million tokens; unit
+		// lines are per unit (per image, per second, per million characters…).
+		PriceLines    map[string]*float64 `json:"price_lines"`
+		EffectiveFrom string              `json:"effective_from"`
+		// CatalogAligned true resets the model's prices to the Janus price
+		// catalog and keeps them aligned (as POST
+		// .../pricing/reset-to-catalog); false stops following the
+		// catalog and changes no price. Setting a price turns it off.
+		CatalogAligned *bool `json:"catalog_aligned"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		WriteError(w, r, err)
@@ -906,8 +990,48 @@ func (s *Server) handlePatchModel(w http.ResponseWriter, r *http.Request) {
 		}
 		patch.Overrides[rate.field] = nano
 	}
+	for key, v := range body.PriceLines {
+		if _, err := usage.ParseLine(key); err != nil {
+			WriteError(w, r, ErrInvalidRequest("Not a price line: "+err.Error()).WithParam("price_lines"))
+			return
+		}
+		var nano *int64
+		if v != nil {
+			if *v < 0 || math.IsNaN(*v) || math.IsInf(*v, 0) || math.Round(*v*1e9) >= math.Exp2(63) {
+				WriteError(w, r, ErrInvalidRequest("Price must be nonnegative and fit in nano-USD storage.").WithParam("price_lines"))
+				return
+			}
+			n := usage.NanoFromUSD(*v)
+			nano = &n
+		}
+		patch.Overrides[key] = nano
+	}
 	if body.ContextWindow.Set {
 		patch.Overrides["context_window"] = body.ContextWindow.Value
+	}
+	var alignPlan *catalogResetPlan
+	if body.CatalogAligned != nil {
+		if *body.CatalogAligned {
+			for k, v := range patch.Overrides {
+				if k != "context_window" && v != nil {
+					WriteError(w, r, ErrInvalidRequest("Set prices or keep the model aligned to the Janus price catalog, not both.").WithParam("catalog_aligned"))
+					return
+				}
+			}
+			up, err := s.Store.UpstreamByID(r.Context(), model.UpstreamID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				WriteError(w, r, err)
+				return
+			}
+			p := s.planCatalogReset(r.Context(), model, up)
+			if !p.Available {
+				WriteError(w, r, ErrInvalidRequest(p.Message+".").WithParam("catalog_aligned"))
+				return
+			}
+			alignPlan = &p
+		} else {
+			patch.CatalogAligned = body.CatalogAligned
+		}
 	}
 	if body.EffectiveFrom != "" {
 		at, err := time.Parse(time.RFC3339, body.EffectiveFrom)
@@ -953,6 +1077,18 @@ func (s *Server) handlePatchModel(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	if alignPlan != nil {
+		// Read again: the patch may have changed the model.
+		current, err := s.Store.ModelByID(r.Context(), id)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		if _, err := s.resetModelToCatalog(r, current, *alignPlan); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
 	updated, err := s.Store.ModelByID(r.Context(), id)
 	if err != nil {
 		WriteError(w, r, err)
@@ -963,9 +1099,16 @@ func (s *Server) handlePatchModel(w http.ResponseWriter, r *http.Request) {
 		s.InvalidateModelNameCache(model.DisplayName, model.Name, updated.DisplayName)
 		s.audit(r, "model_renamed", "model", id, map[string]any{"display_name": model.DisplayName}, map[string]any{"display_name": updated.DisplayName})
 	}
-	if body.Status != nil || len(patch.Overrides) > 0 {
+	if body.Status != nil || len(patch.Overrides) > 0 || patch.CatalogAligned != nil {
 		s.audit(r, "model_updated", "model", id, modelMetadataAudit(model), modelMetadataAudit(updated))
 	}
+	if model.Status != store.ModelEnabled && updated.Status == store.ModelEnabled {
+		s.probeOnEnable(r.Context(), updated)
+		if again, err := s.Store.ModelByID(r.Context(), id); err == nil {
+			updated = again
+		}
+	}
+	s.markCostQuoted(r, updated)
 	WriteJSON(w, http.StatusOK, map[string]any{"model": updated})
 }
 
@@ -981,7 +1124,7 @@ func (v *modelPatchValue[T]) UnmarshalJSON(raw []byte) error {
 }
 func modelMetadataAudit(m *store.Model) map[string]any {
 	return map[string]any{
-		"status": m.Status, "context_window": m.ContextWindow, "metadata": m.Metadata,
+		"status": m.Status, "context_window": m.ContextWindow, "metadata": m.Metadata, "catalog_aligned": m.CatalogAligned,
 		"rate_in_usd_per_mtok": usage.USD(m.RateInNano), "rate_out_usd_per_mtok": usage.USD(m.RateOutNano), "rate_cached_usd_per_mtok": usage.USD(m.RateCachedNano),
 		"rate_cache_write_5m_usd_per_mtok": usage.USD(m.RateCacheWrite5mNano), "rate_cache_write_1h_usd_per_mtok": usage.USD(m.RateCacheWrite1hNano),
 	}
@@ -1330,6 +1473,14 @@ func (s *Server) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	if !active {
 		// A disabled account must stop proxying at once, not after a cache TTL.
 		s.InvalidateTokenCache()
+		// And its open browser sessions end now, on every replica: a session
+		// that outlived the account could otherwise keep acting (and, for an
+		// administrator, re-enable itself).
+		// The change above is already committed, so a failure here is logged
+		// rather than returned: the guards refuse an inactive account anyway.
+		if err := s.Sessions.DeleteForUser(r.Context(), id); err != nil {
+			s.Logger.ErrorContext(r.Context(), "end sessions of disabled user", "user_id", id, "error", err.Error())
+		}
 	}
 	s.audit(r, "user_updated", "user", id,
 		map[string]any{"role": user.Role, "is_active": user.IsActive},
@@ -1384,6 +1535,11 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// A deleted account must stop proxying at once, not after a cache TTL.
 	s.InvalidateTokenCache()
+	// Its browser sessions end too, so restoring the account within the hold
+	// does not revive a session from before the deletion.
+	if err := s.Sessions.DeleteForUser(r.Context(), id); err != nil {
+		s.Logger.ErrorContext(r.Context(), "end sessions of deleted user", "user_id", id, "error", err.Error())
+	}
 	s.audit(r, "user_deleted", "user", id,
 		map[string]any{"email": user.Email, "role": user.Role, "is_active": user.IsActive},
 		map[string]any{"is_active": false, "tokens_revoked": true})
@@ -2429,8 +2585,19 @@ func auditFilterFrom(r *http.Request, start, end time.Time) store.AuditFilter {
 
 // csvSafe keeps a spreadsheet from running a value as a formula (sign-in
 // names and failed logins are attacker-controlled text in the audit log).
+//
+// Every export that writes text a caller could have chosen passes it through
+// here (audit log, request log). A cell is neutralized when it starts with a
+// formula character, also behind leading whitespace, which spreadsheets skip.
 func csvSafe(v string) string {
-	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+	if strings.HasPrefix(v, "'") {
+		return v // already neutralized (requestChargedTeamLabel does its own)
+	}
+	trim := strings.TrimLeft(v, " 	\r\n")
+	if len(trim) != len(v) && strings.ContainsAny(v[:len(v)-len(trim)], "	\r\n") {
+		return "'" + v
+	}
+	if trim != "" && strings.ContainsRune("=+-@", rune(trim[0])) {
 		return "'" + v
 	}
 	return v

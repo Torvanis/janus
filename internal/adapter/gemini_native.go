@@ -91,8 +91,8 @@ func geminiNativeURL(base, model string, stream bool) string {
 }
 
 // chatToGeminiNative translates a chat completion body into a native
-// generateContent body.
-func chatToGeminiNative(body []byte) ([]byte, error) {
+// generateContent body for model.
+func chatToGeminiNative(body []byte, model string) ([]byte, error) {
 	var in struct {
 		Messages []struct {
 			Role       string            `json:"role"`
@@ -220,13 +220,53 @@ func chatToGeminiNative(body []byte) ([]byte, error) {
 		gen["stopSequences"] = stops
 	}
 	switch in.ReasoningEffort {
-	case "minimal", "low", "medium", "high":
-		gen["thinkingConfig"] = map[string]any{"thinkingLevel": in.ReasoningEffort, "includeThoughts": true}
+	case "minimal", "low", "medium", "high", "xhigh":
+		if budget, ok := geminiThinkingBudget(model, in.ReasoningEffort); ok {
+			gen["thinkingConfig"] = map[string]any{"thinkingBudget": budget, "includeThoughts": true}
+		} else if in.ReasoningEffort != "xhigh" {
+			gen["thinkingConfig"] = map[string]any{"thinkingLevel": in.ReasoningEffort, "includeThoughts": true}
+		} else {
+			gen["thinkingConfig"] = map[string]any{"includeThoughts": true}
+		}
+	case "none":
+		// No thinking. A budget of 0 turns it off where the model can
+		// (2.5 Flash, 4) and gives the least thinking where it cannot
+		// (3.x Flash thinks as at "low"); every model tried accepts it.
+		// thinkingLevel "minimal" is refused by most models.
+		gen["thinkingConfig"] = map[string]any{"thinkingBudget": 0, "includeThoughts": true}
 	default:
 		gen["thinkingConfig"] = map[string]any{"includeThoughts": true}
 	}
 	out["generationConfig"] = gen
 	return json.Marshal(out)
+}
+
+// geminiThinkingBudget is the native thinkingBudget for a reasoning effort
+// on a model that takes a budget and refuses thinkingLevel: the Gemini 2.x
+// family (live, gemini-2.5-flash: 400 "Thinking level is not supported for
+// this model." for any level). The values are the ones Google documents for
+// its OpenAI-compatible route (ai.google.dev/gemini-api/docs/openai,
+// "Thinking": minimal and low 1,024, medium 8,192, high 24,576), so an effort
+// a model was measured to take on that route means the same on this one.
+// xhigh, which that route also answers on 2.5, gets the high budget. Later
+// families take thinkingLevel (ok=false).
+func geminiThinkingBudget(model, effort string) (int, bool) {
+	n := strings.ToLower(model)
+	if i := strings.LastIndex(n, "/"); i >= 0 {
+		n = n[i+1:]
+	}
+	if !strings.HasPrefix(n, "gemini-2.") && !strings.HasPrefix(n, "gemini-2-") {
+		return 0, false
+	}
+	switch effort {
+	case "minimal", "low":
+		return 1024, true
+	case "medium":
+		return 8192, true
+	case "high", "xhigh":
+		return 24576, true
+	}
+	return 0, false
 }
 
 // chatText is a message content's text (string or text parts).

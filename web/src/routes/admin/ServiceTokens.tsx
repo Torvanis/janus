@@ -1,12 +1,13 @@
 import { Collection } from '../../components/Collection';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api, qs } from '../../lib/api';
-import type { ServiceTokenRow } from '../../lib/types';
+import { isLongRevoked, type ServiceTokenRow } from '../../lib/types';
 import { formatNumber, formatRelative, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, EmptyState, Field, Modal, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { TopModel, Truncate } from '../../components/TableText';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { FilterSelect, SearchInput } from '../shared';
 import { useLocalOnly } from '../../app/session';
@@ -92,6 +93,11 @@ export function ServiceTokensPage(): ReactNode {
   const setSearch = (next: string) => batchParams({ q: next });
   const setStatus = (next: string) => batchParams({ status: next });
   const setSort = (next: string) => batchParams({ sort: next });
+  // Same rule as the Tokens page: tokens revoked more than a week ago are
+  // hidden until asked for, and the choice lives in the URL (?revoked=all).
+  const [revokedView] = useUrlState<'' | 'all'>('revoked', '');
+  const showOldRevoked = revokedView === 'all';
+  const setShowOldRevoked = (next: boolean) => batchParams({ revoked: next ? 'all' : null });
   const { field: sortField, dir: sortDir } = parseTokenSort(sort);
   const debounced = useDebounced(search);
   const toast = useToast();
@@ -113,6 +119,21 @@ export function ServiceTokensPage(): ReactNode {
     },
     onError: (error: Error) => toast(error.message, 'danger'),
   });
+
+  // The endpoint returns every matching token (Collection pages client-side),
+  // so hiding here after the server's search/status filter gives an exact
+  // hidden count for the current filters.
+  const { shown, hiddenOld, oldRevoked } = useMemo(() => {
+    const all = tokens.data?.service_tokens ?? [];
+    const now = Date.now();
+    const old = all.filter((token) => isLongRevoked(token, now)).length;
+    return {
+      shown: showOldRevoked ? all : all.filter((token) => !isLongRevoked(token, now)),
+      hiddenOld: showOldRevoked ? 0 : old,
+      oldRevoked: old,
+    };
+  }, [tokens.data, showOldRevoked]);
+  const hiddenNote = hiddenOld === 1 ? t('tokens.oldRevokedHiddenOne') : t('tokens.oldRevokedHiddenMany', { count: hiddenOld });
 
   return (
     <div className="page">
@@ -180,148 +201,178 @@ export function ServiceTokensPage(): ReactNode {
             body: t('adminServiceTokens.emptyBody'),
           }}
         >
-          {(data) =>
-            data.service_tokens.length === 0 ? (
+          {() =>
+            shown.length === 0 && hiddenOld > 0 ? (
+              <EmptyState
+                title={debounced || status ? t('adminServiceTokens.noMatchTitle') : t('tokens.allHiddenTitle')}
+                body={hiddenNote}
+                action={
+                  <div className="row wrap">
+                    <button type="button" className="btn" onClick={() => setShowOldRevoked(true)}>
+                      {t('tokens.showAllRevoked')}
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={() => setIssueOpen(true)}>
+                      {t('adminServiceTokens.issue')}
+                    </button>
+                  </div>
+                }
+              />
+            ) : shown.length === 0 ? (
               <EmptyState title={t('adminServiceTokens.noMatchTitle')} body={t('adminServiceTokens.noMatchBody')} />
             ) : (
               <Collection
                 name="Service tokens"
-                rows={data.service_tokens}
+                rows={shown}
                 rowKey={(token) => token.id}
-                resetKey={sort + debounced + status}
+                resetKey={sort + debounced + status + revokedView}
                 hideSearch
                 columns={[{ id: '0', label: '', value: (token) => token.name, render: () => null }]}
               >
                 {(visible) => (
-                  <div className="table-wrap">
-                    <table className="data data-compact">
-                      <thead>
-                        <tr>
-                          <SortableColumn label={t('adminServiceTokens.colName')} field="name" sort={sort} onSort={setSort} />
-                          <th scope="col">{t('tables.status')}</th>
-                          <th scope="col">{t('adminServiceTokens.colTopModel')}</th>
-                          {localOnly ? null : (
+                  <>
+                    <div className="table-wrap">
+                      <table className="data data-compact">
+                        <thead>
+                          <tr>
+                            <SortableColumn label={t('adminServiceTokens.colName')} field="name" sort={sort} onSort={setSort} />
+                            <th scope="col">{t('tables.status')}</th>
+                            <th scope="col">{t('adminServiceTokens.colTopModel')}</th>
+                            {localOnly ? null : (
+                              <SortableColumn
+                                label={t('adminServiceTokens.colSpend30d')}
+                                field="spend"
+                                sort={sort}
+                                onSort={setSort}
+                                numeric
+                              />
+                            )}
                             <SortableColumn
-                              label={t('adminServiceTokens.colSpend30d')}
-                              field="spend"
+                              label={t('adminServiceTokens.colRequests30d')}
+                              field="requests"
                               sort={sort}
                               onSort={setSort}
                               numeric
                             />
-                          )}
-                          <SortableColumn
-                            label={t('adminServiceTokens.colRequests30d')}
-                            field="requests"
-                            sort={sort}
-                            onSort={setSort}
-                            numeric
-                          />
-                          <SortableColumn
-                            label={t('adminServiceTokens.colTokens30d')}
-                            field="tokens"
-                            sort={sort}
-                            onSort={setSort}
-                            numeric
-                          />
-                          <SortableColumn
-                            label={t('adminServiceTokens.colErrors30d')}
-                            field="errors"
-                            sort={sort}
-                            onSort={setSort}
-                            numeric
-                          />
-                          <SortableColumn
-                            label={t('adminServiceTokens.colGrants')}
-                            field="grants"
-                            sort={sort}
-                            onSort={setSort}
-                            numeric
-                          />
-                          <SortableColumn
-                            label={t('adminServiceTokens.colLastUsed')}
-                            field="last_used"
-                            sort={sort}
-                            onSort={setSort}
-                          />
-                          <SortableColumn
-                            label={t('adminServiceTokens.colExpires')}
-                            field="expires"
-                            sort={sort}
-                            onSort={setSort}
-                          />
-                          <th scope="col">
-                            <span className="sr-only">{t('tables.actions')}</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visible.map((token) => (
-                          <tr key={token.id}>
-                            <td className="cell-person">
-                              <Link to={`/admin/service-tokens/${token.id}`}>{token.name}</Link>
-                              <span
-                                className="cell-sub truncate"
-                                style={{ maxWidth: 240 }}
-                                title={token.description || undefined}
-                              >
-                                {token.description ? `${token.description} · ` : ''}
-                                <span className="mono">{token.prefix}…</span>
-                              </span>
-                            </td>
-                            <td>
-                              {token.status === 'active' ? (
-                                <Badge tone="success" dot>
-                                  {t('adminServiceTokens.statusActive')}
-                                </Badge>
-                              ) : token.status === 'expired' ? (
-                                <Badge tone="warning">{t('adminServiceTokens.statusExpired')}</Badge>
-                              ) : (
-                                <Badge tone="danger">{t('adminServiceTokens.statusRevoked')}</Badge>
-                              )}
-                            </td>
-                            <td className="small muted truncate" style={{ maxWidth: 200 }}>
-                              {token.top_model_30d || '—'}
-                              {token.model_count_30d > 1 ? (
-                                <span className="muted">
-                                  {' '}
-                                  {t('adminServiceTokens.plusMore', { count: token.model_count_30d - 1 })}
-                                </span>
-                              ) : null}
-                            </td>
-                            {localOnly ? null : <td className="num small">{formatUSD(token.spend_30d_usd * 1_000_000_000)}</td>}
-                            <td className="num small">{formatNumber(token.requests_30d)}</td>
-                            <td className="num small">{formatNumber(token.tokens_in_30d + token.tokens_out_30d)}</td>
-                            <td className="num small">
-                              {token.errors_30d > 0 ? (
-                                <span className="danger">{formatNumber(token.errors_30d)}</span>
-                              ) : (
-                                formatNumber(0)
-                              )}
-                            </td>
-                            <td className="num small">{formatNumber(token.grant_count)}</td>
-                            <td className="small muted">
-                              {token.last_used_at ? formatRelative(token.last_used_at) : t('adminServiceTokens.neverUsed')}
-                            </td>
-                            <td className="small muted">
-                              {token.expires_at ? formatRelative(token.expires_at) : t('adminServiceTokens.noExpiry')}
-                            </td>
-                            <td>
-                              <RowActions>
-                                <IconButton icon="edit" label={t('adminServiceTokens.edit')} onClick={() => setEditing(token)} />
-                                <IconButton
-                                  icon="revoke"
-                                  label={t('adminServiceTokens.revoke')}
-                                  danger
-                                  onClick={() => setRevoking(token)}
-                                  disabled={token.status === 'revoked'}
-                                />
-                              </RowActions>
-                            </td>
+                            <SortableColumn
+                              label={t('adminServiceTokens.colTokens30d')}
+                              field="tokens"
+                              sort={sort}
+                              onSort={setSort}
+                              numeric
+                            />
+                            <SortableColumn
+                              label={t('adminServiceTokens.colErrors30d')}
+                              field="errors"
+                              sort={sort}
+                              onSort={setSort}
+                              numeric
+                            />
+                            <SortableColumn
+                              label={t('adminServiceTokens.colGrants')}
+                              field="grants"
+                              sort={sort}
+                              onSort={setSort}
+                              numeric
+                            />
+                            <SortableColumn
+                              label={t('adminServiceTokens.colLastUsed')}
+                              field="last_used"
+                              sort={sort}
+                              onSort={setSort}
+                            />
+                            <SortableColumn
+                              label={t('adminServiceTokens.colExpires')}
+                              field="expires"
+                              sort={sort}
+                              onSort={setSort}
+                            />
+                            <th scope="col">
+                              <span className="sr-only">{t('tables.actions')}</span>
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {visible.map((token) => (
+                            <tr key={token.id}>
+                              <td className="cell-person">
+                                <Link to={`/admin/service-tokens/${token.id}`}>{token.name}</Link>
+                                <span className="cell-sub cell-with-more">
+                                  {token.description ? <Truncate>{token.description}</Truncate> : null}
+                                  <span className="mono nowrap" title={t('tokens.prefixTitle', { prefix: token.prefix })}>
+                                    {token.description ? '· ' : ''}
+                                    {token.prefix}…
+                                  </span>
+                                </span>
+                              </td>
+                              <td>
+                                {token.status === 'active' ? (
+                                  <Badge tone="success" dot>
+                                    {t('adminServiceTokens.statusActive')}
+                                  </Badge>
+                                ) : token.status === 'expired' ? (
+                                  <Badge tone="warning">{t('adminServiceTokens.statusExpired')}</Badge>
+                                ) : (
+                                  <Badge tone="danger">{t('adminServiceTokens.statusRevoked')}</Badge>
+                                )}
+                              </td>
+                              <td className="small muted">
+                                <TopModel name={token.top_model_30d} count={token.model_count_30d} />
+                              </td>
+                              {localOnly ? null : <td className="num small">{formatUSD(token.spend_30d_usd * 1_000_000_000)}</td>}
+                              <td className="num small">{formatNumber(token.requests_30d)}</td>
+                              <td className="num small">{formatNumber(token.tokens_in_30d + token.tokens_out_30d)}</td>
+                              <td className="num small">
+                                {token.errors_30d > 0 ? (
+                                  <span className="danger">{formatNumber(token.errors_30d)}</span>
+                                ) : (
+                                  formatNumber(0)
+                                )}
+                              </td>
+                              <td className="num small">{formatNumber(token.grant_count)}</td>
+                              <td className="small muted">
+                                {token.last_used_at ? formatRelative(token.last_used_at) : t('adminServiceTokens.neverUsed')}
+                              </td>
+                              <td className="small muted">
+                                {token.expires_at ? formatRelative(token.expires_at) : t('adminServiceTokens.noExpiry')}
+                              </td>
+                              <td>
+                                <RowActions>
+                                  <IconButton
+                                    icon="edit"
+                                    label={t('adminServiceTokens.edit')}
+                                    onClick={() => setEditing(token)}
+                                  />
+                                  <IconButton
+                                    icon="revoke"
+                                    label={t('adminServiceTokens.revoke')}
+                                    danger
+                                    onClick={() => setRevoking(token)}
+                                    disabled={token.status === 'revoked'}
+                                  />
+                                </RowActions>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {oldRevoked > 0 ? (
+                      <div className="row wrap small muted" style={{ padding: 'var(--janus-space-3) var(--janus-card-padding)' }}>
+                        {hiddenOld > 0 ? (
+                          <>
+                            <span>{hiddenNote}</span>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowOldRevoked(true)}>
+                              {t('tokens.showAllRevoked')}
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowOldRevoked(false)}>
+                            {t('tokens.hideOldRevoked')}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                  </>
                 )}
               </Collection>
             )

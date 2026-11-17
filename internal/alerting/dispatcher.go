@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/torvanis/janus/internal/safehttp"
 	"log/slog"
 	"net"
 	"net/http"
@@ -126,7 +127,7 @@ type Dispatcher struct {
 // New builds a dispatcher.
 func New(s *store.Store, smtpCfg SMTPConfig, client *http.Client, metrics *telemetry.Metrics, logger *slog.Logger) *Dispatcher {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: safehttp.CheckRedirect(nil)}
 	}
 	return &Dispatcher{store: s, smtp: smtpCfg, client: client, metrics: metrics, logger: logger}
 }

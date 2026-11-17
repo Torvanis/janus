@@ -7,7 +7,7 @@
  * A native, visually hidden <select aria-label="Model"> mirrors the choice so
  * keyboard/AT users and automation keep the plain control.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
@@ -143,6 +143,32 @@ export function ModelPicker({
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const showSearch = flat.length > 8;
+  const [place, setPlace] = useState<CSSProperties | undefined>(undefined);
+
+  // Keep the open menu inside the window and clear of the sticky top bar and
+  // the phone bottom nav: it opens upward from the composer unless there is
+  // more room below, and slides left so it never runs off a phone screen.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const fit = () => {
+      const anchor = ref.current;
+      if (!anchor) return;
+      const a = anchor.getBoundingClientRect();
+      const margin = 12;
+      const width = Math.min(360, window.innerWidth - 2 * margin);
+      const left = Math.min(Math.max(a.left, margin), window.innerWidth - margin - width) - a.left;
+      const ceiling = Math.max(0, document.querySelector('header.topbar')?.getBoundingClientRect().bottom ?? 0);
+      const floor = Math.min(window.innerHeight, document.querySelector('.bottom-nav')?.getBoundingClientRect().top ?? Infinity);
+      const above = a.top - 8 - ceiling - margin;
+      const below = floor - a.bottom - 8 - margin;
+      const down = above < 280 && below > above;
+      const maxHeight = Math.max(160, Math.min(440, down ? below : above));
+      setPlace(down ? { left, width, maxHeight, top: 'calc(100% + 8px)', bottom: 'auto' } : { left, width, maxHeight });
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -204,7 +230,7 @@ export function ModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Model: ${title}`}
-        title={current?.meta?.chat_name ? current.label : undefined}
+        title={current ? (current.meta?.chat_name ? `${current.meta.chat_name} (${current.label})` : current.label) : undefined}
         onClick={() => (open ? setOpen(false) : openMenu())}
       >
         <span className="chat-picker-name">{title}</span>
@@ -215,6 +241,7 @@ export function ModelPicker({
       {open ? (
         <div
           className="chat-picker-menu"
+          style={place}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault();

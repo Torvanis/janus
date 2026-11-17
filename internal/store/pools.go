@@ -110,6 +110,55 @@ func (m PoolMember) Servable() bool {
 	return m.Enabled && !m.Missing && m.ModelStatus == ModelEnabled
 }
 
+// ServesLive reports whether an alias or pool has something that can serve
+// today when judged by which models are live (Model.Live: enabled, on an
+// enabled upstream). A pool counts when any enabled member is live; its
+// fallback counts too, because the proxy hands every request to it once the
+// pool is out. A single-target alias counts its fallback only when it reacts
+// to an unavailable target, which is how the proxy treats a target on a
+// disabled upstream. Routers are judged by the caller over their routes
+// (see RouterModelIDs). live is called with catalog model ids.
+func (m *ManagedModel) ServesLive(live func(modelID string) bool) bool {
+	if m == nil {
+		return false
+	}
+	enabled := 0
+	for _, pm := range m.Pool.Members {
+		if !pm.Enabled {
+			continue
+		}
+		enabled++
+		if !pm.Missing && live(pm.ModelID) {
+			return true
+		}
+	}
+	if enabled == 0 && m.TargetModelID != "" && live(m.TargetModelID) {
+		return true
+	}
+	if m.FallbackModelID == "" || m.FallbackBroken || !live(m.FallbackModelID) {
+		return false
+	}
+	return enabled > 1 || m.HasFallbackTrigger(FallbackTriggerTargetUnavailable)
+}
+
+// RouterModelIDs lists every model a router can send a request to: its
+// default and each route's target. Each id is a catalog model or a managed
+// alias/pool.
+func RouterModelIDs(router *ManagedModel, cfg RouterConfig) []string {
+	ids := []string{}
+	if cfg.Default.ModelID != "" {
+		ids = append(ids, cfg.Default.ModelID)
+	} else if router.TargetModelID != "" {
+		ids = append(ids, router.TargetModelID)
+	}
+	for _, r := range cfg.Routes {
+		if r.ModelID != "" {
+			ids = append(ids, r.ModelID)
+		}
+	}
+	return ids
+}
+
 // servableMembers counts members that can take traffic right now.
 func (p ManagedModelPool) servableMembers() int {
 	n := 0

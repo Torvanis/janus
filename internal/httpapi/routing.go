@@ -623,7 +623,7 @@ func (s *Server) applyRoute(ctx context.Context, w http.ResponseWriter, pr *pend
 			adapterType = up.AdapterType
 		}
 		effort := d.Thinking
-		if facts := s.routedReasoning(resolved.Model.ID); facts != nil && effort != "none" {
+		if facts := s.modelReasoning(resolved.Model); facts != nil && effort != "none" {
 			// A level this model is known to refuse: send the nearest it takes.
 			if fitted, changed := facts.Fit(effort); changed && fitted != "" {
 				effort = fitted

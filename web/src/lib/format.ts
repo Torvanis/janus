@@ -36,6 +36,23 @@ export function formatUSD(nano: number, options?: { compact?: boolean }): string
   }).format(value);
 }
 
+/**
+ * Dollars with the digits a price comparison needs: a provider's quote and
+ * Janus's price for one call often differ in the third or fourth decimal,
+ * which formatUSD's cents would hide ($0.0487 vs $0.0637, not $0.05 vs $0.06).
+ */
+export function formatUSDPrecise(nano: number): string {
+  const value = usdFromNano(nano);
+  const abs = Math.abs(value);
+  const digits = value === 0 ? 2 : abs < 0.01 ? 6 : abs < 100 ? 4 : 2;
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 export function formatNumber(value: number, options?: { compact?: boolean }): string {
   if (options?.compact && Math.abs(value) >= 10_000) {
     return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);

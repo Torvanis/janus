@@ -73,27 +73,21 @@ type Prepared struct {
 
 // Usage is the token accounting extracted from an upstream response.
 //
-// TokensCacheWrite5m and TokensCacheWrite1h count prompt-cache WRITE tokens
-// with 5-minute and 1-hour TTLs, the two dimensions Anthropic bills separately
-// from input tokens (usage.cache_creation.ephemeral_5m_input_tokens /
-// ephemeral_1h_input_tokens). They are ADDITIVE to TokensIn — never a subset
-// of it the way TokensCached is. Adapters for providers that do not report
-// cache writes simply leave them zero; no per-adapter change is required.
+// One convention for every provider, the way providers bill (owner ruling:
+// "record the cached tokens the same way that they are billed"): TokensIn is
+// the WHOLE prompt — fresh input, cache reads and cache writes together.
+// TokensCached (cache reads) and TokensCacheWrite5m / TokensCacheWrite1h
+// (prompt-cache writes with 5-minute and 1-hour TTLs) are PARTS of TokensIn
+// that are billed at their own rates; the fresh part billed at the input rate
+// is TokensIn − TokensCached − the writes.
 //
-// CachedDisjoint records which of the two mutually incompatible cache
-// accounting conventions the upstream uses, because the two providers are
-// exact opposites and the difference is worth real money:
-//
-//   - OpenAI (and Gemini, and every OpenAI-compatible server): the cached
-//     count is a SUBSET already included in the input count. Billing must
-//     subtract it before applying the fresh-input rate. CachedDisjoint=false.
-//   - Anthropic: cache_read_input_tokens and cache_creation_input_tokens are
-//     DISJOINT from input_tokens and are billed on top. CachedDisjoint=true.
-//
-// Treating Anthropic's disjoint count as a subset makes the cost formula clamp
-// it to the (tiny) fresh-input count and silently discard the entire cached
-// prefix — a 23x undercharge measured on a real cache hit. The flag travels
-// with the usage so the cost function never has to guess from the adapter type.
+// OpenAI, Gemini and every OpenAI-compatible server already report it this
+// way (prompt_tokens includes prompt_tokens_details.cached_tokens). Anthropic
+// and Bedrock report input_tokens / inputTokens as the fresh part only, with
+// cache reads and writes counted beside it; their adapters add the parts back
+// so TokensIn is the whole prompt there too. Nothing downstream (billing,
+// quotas, metrics, exports, translation to the OpenAI shape) needs to know
+// which provider a count came from.
 //
 // Reported is true when the upstream supplied token counts (the OpenAI
 // `usage` object, Anthropic's `usage`, Bedrock's `amazon-bedrock-invocationMetrics`,
@@ -125,7 +119,6 @@ type Usage struct {
 	TokensCacheWrite1h int64
 	FinishReason       string
 	Reported           bool
-	CachedDisjoint     bool
 
 	// CostNano is a provider-reported request cost in nano-USD; valid only
 	// when CostReported is true.
@@ -155,6 +148,15 @@ type Usage struct {
 	// produced before the first visible byte, so time-to-first-byte is not
 	// prompt processing and the generation window is the whole call.
 	HiddenReasoning bool
+}
+
+// withCacheInPrompt returns u with TokensIn raised from the fresh input a
+// provider like Anthropic or Bedrock reports to the whole prompt: fresh input
+// plus cache reads plus cache writes (see Usage). Only those adapters call
+// it; OpenAI-style usage already counts its cached tokens inside TokensIn.
+func (u Usage) withCacheInPrompt() Usage {
+	u.TokensIn += u.TokensCached + u.TokensCacheWrite5m + u.TokensCacheWrite1h
+	return u
 }
 
 // MergeStream folds the usage parsed from one streamed frame into the running
@@ -217,6 +219,10 @@ type DiscoveredModel struct {
 	// Rates contains only reported, supported prices in nano-USD per million tokens.
 	Rates            map[string]int64
 	MetadataWarnings []string
+	// Capabilities is what the provider's model list says the model can
+	// take, give and be asked (see capabilities.go). Nil or missing keys
+	// mean the provider did not say.
+	Capabilities Capabilities
 	// ClassifierRole is a hint from providers that can tell, at discovery
 	// time, that a model is a guard classifier and which wire protocol the
 	// security gateway must speak to it (TEI reports a classifier's label set

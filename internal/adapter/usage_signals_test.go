@@ -127,15 +127,16 @@ func TestOpenAIUsageWithoutSignalsLeavesFlagsFalse(t *testing.T) {
 	}
 }
 
-// Bedrock reports cache writes; they must reach the 5m tier and be disjoint.
+// Bedrock reports cache writes; they must reach the 5m tier and be part of
+// the whole prompt.
 func TestBedrockUsageKeepsCacheWrites(t *testing.T) {
 	a := &Bedrock{}
 	u, ok := a.ExtractUsage([]byte(`{"usage":{"inputTokens":10,"outputTokens":5,"cacheReadInputTokens":100,"cacheWriteInputTokens":200},"stopReason":"end_turn"}`))
 	if !ok {
 		t.Fatal("expected usage")
 	}
-	if u.TokensCacheWrite5m != 200 || u.TokensCached != 100 || !u.CachedDisjoint {
-		t.Fatalf("usage = %+v, want cache write 200, cached 100, disjoint", u)
+	if u.TokensCacheWrite5m != 200 || u.TokensCached != 100 || u.TokensIn != 310 {
+		t.Fatalf("usage = %+v, want cache write 200, cached 100, in 310 (10 fresh + 100 + 200)", u)
 	}
 }
 
@@ -147,10 +148,10 @@ func TestAnthropicStreamCollectorKeepsCacheWrites(t *testing.T) {
 	c.Feed([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":300},"output_tokens":1}}}`))
 	c.Feed([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}`))
 	u := c.Usage()
-	if !u.Reported || u.TokensIn != 10 || u.TokensOut != 42 || u.TokensCached != 100 {
+	if !u.Reported || u.TokensIn != 610 || u.TokensOut != 42 || u.TokensCached != 100 {
 		t.Fatalf("usage = %+v", u)
 	}
-	if u.TokensCacheWrite5m != 200 || u.TokensCacheWrite1h != 300 || !u.CachedDisjoint {
+	if u.TokensCacheWrite5m != 200 || u.TokensCacheWrite1h != 300 {
 		t.Fatalf("cache writes must survive the stream merge: %+v", u)
 	}
 	if u.FinishReason != "end_turn" {

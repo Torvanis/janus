@@ -96,7 +96,7 @@ func TestAnthropicExtractUsage(t *testing.T) {
 	a := &Anthropic{}
 
 	u, ok := a.ExtractUsage([]byte(`{"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":3}}`))
-	if !ok || u.TokensIn != 10 || u.TokensOut != 20 || u.TokensCached != 3 || u.FinishReason != "end_turn" {
+	if !ok || u.TokensIn != 13 || u.TokensOut != 20 || u.TokensCached != 3 || u.FinishReason != "end_turn" {
 		t.Fatalf("usage = %+v ok=%v", u, ok)
 	}
 
@@ -179,7 +179,8 @@ func TestAnthropicCacheWriteExtraction(t *testing.T) {
 				t.Fatalf("cache writes = (%d, %d), want (%d, %d)",
 					u.TokensCacheWrite5m, u.TokensCacheWrite1h, tc.want5m, tc.want1h)
 			}
-			if u.TokensIn != 1000 || u.TokensOut == 0 {
+			// Input tokens include cache reads and writes, as billed.
+			if u.TokensIn != 1000+u.TokensCached+tc.want5m+tc.want1h || u.TokensOut == 0 {
 				t.Fatalf("base token counts disturbed: %+v", u)
 			}
 		})
@@ -206,8 +207,8 @@ func TestAnthropicStreamCollectorCacheWrite(t *testing.T) {
 	if u.TokensCacheWrite5m != 150 || u.TokensCacheWrite1h != 250 {
 		t.Fatalf("cache writes = (%d, %d), want (150, 250) from message_start", u.TokensCacheWrite5m, u.TokensCacheWrite1h)
 	}
-	if u.TokensIn != 1000 || u.TokensOut != 100 || u.TokensCached != 50 {
-		t.Fatalf("token counts = (%d, %d, %d), want (1000, 100, 50)", u.TokensIn, u.TokensOut, u.TokensCached)
+	if u.TokensIn != 1450 || u.TokensOut != 100 || u.TokensCached != 50 {
+		t.Fatalf("token counts = (%d, %d, %d), want (1450 = 1000 fresh + 50 read + 400 written, 100, 50)", u.TokensIn, u.TokensOut, u.TokensCached)
 	}
 }
 
@@ -238,8 +239,8 @@ func TestAnthropicStreamCollector(t *testing.T) {
 	if !u.Reported {
 		t.Fatal("streamed usage must be reported")
 	}
-	if u.TokensIn != 25 {
-		t.Fatalf("TokensIn = %d, want 25 (from message_start)", u.TokensIn)
+	if u.TokensIn != 30 {
+		t.Fatalf("TokensIn = %d, want 30 (25 fresh + 5 read, from message_start)", u.TokensIn)
 	}
 	if u.TokensOut != 72 {
 		t.Fatalf("TokensOut = %d, want 72 (from message_delta)", u.TokensOut)

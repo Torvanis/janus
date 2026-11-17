@@ -1,11 +1,11 @@
 GO ?= go
 NPM ?= npm
-VERSION ?= 2026.11.1
-BUILD_DATE ?= 2026-11-07
-GOTOOLCHAIN := go1.26.10
+VERSION ?= 2026.11.2
+BUILD_DATE ?= 2026-11-17
+GOTOOLCHAIN := go1.26.11
 export GO VERSION BUILD_DATE GOTOOLCHAIN
 .DEFAULT_GOAL := build
-.PHONY: web-deps web web-test build build-fips vet test test-fips verify release run packaging-test
+.PHONY: web-deps web web-test build build-fips vet test test-fips verify release run packaging-test audit
 web-deps:
 	cd web && $(NPM) ci --no-audit --no-fund
 web: web-deps
@@ -33,6 +33,12 @@ test-fips:
 verify:
 	$(MAKE) web
 	$(MAKE) vet test web-test packaging-test
+# No high or critical npm advisories. Shipped (runtime) packages get no
+# exceptions; build/test-only advisories with no patched release may be listed
+# in web/audit-exceptions.json with an expiry date.
+audit:
+	cd web && $(NPM) audit --omit=dev --audit-level=high
+	cd web && node scripts/npm-audit-gate.mjs
 release:
 	python3 scripts/release.py
 run:

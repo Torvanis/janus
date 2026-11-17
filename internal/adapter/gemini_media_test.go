@@ -20,13 +20,30 @@ func TestGeminiSoundAndVideoGoNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(p.URL, ":streamGenerateContent") {
+	if p.URL != "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse" {
 		t.Fatalf("not native: %s", p.URL)
 	}
-	body := string(p.Body)
-	if !strings.Contains(body, `"inlineData":{"data":"SUQz","mimeType":"audio/mp3"}`) ||
-		!strings.Contains(body, `"inlineData":{"data":"AAAAGGZ0eXA=","mimeType":"video/mp4"}`) {
-		t.Fatalf("native body = %s", body)
+	if want := `{"contents":[{"parts":[{"text":"What is in these?"},` +
+		`{"inlineData":{"data":"SUQz","mimeType":"audio/mp3"}},` +
+		`{"inlineData":{"data":"AAAAGGZ0eXA=","mimeType":"video/mp4"}}],"role":"user"}],` +
+		`"generationConfig":{"thinkingConfig":{"includeThoughts":true}}}`; string(p.Body) != want {
+		t.Fatalf("native body =\n%s\nwant\n%s", p.Body, want)
+	}
+
+	// WAV sound with a thinking level on a 2.x model (what Measure sends
+	// when the model's off switch is unknown): audio/wav inlineData and a
+	// thinkingBudget, never the thinkingLevel 2.x refuses.
+	wav := &Request{Path: "/v1/chat/completions", Model: "gemini-2.5-flash", Header: map[string][]string{},
+		Body: []byte(`{"model":"gemini-2.5-flash","max_tokens":256,"reasoning_effort":"minimal","messages":[{"role":"user","content":[` +
+			`{"type":"text","text":"What number?"},{"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}]}]}`)}
+	p, err = g.Prepare(up, wav)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"contents":[{"parts":[{"text":"What number?"},{"inlineData":{"data":"UklGRg==","mimeType":"audio/wav"}}],"role":"user"}],` +
+		`"generationConfig":{"maxOutputTokens":256,"thinkingConfig":{"includeThoughts":true,"thinkingBudget":1024}}}`; string(p.Body) != want ||
+		p.URL != "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" {
+		t.Fatalf("wav: %s\n%s\nwant\n%s", p.URL, p.Body, want)
 	}
 
 	// Google refuses sound/video next to code execution: that tool is

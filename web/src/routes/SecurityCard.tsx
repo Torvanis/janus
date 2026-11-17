@@ -58,9 +58,20 @@ export function SecurityCard(): ReactNode {
   const [enroll, setEnroll] = useState<{ secret: string; otpauth_url: string; algorithm?: string } | null>(null);
   const [code, setCode] = useState('');
   const [recovery, setRecovery] = useState<string[] | null>(null);
+  // Setting two-factor up again on an account that already has it replaces
+  // the stored secret, so the server asks for the password (as for turning
+  // it off). A first enrollment sends none.
+  const [reenrollPassword, setReenrollPassword] = useState('');
   const start = useMutation({
-    mutationFn: () => api.post<{ secret: string; otpauth_url: string; algorithm?: string }>('/api/v1/me/local/totp/start'),
-    onSuccess: (data) => setEnroll(data),
+    mutationFn: (password?: string) =>
+      api.post<{ secret: string; otpauth_url: string; algorithm?: string }>(
+        '/api/v1/me/local/totp/start',
+        password ? { password } : undefined,
+      ),
+    onSuccess: (data) => {
+      setReenrollPassword('');
+      setEnroll(data);
+    },
     onError: (error: Error) => toast(error.message, 'danger'),
   });
   const confirmTotp = useMutation({
@@ -157,7 +168,7 @@ export function SecurityCard(): ReactNode {
             </Field>
             <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
               <button type="submit" className="btn btn-primary" disabled={!canSubmit || change.isPending}>
-                {s?.has_password ? t('security.changePassword') : t('security.setPassword')}
+                {t('security.changePassword')}
               </button>
               {!forced ? (
                 <button type="button" className="btn btn-ghost" onClick={() => setShowPassword(false)}>
@@ -167,14 +178,16 @@ export function SecurityCard(): ReactNode {
             </div>
             <p className="muted small">{t('security.passwordNote')}</p>
           </form>
-        ) : (
+        ) : s?.has_password ? (
           <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
             <button type="button" className="btn" onClick={() => setShowPassword(true)}>
-              {s?.has_password ? t('security.changePassword') : t('security.setPassword')}
+              {t('security.changePassword')}
             </button>
-            {!s?.has_password ? <span className="muted small">{t('security.breakGlass')}</span> : null}
           </div>
-        )}
+        ) : s ? (
+          // A first password is added by an administrator, never by the account itself.
+          <p className="muted small">{t('security.breakGlass')}</p>
+        ) : null}
 
         {/* TOTP */}
         {s?.has_password ? (
@@ -251,8 +264,24 @@ export function SecurityCard(): ReactNode {
               <div className="banner banner-warning" role="alert">
                 <div className="stack" style={{ gap: 'var(--janus-space-2)' }}>
                   <span className="small">{t('security.reenrollBody')}</span>
+                  <Field label={t('security.currentPassword')}>
+                    <input
+                      aria-label={t('security.currentPassword')}
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={reenrollPassword}
+                      onChange={(e) => setReenrollPassword(e.target.value)}
+                      style={{ maxWidth: 280 }}
+                    />
+                  </Field>
                   <div>
-                    <button type="button" className="btn btn-sm" onClick={() => start.mutate()} disabled={start.isPending}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => start.mutate(reenrollPassword)}
+                      disabled={start.isPending || reenrollPassword.length === 0}
+                    >
                       {t('security.setUp')}
                     </button>
                   </div>
@@ -268,7 +297,7 @@ export function SecurityCard(): ReactNode {
             ) : (
               <div className="row" style={{ gap: 'var(--janus-space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span className="small muted">{t('security.totpOffBody')}</span>
-                <button type="button" className="btn btn-sm" onClick={() => start.mutate()} disabled={start.isPending}>
+                <button type="button" className="btn btn-sm" onClick={() => start.mutate(undefined)} disabled={start.isPending}>
                   {t('security.setUp')}
                 </button>
               </div>

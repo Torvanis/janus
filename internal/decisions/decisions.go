@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/torvanis/janus/internal/adapter"
 )
 
 // Dialects.
@@ -148,8 +150,11 @@ type Usage struct {
 	InputTokens  int64
 	OutputTokens int64
 	CachedTokens int64
-	// CostUSD is set when the provider reports a charge (OpenRouter).
+	// CostUSD is set when the provider reports a charge (OpenRouter); it
+	// is what Janus repeats to the caller. CostNano is the same quote
+	// parsed exactly (no float64), and is what metering records.
 	CostUSD      float64
+	CostNano     int64
 	CostReported bool
 }
 
@@ -399,17 +404,22 @@ func ParseSystemOneResponse(raw []byte, asked []Question) (Response, error) {
 		Model   string                     `json:"model"`
 		Answers map[string]json.RawMessage `json:"answers"`
 		Usage   struct {
-			InputTokens  int64    `json:"input_tokens"`
-			OutputTokens int64    `json:"output_tokens"`
-			Cost         *float64 `json:"cost"`
+			InputTokens  int64           `json:"input_tokens"`
+			OutputTokens int64           `json:"output_tokens"`
+			Cost         json.RawMessage `json:"cost"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &top); err != nil {
 		return Response{}, fmt.Errorf("unparseable decision response: %w", err)
 	}
 	out := Response{Model: top.Model, Usage: Usage{InputTokens: top.Usage.InputTokens, OutputTokens: top.Usage.OutputTokens}}
-	if top.Usage.Cost != nil {
-		out.Usage.CostUSD, out.Usage.CostReported = *top.Usage.Cost, true
+	if nano, ok := adapter.QuotedCostNano(top.Usage.Cost); ok {
+		out.Usage.CostNano, out.Usage.CostReported = nano, true
+		// The caller is shown the provider's own number, as before.
+		var err error
+		if out.Usage.CostUSD, err = strconv.ParseFloat(string(bytes.TrimSpace(top.Usage.Cost)), 64); err != nil {
+			out.Usage.CostUSD = float64(nano) / 1e9
+		}
 	}
 	var extra map[string]json.RawMessage
 	if json.Unmarshal(raw, &extra) == nil {

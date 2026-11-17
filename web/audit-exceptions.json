@@ -1,0 +1,8 @@
+[
+  {
+    "id": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "reason": "no patched picomatch exists (all versions <= 4.0.7); reached only through build and test tools (vite, vitest, knip, typescript-eslint via fdir/tinyglobby), never the shipped bundle: npm audit --omit=dev is clean",
+    "expires": "2026-12-15"
+  }
+]

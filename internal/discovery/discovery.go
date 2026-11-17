@@ -13,8 +13,9 @@ import (
 
 	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/alerting"
+	"github.com/torvanis/janus/internal/capability"
 	"github.com/torvanis/janus/internal/crypto"
-	"github.com/torvanis/janus/internal/ratecards"
+	"github.com/torvanis/janus/internal/pricecatalog"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/telemetry"
 )
@@ -50,7 +51,31 @@ type Service struct {
 	lastRunAt time.Time
 	mu        sync.RWMutex
 	wake      chan struct{}
+	// clientFor, when set, returns the client for one upstream's discovery
+	// (the shared client with that upstream's header policy).
+	clientFor func(up *store.Upstream) *http.Client
+	// catalog is the price catalog in use; nil means the bundled one.
+	catalog func() *pricecatalog.Loaded
 }
+
+// SetPriceCatalog makes discovery price new and existing models from the
+// catalog f returns (the refreshed one, when the refresh is on).
+func (s *Service) SetPriceCatalog(f func() *pricecatalog.Loaded) { s.catalog = f }
+
+func (s *Service) priceCatalog() *pricecatalog.Loaded {
+	if s.catalog != nil {
+		return s.catalog()
+	}
+	l, _ := pricecatalog.Bundled()
+	return l
+}
+
+// SetClientFor makes discovery call each upstream through the client f
+// returns for it. Set once, before the service runs.
+func (s *Service) SetClientFor(f func(up *store.Upstream) *http.Client) { s.clientFor = f }
+
+// Client is the shared client discovery was built with.
+func (s *Service) Client() *http.Client { return s.client }
 
 // New builds a discovery service.
 func New(s *store.Store, cipher *crypto.Cipher, client *http.Client, metrics *telemetry.Metrics, alerts *alerting.Dispatcher, logger *slog.Logger, interval time.Duration) *Service {
@@ -140,9 +165,13 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 	// are instead of being marked stale.
 	report := &adapter.DiscoveryReport{}
 	discoverCtx = adapter.WithDiscoveryReport(discoverCtx, report)
+	client := s.client
+	if s.clientFor != nil {
+		client = s.clientFor(up)
+	}
 	models, err := a.Discover(discoverCtx, adapter.Upstream{
 		ID: up.ID, Name: up.Name, BaseURL: up.BaseURL, APIKey: apiKey, AdapterType: up.AdapterType,
-	}, s.client)
+	}, client)
 	if err != nil {
 		return s.fail(ctx, up, res, err, started)
 	}
@@ -161,8 +190,12 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 	}
 
 	seen := make([]string, 0, len(models))
+	catalog := s.priceCatalog()
 	for _, m := range models {
-		reference, warnings := ratecards.Automatic(adapter.MetadataProvider(up.AdapterType, up.BaseURL), m.Name)
+		// The catalog is the reference layer: exact model first, else the
+		// default for the provider and model type. The provider's API
+		// prices (values) and administrator overrides rank above it.
+		reference, referenceSources := pricecatalog.Reference(catalog, up.AdapterType, up.BaseURL, m.Name, m.Modalities)
 		values := m.Rates
 		if values == nil {
 			values = map[string]int64{}
@@ -170,12 +203,17 @@ func (s *Service) RunFor(ctx context.Context, up *store.Upstream) Result {
 		if m.ContextWindow > 0 {
 			values["context_window"] = m.ContextWindow
 		}
-		created, err := s.store.UpsertDiscoveredMetadata(ctx, up.ID, m.Name, m.Modalities, store.AutomaticMetadata{Upstream: values, Reference: reference, Warnings: append(warnings, m.MetadataWarnings...)})
+		created, err := s.store.UpsertDiscoveredMetadata(ctx, up.ID, m.Name, m.Modalities, store.AutomaticMetadata{Upstream: values, Reference: reference, ReferenceSources: referenceSources, Warnings: m.MetadataWarnings})
 		if err != nil {
 			return s.fail(ctx, up, res, err, started)
 		}
 		if created {
 			res.New++
+		}
+		// What the provider's list says the model can do. Losing it costs
+		// detail on the model card, not the discovery run.
+		if err := s.store.SetDiscoveredCapabilities(ctx, up.ID, m.Name, capability.FromProvider(m.Capabilities, started.UTC())); err != nil {
+			s.logger.WarnContext(ctx, "record discovered capabilities", "model", m.Name, "error", err.Error())
 		}
 		// A provider that can identify a guard classifier at discovery time
 		// (TEI's /info names the label set) hands the role over, but only on

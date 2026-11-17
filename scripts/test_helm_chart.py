@@ -216,7 +216,24 @@ class ChartTest(unittest.TestCase):
                            args=["--api-versions", "monitoring.coreos.com/v1/ServiceMonitor"])
         monitor = objects(text, "ServiceMonitor")[0]
         self.assertEqual(monitor["spec"]["endpoints"][0]["path"], "/metrics")
+        self.assertEqual(monitor["spec"]["endpoints"][0]["port"], "metrics")
         self.assertEqual(monitor["metadata"]["labels"]["release"], "metrics")
+        self.reject({"serviceMonitor": {"enabled": True}, "metrics": {"enabled": False}},
+                    "requires metrics.enabled", args=["--api-versions", "monitoring.coreos.com/v1/ServiceMonitor"])
+
+    def test_metrics_port(self):
+        # Janus serves /metrics only on JANUS_METRICS_ADDR, never on :8080.
+        text = self.render({})
+        self.assertEqual(env(text)["JANUS_METRICS_ADDR"]["value"], ":9464")
+        deploy = objects(text, "Deployment")[0]
+        ports = {p["name"]: p["containerPort"] for p in deploy["spec"]["template"]["spec"]["containers"][0]["ports"]}
+        self.assertEqual(ports, {"http": 8080, "metrics": 9464})
+        service = [s for s in objects(text, "Service") if s["metadata"]["name"] == deploy["metadata"]["name"]][0]
+        self.assertEqual({p["name"]: p["targetPort"] for p in service["spec"]["ports"]}, {"http": "http", "metrics": "metrics"})
+        off = self.render({"metrics": {"enabled": False}})
+        self.assertEqual(env(off)["JANUS_METRICS_ADDR"]["value"], "off")
+        deploy = objects(off, "Deployment")[0]
+        self.assertEqual([p["name"] for p in deploy["spec"]["template"]["spec"]["containers"][0]["ports"]], ["http"])
 
     def test_license_extra_env_and_secret_env(self):
         text = self.render({"license": {"existingSecret": "license", "key": "license.key"},
@@ -230,7 +247,7 @@ class ChartTest(unittest.TestCase):
     def test_env_override_guards(self):
         for key in ["JANUS_DATABASE_URL", "JANUS_ENCRYPTION_KEY", "JANUS_DEV_AUTH",
                     "JANUS_DEV_AUTH_ALLOW_UNSAFE", "JANUS_COOKIE_SECURE", "JANUS_LISTEN_ADDR",
-                    "JANUS_PUBLIC_URL", "JANUS_ENV", "JANUS_LICENSE_FILE", "PGHOST", "PGSERVICE"]:
+                    "JANUS_PUBLIC_URL", "JANUS_ENV", "JANUS_LICENSE_FILE", "JANUS_METRICS_ADDR", "PGHOST", "PGSERVICE"]:
             for field in ["extraEnv", "secretEnv"]:
                 with self.subTest(key=key, field=field):
                     val = "unsafe" if field == "extraEnv" else {"name": "unsafe", "key": "value"}
@@ -276,15 +293,15 @@ class ChartTest(unittest.TestCase):
         self.assertTrue(labelled)
         for doc in labelled:
             self.assertEqual(doc["metadata"]["labels"]["app.kubernetes.io/name"], "janus")
-            self.assertEqual(doc["metadata"]["labels"]["helm.sh/chart"], "janus-helm-chart-2026.11.1")
+            self.assertEqual(doc["metadata"]["labels"]["helm.sh/chart"], "janus-helm-chart-2026.11.2")
         for work in (d for d in docs if d["kind"] in ["Deployment", "StatefulSet"]):
             self.assertEqual(work["spec"]["selector"]["matchLabels"]["app.kubernetes.io/name"], "janus")
 
     def test_image_digest_and_tag(self):
         image = deployment(self.render())["spec"]["template"]["spec"]["containers"][0]["image"]
         self.assertEqual(image, "ghcr.io/torvanis/janus@sha256:0cc0c4996ee516bcf09daf147d456a16ec9a3358e6a4b7ea37a4b93e54a2310c")
-        image = deployment(self.render({"image": {"digest": "", "tag": "2026.11.1"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
-        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.11.1")
+        image = deployment(self.render({"image": {"digest": "", "tag": "2026.11.2"}}))["spec"]["template"]["spec"]["containers"][0]["image"]
+        self.assertEqual(image, "ghcr.io/torvanis/janus:2026.11.2")
 
     def test_lint_variants(self):
         for value in [{}, {"database": {"type": "sqlite"}, "postgresql": {"enabled": False}},
@@ -299,7 +316,7 @@ class ChartTest(unittest.TestCase):
             result = subprocess.run([HELM, "package", str(CHART), "--destination", temp],
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            package = Path(temp) / "janus-helm-chart-2026.11.1.tgz"
+            package = Path(temp) / "janus-helm-chart-2026.11.2.tgz"
             self.assertTrue(package.exists())
             self.assertEqual(self.render(), self.render(chart=package))
             if ARTIFACTS:

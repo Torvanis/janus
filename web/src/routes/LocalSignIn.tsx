@@ -13,13 +13,71 @@ import { describePolicy, passwordProblem } from '../lib/passwordPolicy';
  */
 export type SignInProvider = { slug: string; name: string; url: string };
 
-export function LocalSignIn({ redirectTo, providers = [] }: { redirectTo: string; providers?: SignInProvider[] }): ReactNode {
+/**
+ * Typed sign-in name → the full name it signs in as: "jdoe" and
+ * "CORP\jdoe" become "jdoe@<default domain>". Null when the name already
+ * has an @domain, when no default domain is set, or for a DOMAIN\name whose
+ * domain is not the directory's Windows domain. Mirrors auth.QualifyLogin.
+ */
+/**
+ * The Windows (NetBIOS) domain name for DOMAIN\name sign-ins: the one set,
+ * else the first label of the default domain, upper-cased and cut to 15
+ * characters (corp.example.com → CORP). Mirrors auth.WindowsDomain.
+ */
+export function windowsDomainFor(defaultDomain?: string, windowsDomain?: string): string {
+  const set = (windowsDomain ?? '').trim();
+  if (set) return set.toUpperCase();
+  const label = (defaultDomain ?? '').trim().replace(/^@/, '').split('.')[0] ?? '';
+  return label.slice(0, 15).toUpperCase();
+}
+
+export function qualifiedName(login: string, defaultDomain?: string, windowsDomain?: string): string | null {
+  const name = login.trim();
+  const domain = (defaultDomain ?? '').trim().replace(/^@/, '').toLowerCase();
+  if (!name || !domain) return null;
+  const slash = name.indexOf('\\');
+  if (slash >= 0) {
+    const prefix = name.slice(0, slash).trim();
+    const user = name.slice(slash + 1).trim();
+    const want = windowsDomainFor(domain, windowsDomain);
+    if (!want || prefix.toUpperCase() !== want.toUpperCase() || !user || /[@\\]/.test(user)) return null;
+    return `${user}@${domain}`;
+  }
+  if (name.includes('@')) return null;
+  return `${name}@${domain}`;
+}
+
+export function LocalSignIn({
+  redirectTo,
+  providers = [],
+  directory = false,
+  defaultDomain,
+  windowsDomain,
+}: {
+  redirectTo: string;
+  providers?: SignInProvider[];
+  /** A directory is on: the field takes user names, not only email addresses. */
+  directory?: boolean;
+  /** The domain a user name without one signs in with. */
+  defaultDomain?: string;
+  /** The Windows (NetBIOS) domain accepted as DOMAIN\name. */
+  windowsDomain?: string;
+}): ReactNode {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const nameLabel = directory ? t('login.userNameOrEmail') : t('login.workEmail');
+  const domain = directory ? (defaultDomain ?? '').trim() : '';
+  const windows = windowsDomainFor(domain, windowsDomain);
+  const resolved = qualifiedName(email, domain, windows);
+  const domainHint = !domain
+    ? null
+    : resolved
+      ? t('login.signsInAs', { name: resolved })
+      : t('login.nameFormsHint', { value: domain, prefix: windows });
 
   async function submitPassword(event: FormEvent) {
     event.preventDefault();
@@ -106,17 +164,25 @@ export function LocalSignIn({ redirectTo, providers = [] }: { redirectTo: string
   return (
     <form className="stack" onSubmit={(event) => void submitPassword(event)} aria-label={t('login.localTitle')}>
       <label className="field">
-        <span className="field-label">{t('login.workEmail')}</span>
+        <span className="field-label">{nameLabel}</span>
         <input
-          aria-label={t('login.workEmail')}
+          aria-label={nameLabel}
           className="input"
-          type="email"
+          type={directory ? 'text' : 'email'}
           autoComplete="username"
+          autoCapitalize={directory ? 'none' : undefined}
+          spellCheck={directory ? false : undefined}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@example.com"
+          placeholder={directory ? undefined : 'you@example.com'}
+          aria-describedby={domainHint ? 'signin-name-hint' : undefined}
           autoFocus
         />
+        {domainHint ? (
+          <span id="signin-name-hint" className="small muted" aria-live="polite">
+            {domainHint}
+          </span>
+        ) : null}
       </label>
       <label className="field">
         <span className="field-label">{t('login.password')}</span>

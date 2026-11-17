@@ -26,7 +26,16 @@ function renderAt(path: string, role = 'admin') {
       <SessionContext.Provider
         value={
           {
-            me: { id: 'me', name: 'Admin', email: 'a@example.com', role, groups: [], teams: [], chat_preview: true },
+            me: {
+              id: 'me',
+              name: 'Admin',
+              email: 'a@example.com',
+              role,
+              groups: [],
+              teams: [],
+              chat_enabled: true,
+              chat_available: true,
+            },
             config: null,
             refresh: vi.fn(),
             loading: false,
@@ -97,8 +106,34 @@ it('puts Chat at the top of administration, grants and service tokens under Gate
   expect(links('admin-gateway')).not.toContain('/admin/chat');
   expect(within(sidebar).getByRole('button', { name: /People & Usage/ })).toBeTruthy();
   expect(within(sidebar).queryByRole('button', { name: /People & access/ })).toBeNull();
-  expect(links('admin-people')).toEqual(['/admin/users', '/admin/quotas', '/admin/insights']);
-  expect(links('admin-activity')).toEqual(['/admin/requests', '/admin/audit']);
+  expect(links('admin-people')).toEqual(['/admin/users', '/admin/quotas', '/admin/insights', '/admin/requests']);
+});
+
+it('puts Requests under People & Usage and the audit log under Safety & Security, with no Activity section', () => {
+  renderAt('/admin/audit');
+  const sidebar = screen.getByRole('navigation', { name: /primary/i });
+  const links = (id: string) =>
+    within(sidebar.querySelector(`[data-section="${id}"]`) as HTMLElement)
+      .queryAllByRole('link', { hidden: true })
+      .map((a) => a.getAttribute('href'));
+  expect(links('admin-people')).toEqual(['/admin/users', '/admin/quotas', '/admin/insights', '/admin/requests']);
+  expect(links('admin-security')).toEqual([
+    '/admin/security',
+    '/admin/child-safety',
+    '/admin/rules',
+    '/admin/alerts',
+    '/admin/audit',
+  ]);
+  expect(sidebar.querySelector('[data-section="admin-activity"]')).toBeNull();
+  expect(within(sidebar).queryByRole('button', { name: /Activity/ })).toBeNull();
+  // The audit log's new section is the one held open for its page.
+  const security = within(sidebar).getByRole('button', { name: /Safety & Security/ });
+  expect(security.getAttribute('aria-expanded')).toBe('true');
+  expect(
+    within(sidebar)
+      .getByRole('link', { name: /Audit log/ })
+      .getAttribute('aria-current'),
+  ).toBe('page');
 });
 
 it('puts Overview at the very top of administration, on its own', () => {

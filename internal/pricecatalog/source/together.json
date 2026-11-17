@@ -1,0 +1,121 @@
+{
+  "provider": "together",
+  "entries": [
+    {
+      "provider": "together",
+      "model": "Qwen/Qwen3.5-9B",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 170000000,
+        "rate_out_nanousd": 250000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "canopylabs/orpheus-3b-0.1-ft",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 15000000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "cartesia/sonic-3",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 65000000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 1200000000,
+        "rate_cached_nanousd": 6000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "hexgrad/Kokoro-82M",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "moonshotai/Kimi-K3",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 500000000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "openai/whisper-large-v3",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 1500000
+      },
+      "source": {
+        "url": "https://docs.together.ai/docs/serverless/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "together",
+      "model": "zai-org/GLM-5.3",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1400000000,
+        "rate_out_nanousd": 4400000000,
+        "rate_cached_nanousd": 260000000
+      },
+      "source": {
+        "url": "https://www.together.ai/pricing",
+        "read_at": "2026-11-06"
+      }
+    }
+  ]
+}

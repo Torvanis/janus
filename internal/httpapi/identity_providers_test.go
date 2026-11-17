@@ -161,8 +161,32 @@ func TestIdentityProviderEndToEndSignIn(t *testing.T) {
 			"groups": []string{"Janus-Admins"}, "exp": time.Now().Add(time.Hour).Unix(), "nonce": nonce}
 	}
 	// Callback → session, redirect to /models.
+	// The callback is taken only from the browser that started the sign-in
+	// (2026-11 security review, AUTH-06): another browser handed the same
+	// link is not signed in, and the attempt does not use up the sign-in.
+	started := rec.Result().Cookies()
+	if len(started) != 1 || !started[0].HttpOnly || started[0].SameSite != http.SameSiteLaxMode || started[0].Path != "/auth" {
+		t.Fatalf("start set cookies %+v, want one sign-in binding cookie", started)
+	}
 	cbReq := httptest.NewRequest(http.MethodGet, "/auth/callback/acme?code=abc&state="+url.QueryEscape(loc.Query().Get("state")), nil)
 	cbRec := httptest.NewRecorder()
+	h.handler.ServeHTTP(cbRec, cbReq)
+	if cbRec.Header().Get("Location") == "/models" || len(sessionCookies(cbRec)) != 0 || !strings.Contains(cbRec.Header().Get("Location"), "not+started+in+this+browser") {
+		t.Fatalf("a browser that did not start the sign-in finished it: %d %s", cbRec.Code, cbRec.Body)
+	}
+	if _, err := h.store.UserByAuthID(ctx, "acme:42"); err == nil {
+		t.Fatal("the refused callback created the account")
+	}
+	wrong := httptest.NewRequest(http.MethodGet, cbReq.URL.String(), nil)
+	wrong.AddCookie(&http.Cookie{Name: started[0].Name, Value: strings.Repeat("0", 64)})
+	cbRec = httptest.NewRecorder()
+	h.handler.ServeHTTP(cbRec, wrong)
+	if cbRec.Header().Get("Location") == "/models" || len(sessionCookies(cbRec)) != 0 {
+		t.Fatal("a made-up binding cookie was accepted")
+	}
+	cbReq = httptest.NewRequest(http.MethodGet, cbReq.URL.String(), nil)
+	cbReq.AddCookie(started[0])
+	cbRec = httptest.NewRecorder()
 	h.handler.ServeHTTP(cbRec, cbReq)
 	if cbRec.Code != http.StatusFound || cbRec.Header().Get("Location") != "/models" {
 		t.Fatalf("callback: %d %s loc=%s", cbRec.Code, cbRec.Body, cbRec.Header().Get("Location"))
@@ -223,4 +247,16 @@ func TestIdentityProviderTestEndpoint(t *testing.T) {
 	if rec.Code != 200 || decodeBody(t, rec)["ok"] != false {
 		t.Fatalf("test unreachable: %d %s", rec.Code, rec.Body)
 	}
+}
+
+// sessionCookies are the cookies a response set, other than the cleared
+// sign-in binding cookie.
+func sessionCookies(rec *httptest.ResponseRecorder) []*http.Cookie {
+	var out []*http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if !strings.HasPrefix(c.Name, loginBindingCookiePrefix) {
+			out = append(out, c)
+		}
+	}
+	return out
 }

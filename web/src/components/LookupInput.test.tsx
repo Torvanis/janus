@@ -52,6 +52,14 @@ describe('LookupInput', () => {
     expect(screen.getByText('Casey Sample')).toBeTruthy(); // chip shows the name
   });
 
+  it('puts the full name and email in each suggestion title, for ones cut short by the menu width', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.type(screen.getByRole('combobox', { name: 'People' }), 'sample');
+    const opt = await screen.findByRole('option', { name: /Casey Sample/ });
+    expect(opt.getAttribute('title')).toBe('Casey Sample · casey@sample.test');
+  });
+
   it('is keyboard driven: arrows move, Enter picks, Backspace removes the last chip', async () => {
     const user = userEvent.setup();
     render(<Harness />);

@@ -23,17 +23,17 @@ to every client.
 
 Product information and licensing: [janusedge.com](https://janusedge.com).
 
-## Release 2026.11.1
+## Release 2026.11.2
 
-Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.11.1`.
+Versions use **YEAR.MONTH.RELEASE_NUMBER**. The release tag is `v2026.11.2`.
 
 - [Releases and downloads](https://github.com/torvanis/janus/releases)
-- Container: `ghcr.io/torvanis/janus:2026.11.1` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
-- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.11.1): see [Install on a Linux server](#install-on-a-linux-server)
+- Container: `ghcr.io/torvanis/janus:2026.11.2` (public, Linux amd64/arm64); alternatively build locally using the Dockerfile below.
+- [Linux server installer and architecture archives](https://github.com/Torvanis/janus/releases/tag/v2026.11.2): see [Install on a Linux server](#install-on-a-linux-server)
 - [Helm chart installation guide](charts/janus-helm-chart/README.md): bundled single-instance PostgreSQL by default, existing PostgreSQL, or SQLite **for evaluation only**.
-- [Download Helm chart 2026.11.1](https://github.com/Torvanis/janus/releases/download/v2026.11.1/janus-helm-chart-2026.11.1.tgz)
-- Offline container images for air-gapped installs: `janus-container-image-2026.11.1-linux-amd64.tar` and `janus-container-image-2026.11.1-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.11.1) (`docker load -i` or `podman load -i`).
-- **Janus FIPS edition** (Business): `ghcr.io/torvanis/janus:2026.11.1-fips`, plus `janus-fips_2026.11.1_linux_<arch>.tar.gz` and `janus-fips-container-image-2026.11.1-linux-<arch>.tar` on the release page. See [FIPS edition and STIG profile](#fips-edition-and-stig-profile).
+- [Download Helm chart 2026.11.2](https://github.com/Torvanis/janus/releases/download/v2026.11.2/janus-helm-chart-2026.11.2.tgz)
+- Offline container images for air-gapped installs: `janus-container-image-2026.11.2-linux-amd64.tar` and `janus-container-image-2026.11.2-linux-arm64.tar` on the [release page](https://github.com/Torvanis/janus/releases/tag/v2026.11.2) (`docker load -i` or `podman load -i`).
+- **Janus FIPS edition** (Business): `ghcr.io/torvanis/janus:2026.11.2-fips`, plus `janus-fips_2026.11.2_linux_<arch>.tar.gz` and `janus-fips-container-image-2026.11.2-linux-<arch>.tar` on the release page. See [FIPS edition and STIG profile](#fips-edition-and-stig-profile).
 - [Release notes](CHANGELOG.md)
 
 Use a versioned image or an immutable digest rather than an unpinned tag.
@@ -44,7 +44,7 @@ On any systemd distribution (tested on Ubuntu 24.04 and Rocky Linux 9) with
 Python 3.9+ and openssl:
 
 ```sh
-curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.11.1/install.py
+curl -fLO https://github.com/Torvanis/janus/releases/download/v2026.11.2/install.py
 sudo python3 install.py --admin-email you@example.com --hostname ai.example.com
 ```
 
@@ -62,11 +62,11 @@ PostgreSQL and offline installation: [deploy/README.md](deploy/README.md#linux-s
 
 ## Quick start with a container
 
-Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.11.1` or build
+Requires Docker and OpenSSL. Pull `ghcr.io/torvanis/janus:2026.11.2` or build
 the image from a checkout of this release (see Build from source):
 
 ```sh
-docker build -t janus:2026.11.1 .
+docker build -t janus:2026.11.2 .
 ```
 
 This starts a **local evaluation** instance;
@@ -85,7 +85,7 @@ docker run -d --name janus \
   --env-file janus.env \
   -e JANUS_PUBLIC_URL=http://localhost:8080 \
   -v janus-data:/data \
-  janus:2026.11.1
+  janus:2026.11.2
 ```
 
 Open **http://localhost:8080** and create the first administrator. There is no
@@ -125,17 +125,23 @@ Janus reads configuration from environment variables. Common settings:
 | `JANUS_ENCRYPTION_KEY` | Required 32-byte encryption key, encoded as 64 hexadecimal characters. |
 | `JANUS_PUBLIC_URL` | Browser-facing URL, including scheme. Use HTTPS for shared installations. |
 | `JANUS_LISTEN_ADDR` | HTTP bind address; the container listens on port 8080. |
+| `JANUS_METRICS_ADDR` | Address of the separate Prometheus `/metrics` listener; defaults to `:9464`, `off` turns it off. `/metrics` is never served on the main port. Metrics name every upstream and model and carry usage and spend totals: keep this port inside your network. |
+| `JANUS_CONTENT_SECURITY_POLICY` | Content security policy for the web console: `report-only` (default), `enforce`, or `off` (framing rules only). Browsers report would-be refusals to `POST /csp-report`. |
 | `JANUS_DATABASE_URL` | Database connection string; defaults to `sqlite:///data/janus.db`. |
 | `JANUS_OIDC_PROVIDER_URL` | Optional OIDC issuer URL. |
 | `JANUS_OIDC_CLIENT_ID` | OIDC client identifier; required when configuring the environment-based provider. |
 | `JANUS_OIDC_CLIENT_SECRET` | OIDC client secret; required with that provider. |
 | `JANUS_BOOTSTRAP_ADMIN_EMAILS` | Optional comma-separated administrator emails for external identity sign-in. |
 | `JANUS_LICENSE_FILE` | Optional path to a signed license file. |
-| `JANUS_OFFLINE` | Disables update checks when set to `true`. |
+| `JANUS_OFFLINE` | Disables update checks when set to `true`, and keeps the price catalog refresh off unless `JANUS_PRICE_CATALOG_URL` is set. |
 | `JANUS_UPDATE_CHECK` | Opt-in version checking; disabled by default. |
+| `JANUS_PRICE_CATALOG_REFRESH` | `daily` or `off`. Unset leaves the opt-in daily refresh of the signed Janus price catalog to Administration → Settings → License & updates (off by default); when set it wins and the setting is locked. |
+| `JANUS_PRICE_CATALOG_URL` | Where the refresh downloads the catalog (its signature is at `<url>.sig`); defaults to `https://janusedge.com/pricing/catalog.json`. Point it at your own mirror to price many gateways from one publisher. |
+| `JANUS_PRICE_CATALOG_REQUIRE_SIGNATURE` | Defaults to `true`; `false` accepts an unsigned or edited catalog (environment only, for offline sites). |
+| `JANUS_PRICE_CATALOG_KEYS` | Extra trusted Ed25519 public keys for catalogs you sign yourself, base64, comma-separated. `janus-price-catalog` (in `cmd/`) builds, signs and verifies catalogs. |
 | `JANUS_PERFORMANCE_MODE` | Business: batch usage writes for the busiest gateways (see below). Defaults to `false`. |
 | `JANUS_DB_MAX_CONNS` | PostgreSQL connections per replica; defaults to 25. Keep replicas × this well under the server's `max_connections`. |
-| `JANUS_CHAT_PREVIEW` | Turns on Janus Chat (preview). Defaults to `false`. |
+| `JANUS_CHAT_PREVIEW` | **Removed in 2026.11.2.** Janus Chat is on by default and turned on or off in Administration → Chat. The variable is ignored; Janus logs a warning at startup while it is still set, so remove it. |
 | `JANUS_CHAT_AUTO_TITLE` | Lets the chat's model name each conversation (a metered `janus-chat-title` request). Defaults to `true`. |
 | `JANUS_CHAT_MAX_UPLOAD_BYTES` | Largest chat attachment; defaults to 20 MiB and never exceeds the storage limit. |
 | `JANUS_CHAT_SEARCH_SEARXNG_URL` | Address of a SearXNG instance; Chat web search is turned on with it once at startup. |
@@ -172,11 +178,11 @@ prints the edition, the module and the features it restricts. It needs a
 Business, Enterprise or trial license and PostgreSQL (it refuses SQLite).
 
 ```bash
-docker run --rm ghcr.io/torvanis/janus:2026.11.1-fips --fips-status
+docker run --rm ghcr.io/torvanis/janus:2026.11.2-fips --fips-status
 make build-fips            # from source: GOFIPS140=v1.0.0, -tags fips
 ```
 
-With Helm: `--set image.tag=2026.11.1-fips --set image.digest=` (or that
+With Helm: `--set image.tag=2026.11.2-fips --set image.digest=` (or that
 image's digest).
 
 `JANUS_STIG_PROFILE=true` (either edition, Business) applies the documented
@@ -213,7 +219,7 @@ through a configured upstream.
 
 ## Build from source
 
-Requires Git, Make, Bash, Python **3**, Go **1.26.10**, and Node.js **22**
+Requires Git, Make, Bash, Python **3**, Go **1.26.11**, and Node.js **22**
 with npm. The verification suite also requires a C compiler for Go race tests.
 These commands target a Unix-like build environment. Dependency versions are
 recorded in the Go module files and `web/package-lock.json`.
@@ -221,7 +227,7 @@ recorded in the Go module files and `web/package-lock.json`.
 ```sh
 git clone https://github.com/torvanis/janus.git
 cd janus
-git checkout v2026.11.1
+git checkout v2026.11.2
 make web-deps
 make verify
 make build

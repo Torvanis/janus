@@ -70,6 +70,7 @@ func (a *Anthropic) Discover(ctx context.Context, up Upstream, client *http.Clie
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse Anthropic model list: %w", err)
 	}
+	rows := modelRows(body)
 	out := make([]DiscoveredModel, 0, len(payload.Data))
 	for _, m := range payload.Data {
 		if m.ID == "" {
@@ -85,7 +86,7 @@ func (a *Anthropic) Discover(ctx context.Context, up Upstream, client *http.Clie
 		// Every model Anthropic lists is a Messages (chat) model today, but
 		// the id is still consulted so a future embedding or video entry
 		// is not mislabelled the way video models once were on OpenAI.
-		out = append(out, DiscoveredModel{Name: m.ID, Modalities: guessModalities(m.ID), ContextWindow: ctxWindow})
+		out = append(out, DiscoveredModel{Name: m.ID, Modalities: guessModalities(m.ID), ContextWindow: ctxWindow, Capabilities: rowCapabilities("anthropic", rows[m.ID])})
 	}
 	return out, nil
 }
@@ -810,14 +811,17 @@ func openAIFinishReason(stop string) string {
 	}
 }
 
-// openAIUsage renders an Anthropic usage block in the OpenAI shape. Cache
-// reads land in prompt_tokens_details.cached_tokens, the field OpenAI SDKs
-// already know how to read.
+// openAIUsage renders an Anthropic usage block in the OpenAI shape, in
+// OpenAI's own convention: prompt_tokens is the whole prompt (fresh input,
+// cache reads and cache writes, as Anthropic bills it) and
+// prompt_tokens_details.cached_tokens the cache reads within it, the field
+// OpenAI SDKs already know how to read. total_tokens = prompt + completion.
 func openAIUsage(u anthropicUsageBlock) map[string]any {
+	prompt := u.prompt()
 	out := map[string]any{
-		"prompt_tokens":     u.InputTokens,
+		"prompt_tokens":     prompt,
 		"completion_tokens": u.OutputTokens,
-		"total_tokens":      u.InputTokens + u.OutputTokens,
+		"total_tokens":      prompt + u.OutputTokens,
 	}
 	if u.CacheReadInputTokens > 0 {
 		out["prompt_tokens_details"] = map[string]any{"cached_tokens": u.CacheReadInputTokens}
@@ -961,6 +965,9 @@ type anthropicStreamTransformer struct {
 	server       map[int]*anthropicServerPending
 	inputTokens  int64
 	cachedTokens int64
+	// writeTokens is every cache-write token (5-minute and 1-hour): part
+	// of the prompt_tokens the client is shown.
+	writeTokens  int64
 	outputTokens int64
 	sawSSE       bool
 	done         bool
@@ -1018,6 +1025,8 @@ func (t *anthropicStreamTransformer) TransformStreamLine(line []byte) ([]byte, e
 			}
 			t.inputTokens = ev.Message.Usage.InputTokens
 			t.cachedTokens = ev.Message.Usage.CacheReadInputTokens
+			w5m, w1h := ev.Message.Usage.cacheWrites()
+			t.writeTokens = w5m + w1h
 			t.outputTokens = ev.Message.Usage.OutputTokens
 		}
 		t.created = t.adapter.created()
@@ -1095,6 +1104,9 @@ func (t *anthropicStreamTransformer) TransformStreamLine(line []byte) ([]byte, e
 			if ev.Usage.CacheReadInputTokens > 0 {
 				t.cachedTokens = ev.Usage.CacheReadInputTokens
 			}
+			if w5m, w1h := ev.Usage.cacheWrites(); w5m+w1h > 0 {
+				t.writeTokens = w5m + w1h
+			}
 		}
 		finish := "stop"
 		if ev.Delta != nil {
@@ -1134,6 +1146,7 @@ func (t *anthropicStreamTransformer) finish() []byte {
 	t.done = true
 	usage := openAIUsage(anthropicUsageBlock{
 		InputTokens: t.inputTokens, OutputTokens: t.outputTokens, CacheReadInputTokens: t.cachedTokens,
+		CacheCreationInputTokens: t.writeTokens,
 	})
 	frame, _ := t.chunk(nil, nil, usage)
 	return append(frame, []byte("data: [DONE]\n\n")...)
@@ -1210,6 +1223,14 @@ func (b anthropicUsageBlock) cacheWrites() (w5m, w1h int64) {
 	return b.CacheCreationInputTokens, 0
 }
 
+// prompt is the whole prompt of one usage block, the way Anthropic bills it:
+// input_tokens counts only the fresh part, and cache reads and cache writes
+// are counted beside it.
+func (b anthropicUsageBlock) prompt() int64 {
+	w5m, w1h := b.cacheWrites()
+	return b.InputTokens + b.CacheReadInputTokens + w5m + w1h
+}
+
 type anthropicUsage struct {
 	Usage      anthropicUsageBlock `json:"usage"`
 	StopReason string              `json:"stop_reason"`
@@ -1248,12 +1269,13 @@ func (a *Anthropic) ExtractUsage(body []byte) (Usage, bool) {
 	if env.Delta != nil && env.Delta.StopReason != "" {
 		u.FinishReason = env.Delta.StopReason
 	}
+	// Reported keys on the fresh input and output counts, as before the
+	// cache parts were folded into TokensIn.
 	u.Reported = u.TokensIn > 0 || u.TokensOut > 0
 	env.Usage.ServerToolUse.apply(&u)
-	// Anthropic reports cache reads and cache writes DISJOINT from
-	// input_tokens; the cost function must add them rather than subtract.
-	u.CachedDisjoint = true
-	return u, u.Reported
+	// Anthropic counts cache reads and writes beside input_tokens; the
+	// whole prompt is all of them (see Usage).
+	return u.withCacheInPrompt(), u.Reported
 }
 
 // NewStreamCollector accumulates the typed Anthropic SSE events, where input
@@ -1303,15 +1325,14 @@ func (c *anthropicStreamCollector) Feed(line []byte) {
 	// final frame is authoritative), flags are sticky — the same rule the
 	// OpenAI, Bedrock and Vertex collectors apply, so no adapter can drift in
 	// what it keeps from a trailing frame.
+	// TokensIn stays the fresh input_tokens while frames merge, so each
+	// part keeps its own largest value; Usage adds the parts.
 	c.usage.MergeStream(frame)
-	c.usage.CachedDisjoint = true
 }
 
-func (c *anthropicStreamCollector) Usage() Usage {
-	// Same disjoint cache convention as the buffered path (see ExtractUsage).
-	c.usage.CachedDisjoint = true
-	return c.usage
-}
+// Usage is the merged usage with TokensIn as the whole prompt, the same
+// convention as the buffered path (see ExtractUsage).
+func (c *anthropicStreamCollector) Usage() Usage { return c.usage.withCacheInPrompt() }
 
 // anthropicServerPending is a server_tool_use block whose input is still
 // streaming.

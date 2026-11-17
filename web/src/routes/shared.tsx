@@ -3,10 +3,20 @@ import { useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { TimePoint } from '../lib/types';
 import { seriesColor, type AreaSeries } from '../components/charts';
-import { t } from '../lib/i18n';
+import { t, type MessageKey } from '../lib/i18n';
 import type { UsageEvent } from '../lib/types';
-import { formatBytes, formatDateTime, formatDuration, formatNumber, formatUSD, statusTone, modalityLabel } from '../lib/format';
+import {
+  formatBytes,
+  formatDateTime,
+  formatDuration,
+  formatNumber,
+  formatUSD,
+  formatUSDPrecise,
+  statusTone,
+  modalityLabel,
+} from '../lib/format';
 import { Badge } from '../components/ui';
+import { HeaderLabel } from '../components/TableText';
 import { ChargedTeam } from '../components/ChargedTeam';
 import { useLocalOnly } from '../app/session';
 import { useUrlState } from '../lib/hooks';
@@ -110,7 +120,7 @@ export function SearchInput({
   label?: string;
 }): ReactNode {
   return (
-    <div className="row" style={{ gap: 4 }}>
+    <div className="row search-input" style={{ gap: 4 }}>
       <input
         className="input"
         type="search"
@@ -118,7 +128,6 @@ export function SearchInput({
         placeholder={placeholder}
         aria-label={label}
         onChange={(event) => onChange(event.target.value)}
-        style={{ minWidth: 180 }}
       />
       {value ? (
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange('')} aria-label={t('shared.clearSearch')}>
@@ -236,10 +245,14 @@ export function SortHeader({
   return (
     <th scope="col" aria-sort={isDesc ? 'descending' : isAsc ? 'ascending' : 'none'}>
       <button type="button" onClick={() => onSort(isDesc ? asc : sortKey)}>
-        {label}
-        <span aria-hidden="true" style={{ opacity: isDesc || isAsc ? 1 : 0.3 }}>
-          {isAsc ? '↑' : '↓'}
-        </span>
+        <HeaderLabel
+          label={label}
+          after={
+            <span aria-hidden="true" style={{ opacity: isDesc || isAsc ? 1 : 0.3 }}>
+              {isAsc ? '↑' : '↓'}
+            </span>
+          }
+        />
       </button>
     </th>
   );
@@ -317,23 +330,54 @@ export function PolicyCaveat(): ReactNode {
  * response (a configuration gap the admin should fix) must never read like a
  * free request or like an error response.
  */
-function AccountingBadge({ method }: { method: string }): ReactNode {
+function AccountingBadge({ method, quotedBy }: { method: string; quotedBy?: string }): ReactNode {
   switch (method) {
     case 'byte_count_fallback':
       return <Badge tone="warning">{t('requests.estimatedFromBytes')}</Badge>;
     case 'upstream_reported_cost':
-      return <Badge tone="success">{t('requests.costReportedByUpstream')}</Badge>;
+      // The provider's own quote is the call's cost (over the rate card).
+      return (
+        <Badge tone="success">
+          {quotedBy ? t('requests.costQuotedBy', { name: quotedBy }) : t('requests.costReportedByUpstream')}
+        </Badge>
+      );
     case 'unmetered_modality':
       return (
         <span title={t('requests.unmeteredModalityHint')}>
           <Badge tone="danger">{t('requests.unmeteredModality')}</Badge>
         </span>
       );
+    case 'request_measured':
+      return <Badge tone="success">{t('requests.measuredPriced')}</Badge>;
+    case 'measured_unpriced':
+      return (
+        <span title={t('requests.measuredUnpricedHint')}>
+          <Badge tone="warning">{t('requests.measuredUnpriced')}</Badge>
+        </span>
+      );
+    case 'billed_on_result':
+      return <Badge tone="neutral">{t('requests.billedOnResult')}</Badge>;
     case 'not_billable':
       return <Badge tone="neutral">{t('requests.notBillable')}</Badge>;
     default:
       return <Badge tone="success">{t('requests.reportedByUpstream')}</Badge>;
   }
+}
+
+const BILLED_UNIT_TEXT: Record<string, MessageKey> = {
+  image: 'requests.unitImage',
+  video_second: 'requests.unitVideoSecond',
+  audio_minute: 'requests.unitAudioMinute',
+  character: 'requests.unitCharacter',
+  page: 'requests.unitPage',
+  request: 'requests.unitRequest',
+};
+
+/** "2 image(s)", "8 second(s) of video": what a unit-billed request used. */
+export function billedUsageText(unit: string, quantity: number): string {
+  const key = BILLED_UNIT_TEXT[unit];
+  const count = formatNumber(Math.round(quantity * 100) / 100);
+  return key ? t(key, { count }) : `${count} ${unit}`;
 }
 
 export function RequestDetail({
@@ -395,9 +439,20 @@ export function RequestDetail({
               this component backs both the user Requests drawer and the admin
               log viewer, and both must honor the mode. */}
           {localOnly ? null : <DetailRow label={t('tables.cost')}>{formatUSD(event.cost_nanousd)}</DetailRow>}
+          {!localOnly && event.estimated_cost_nanousd !== undefined && event.estimated_cost_nanousd !== null ? (
+            <DetailRow label="Janus price">
+              <JanusEstimate quoted={event.cost_nanousd} estimate={event.estimated_cost_nanousd} />
+            </DetailRow>
+          ) : null}
           <DetailRow label={t('requests.countingMethod')}>
-            <AccountingBadge method={event.token_accounting_method} />
+            <AccountingBadge method={event.token_accounting_method} quotedBy={event.cost_quoted_by} />
           </DetailRow>
+          {event.billed_unit ? (
+            <DetailRow label={t('requests.billedUsage')}>
+              {billedUsageText(event.billed_unit, event.billed_quantity ?? 0)}
+              {event.billed_line ? <span className="muted"> · {t('requests.billedBy', { rule: event.billed_line })}</span> : null}
+            </DetailRow>
+          ) : null}
           {event.throughput_source ? (
             <DetailRow label={t('requests.throughput')}>
               <span className="row wrap" style={{ gap: 'var(--janus-space-2)' }}>
@@ -464,5 +519,25 @@ export function RequestDetail({
       </section>
       {extra}
     </>
+  );
+}
+
+/**
+ * Janus's own price for a call whose cost the provider quoted, beside the
+ * quote: what the model's prices would have charged, in plain words.
+ */
+function JanusEstimate({ quoted, estimate }: { quoted: number; estimate: number }): ReactNode {
+  if (estimate === 0 && quoted > 0) return <span className="muted">No Janus price for this call</span>;
+  const diff = estimate - quoted;
+  let note = 'the same as the provider charged';
+  if (diff !== 0) {
+    const pct = quoted > 0 ? Math.abs((diff * 100) / quoted) : null;
+    const pctText = pct === null ? '' : ` (${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%)`;
+    note = `${formatUSDPrecise(Math.abs(diff))}${pctText} ${diff > 0 ? 'more' : 'less'} than the provider charged`;
+  }
+  return (
+    <span>
+      {formatUSDPrecise(estimate)} <span className="muted">· {note}</span>
+    </span>
   );
 }

@@ -96,7 +96,10 @@ it('allows a removed binding to switch to a current team and surfaces save error
 it('does not offer team changes for revoked keys and cancellation does not mutate', async () => {
   const token = { id: 'key', description: 'Existing key', prefix: 'j_key', team_id: '', created_at: '', revoked_at: '' };
   vi.mocked(api.get).mockResolvedValue({
-    tokens: [token, { ...token, id: 'revoked', description: 'Revoked key', revoked_at: '2026-01-01T00:00:00Z' }],
+    tokens: [
+      token,
+      { ...token, id: 'revoked', description: 'Revoked key', revoked_at: new Date(Date.now() - 86_400_000).toISOString() },
+    ],
   });
   const put = vi.spyOn(api, 'put');
   mount();

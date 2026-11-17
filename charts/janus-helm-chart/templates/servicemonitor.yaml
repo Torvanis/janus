@@ -13,7 +13,7 @@ spec:
     matchLabels:
       {{- include "janus.selector" . | nindent 6 }}
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
 {{- end }}

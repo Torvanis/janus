@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,17 +11,22 @@ import (
 	"time"
 )
 
-const modelColumns = `m.id, m.upstream_id, m.name, m.display_name, m.status, m.modalities, m.rate_in_nanousd, m.rate_out_nanousd, m.rate_cached_nanousd, m.rate_cache_write_5m_nanousd, m.rate_cache_write_1h_nanousd, m.context_window, m.rate_effective_from, m.discovered_at, m.classifier_role, m.metadata_json`
+const modelColumns = `m.id, m.upstream_id, m.name, m.display_name, m.status, m.modalities, m.rate_in_nanousd, m.rate_out_nanousd, m.rate_cached_nanousd, m.rate_cache_write_5m_nanousd, m.rate_cache_write_1h_nanousd, m.context_window, m.rate_effective_from, m.discovered_at, m.classifier_role, m.metadata_json, m.capabilities_json`
 
 func scanModel(scan func(...any) error) (*Model, error) {
 	var m Model
-	var modalities, effective, discovered, metadata string
-	if err := scan(&m.ID, &m.UpstreamID, &m.Name, &m.DisplayName, &m.Status, &modalities, &m.RateInNano, &m.RateOutNano, &m.RateCachedNano, &m.RateCacheWrite5mNano, &m.RateCacheWrite1hNano, &m.ContextWindow, &effective, &discovered, &m.ClassifierRole, &metadata, &m.UpstreamName, &m.AdapterType); err != nil {
+	var modalities, effective, discovered, metadata, capabilities string
+	var upstreamEnabled int
+	if err := scan(&m.ID, &m.UpstreamID, &m.Name, &m.DisplayName, &m.Status, &modalities, &m.RateInNano, &m.RateOutNano, &m.RateCachedNano, &m.RateCacheWrite5mNano, &m.RateCacheWrite1hNano, &m.ContextWindow, &effective, &discovered, &m.ClassifierRole, &metadata, &capabilities, &m.UpstreamName, &m.AdapterType, &upstreamEnabled); err != nil {
 		return nil, err
 	}
 	if err := m.readMetadata(metadata); err != nil {
 		return nil, err
 	}
+	if err := m.readCapabilities(capabilities); err != nil {
+		return nil, err
+	}
+	m.UpstreamEnabled = upstreamEnabled != 0
 	m.Modalities = splitCSV(modalities)
 	m.RateEffectiveFrom = ParseTime(effective)
 	m.DiscoveredAt = ParseTime(discovered)
@@ -38,7 +44,7 @@ func splitCSV(v string) []string {
 }
 
 const modelJoin = ` FROM model m JOIN upstream u ON u.id = m.upstream_id `
-const modelSelect = `SELECT ` + modelColumns + `, u.name, u.adapter_type` + modelJoin
+const modelSelect = `SELECT ` + modelColumns + `, u.name, u.adapter_type, u.enabled` + modelJoin
 
 // ModelFilter narrows an admin model listing.
 type ModelFilter struct {
@@ -54,6 +60,10 @@ type ModelFilter struct {
 	// ClassifierOnly lists only guard classifiers (the admin "which models
 	// can back a check" picker).
 	ClassifierOnly bool
+	// Live keeps only models on an enabled upstream (see Model.Live). User
+	// facing lists set it; admin listings leave it false so a model on a
+	// disabled upstream stays visible with its status.
+	Live bool
 }
 
 // ListModels returns curated models across upstreams.
@@ -73,6 +83,9 @@ func (s *Store) ListModels(ctx context.Context, f ModelFilter) ([]*Model, error)
 	}
 	if f.ClassifierOnly {
 		where = append(where, "m.classifier_role <> ''")
+	}
+	if f.Live {
+		where = append(where, "u.enabled = 1")
 	}
 	if f.Search != "" {
 		where = append(where, "(LOWER(m.name) LIKE ? OR LOWER(m.display_name) LIKE ?)")
@@ -104,12 +117,38 @@ func (s *Store) ListModels(ctx context.Context, f ModelFilter) ([]*Model, error)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	// One grouped count for the whole list, not one query per model: the
+	// user catalog and /v1/models read this on every call.
+	counts, err := s.modelGrantCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, m := range out {
-		if err := s.queryRow(ctx, `SELECT COUNT(*) FROM model_grant WHERE model_id = ?`, m.ID).Scan(&m.GrantCount); err != nil {
-			return nil, fmt.Errorf("count grants: %w", err)
-		}
+		m.GrantCount = counts[m.ID]
 	}
 	return out, nil
+}
+
+// modelGrantCounts returns the number of grants per model id.
+func (s *Store) modelGrantCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.query(ctx, `SELECT model_id, COUNT(*) FROM model_grant GROUP BY model_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count grants: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan grant count: %w", err)
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 // ModelByID loads one model with its upstream context.
@@ -377,6 +416,17 @@ func (s *Store) ModelsByName(ctx context.Context, name string) ([]*Model, error)
 	return matchModelName(models, name)
 }
 
+// ModelsNamedAnyStatus is ModelsByName over every model of a live upstream
+// whatever its status (disabled and pending ones too), for settings that
+// name a model and must reach it even while it is turned off.
+func (s *Store) ModelsNamedAnyStatus(ctx context.Context, name string) ([]*Model, error) {
+	models, err := s.ListModels(ctx, ModelFilter{Servable: true})
+	if err != nil {
+		return nil, err
+	}
+	return matchModelName(models, name)
+}
+
 // matchModelName applies the caller-name tiers to a candidate list.
 func matchModelName(models []*Model, name string) ([]*Model, error) {
 	tiers := []func(m *Model) bool{
@@ -594,6 +644,33 @@ func (s *Store) SetModelRates(ctx context.Context, id string, rc RateCard) error
 	}})
 }
 
+// RateCardHistory lists the model's saved prices, newest first, at most
+// limit of them: one per change, each with the lines in force with it.
+func (s *Store) RateCardHistory(ctx context.Context, modelID string, limit int) ([]RateCard, error) {
+	rows, err := s.query(ctx, `SELECT rate_in_nanousd, rate_out_nanousd, rate_cached_nanousd, rate_cache_write_5m_nanousd, rate_cache_write_1h_nanousd, lines_json, effective_from FROM rate_card_version
+		 WHERE model_id = ? ORDER BY effective_from DESC, created_at DESC LIMIT ?`, modelID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list rate card history: %w", err)
+	}
+	defer rows.Close()
+	out := []RateCard{}
+	for rows.Next() {
+		var rc RateCard
+		var lines, effective string
+		if err := rows.Scan(&rc.RateInNano, &rc.RateOutNano, &rc.RateCachedNano, &rc.RateCacheWrite5mNano, &rc.RateCacheWrite1hNano, &lines, &effective); err != nil {
+			return nil, fmt.Errorf("read rate card history: %w", err)
+		}
+		if lines != "" && lines != "{}" {
+			if err := json.Unmarshal([]byte(lines), &rc.Lines); err != nil {
+				return nil, fmt.Errorf("read rate card lines: %w", err)
+			}
+		}
+		rc.EffectiveFrom = ParseTime(effective)
+		out = append(out, rc)
+	}
+	return out, rows.Err()
+}
+
 // RateCardAt resolves the full rate card in force at a given instant, falling
 // back to the model's current rates when no historical version covers the
 // timestamp. Versions written before migration 0011 read their cache-write
@@ -602,10 +679,11 @@ func (s *Store) RateCardAt(ctx context.Context, modelID string, at time.Time) (*
 	var rc RateCard
 	var effective string
 	row := s.queryRow(ctx,
-		`SELECT rate_in_nanousd, rate_out_nanousd, rate_cached_nanousd, rate_cache_write_5m_nanousd, rate_cache_write_1h_nanousd, effective_from FROM rate_card_version
+		`SELECT rate_in_nanousd, rate_out_nanousd, rate_cached_nanousd, rate_cache_write_5m_nanousd, rate_cache_write_1h_nanousd, lines_json, effective_from FROM rate_card_version
 		 WHERE model_id = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1`,
 		modelID, FormatTime(at))
-	err := row.Scan(&rc.RateInNano, &rc.RateOutNano, &rc.RateCachedNano, &rc.RateCacheWrite5mNano, &rc.RateCacheWrite1hNano, &effective)
+	var lines string
+	err := row.Scan(&rc.RateInNano, &rc.RateOutNano, &rc.RateCachedNano, &rc.RateCacheWrite5mNano, &rc.RateCacheWrite1hNano, &lines, &effective)
 	if errors.Is(err, sql.ErrNoRows) {
 		m, mErr := s.ModelByID(ctx, modelID)
 		if mErr != nil {
@@ -618,10 +696,16 @@ func (s *Store) RateCardAt(ctx context.Context, modelID string, at time.Time) (*
 			RateCachedNano:       m.RateCachedNano,
 			RateCacheWrite5mNano: m.RateCacheWrite5mNano,
 			RateCacheWrite1hNano: m.RateCacheWrite1hNano,
+			Lines:                m.PriceLines(),
 		}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load rate card: %w", err)
+	}
+	if lines != "" && lines != "{}" {
+		if err := json.Unmarshal([]byte(lines), &rc.Lines); err != nil {
+			return nil, fmt.Errorf("read rate card lines: %w", err)
+		}
 	}
 	rc.EffectiveFrom = ParseTime(effective)
 	return &rc, nil

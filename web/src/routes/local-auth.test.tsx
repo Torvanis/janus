@@ -11,7 +11,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError, api } from '../lib/api';
 import { ToastProvider } from '../components/ui';
-import { FirstRunSetup, LocalSignIn } from './LocalSignIn';
+import { FirstRunSetup, LocalSignIn, qualifiedName, windowsDomainFor } from './LocalSignIn';
 import { SecurityCard } from './SecurityCard';
 
 vi.mock('../lib/api', async (importOriginal) => {
@@ -105,6 +105,88 @@ describe('LocalSignIn', () => {
   });
 });
 
+describe('LocalSignIn with a directory', () => {
+  it('accepts a short name, says which domain it uses, and sends it as typed', async () => {
+    mocked.post.mockResolvedValue({ signed_in: true, redirect_to: '/dashboard' });
+    wrap(<LocalSignIn redirectTo="/dashboard" directory defaultDomain="corp.example.com" />);
+    const user = userEvent.setup();
+    const name = screen.getByLabelText('Email or user name', { selector: 'input' }) as HTMLInputElement;
+    // A user name must pass the browser's own validation (type=email refuses it).
+    expect(name.type).toBe('text');
+    expect(screen.getByText('Use jdoe, jdoe@corp.example.com or CORP\\jdoe.')).toBeTruthy();
+    await user.type(name, 'jdoe');
+    expect(name.checkValidity()).toBe(true);
+    expect(screen.getByText('Signs in as jdoe@corp.example.com')).toBeTruthy();
+    expect(name.getAttribute('aria-describedby')).toBe('signin-name-hint');
+    await user.type(screen.getByLabelText('Password', { selector: 'input', exact: true }), 'pw');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    // The server applies the domain; the form sends what was typed.
+    await waitFor(() =>
+      expect(mocked.post).toHaveBeenCalledWith('/auth/local/login', { email: 'jdoe', password: 'pw', redirect_to: '/dashboard' }),
+    );
+  });
+
+  it('leaves a name that already has a domain alone', async () => {
+    wrap(<LocalSignIn redirectTo="/dashboard" directory defaultDomain="corp.example.com" />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Email or user name', { selector: 'input' }), 'jdoe@other.example.org');
+    expect(screen.queryByText(/Signs in as/)).toBeNull();
+    expect(screen.getByText('Use jdoe, jdoe@corp.example.com or CORP\\jdoe.')).toBeTruthy();
+  });
+
+  it('takes user names without a hint when no default domain is set', () => {
+    wrap(<LocalSignIn redirectTo="/dashboard" directory />);
+    const name = screen.getByLabelText('Email or user name', { selector: 'input' }) as HTMLInputElement;
+    expect(name.type).toBe('text');
+    expect(screen.queryByText(/^Use jdoe/)).toBeNull();
+  });
+
+  it('keeps the email field when no directory is on', () => {
+    wrap(<LocalSignIn redirectTo="/dashboard" defaultDomain="corp.example.com" />);
+    const name = screen.getByLabelText('Work email', { selector: 'input' }) as HTMLInputElement;
+    expect(name.type).toBe('email');
+    expect(screen.queryByText(/^Use jdoe/)).toBeNull();
+  });
+
+  it('qualifies the three name forms like the server', () => {
+    expect(qualifiedName('ada', 'corp.example.com')).toBe('ada@corp.example.com');
+    expect(qualifiedName(' ada ', '@corp.example.com')).toBe('ada@corp.example.com');
+    expect(qualifiedName('ada@x.org', 'corp.example.com')).toBeNull();
+    // DOMAIN\\name: derived (CORP) or set, any case.
+    expect(qualifiedName('CORP\\ada', 'corp.example.com')).toBe('ada@corp.example.com');
+    expect(qualifiedName('corp\\ada', 'Corp.Example.com')).toBe('ada@corp.example.com');
+    expect(qualifiedName('acme\\ada', 'corp.example.com', 'ACME')).toBe('ada@corp.example.com');
+    expect(qualifiedName('CORP\\ada', 'corp.example.com', 'ACME')).toBeNull();
+    expect(qualifiedName('OTHER\\ada', 'corp.example.com')).toBeNull();
+    expect(qualifiedName('CORP\\', 'corp.example.com')).toBeNull();
+    expect(qualifiedName('CORP\\ada@x.org', 'corp.example.com')).toBeNull();
+    expect(qualifiedName('CORP\\ada', '')).toBeNull();
+    expect(qualifiedName('ada', '')).toBeNull();
+    expect(qualifiedName('', 'corp.example.com')).toBeNull();
+  });
+
+  it('derives the Windows domain like the server', () => {
+    expect(windowsDomainFor('corp.example.com')).toBe('CORP');
+    expect(windowsDomainFor('averyveryverylongname.example.com')).toBe('AVERYVERYVERYLO');
+    expect(windowsDomainFor('corp.example.com', 'acme')).toBe('ACME');
+    expect(windowsDomainFor('')).toBe('');
+  });
+
+  it('shows the full name a Windows-style name signs in as', async () => {
+    wrap(<LocalSignIn redirectTo="/dashboard" directory defaultDomain="corp.example.com" windowsDomain="ACME" />);
+    const user = userEvent.setup();
+    expect(screen.getByText('Use jdoe, jdoe@corp.example.com or ACME\\jdoe.')).toBeTruthy();
+    const name = screen.getByLabelText('Email or user name', { selector: 'input' });
+    await user.type(name, 'acme\\jdoe');
+    expect(screen.getByText('Signs in as jdoe@corp.example.com')).toBeTruthy();
+    // Another domain: no promise, just the accepted forms again.
+    await user.clear(name);
+    await user.type(name, 'OTHER\\jdoe');
+    expect(screen.queryByText(/Signs in as/)).toBeNull();
+    expect(screen.getByText('Use jdoe, jdoe@corp.example.com or ACME\\jdoe.')).toBeTruthy();
+  });
+});
+
 describe('FirstRunSetup', () => {
   it('requires a 12+ char password that matches, then creates the admin', async () => {
     mocked.post.mockResolvedValue({ signed_in: true, redirect_to: '/dashboard' });
@@ -133,12 +215,12 @@ describe('FirstRunSetup', () => {
 });
 
 describe('SecurityCard', () => {
-  it('offers to add a password (break-glass) for an SSO user without one', async () => {
+  it('sends an SSO user without a password to an administrator instead of offering to set one', async () => {
     mocked.get.mockResolvedValue({ has_password: false, totp_enabled: false, must_change: false, recovery_codes_left: 0 });
     wrap(<SecurityCard />);
     await screen.findByText('No password');
-    expect(screen.getByRole('button', { name: 'Set a password' })).toBeTruthy();
-    expect(screen.getByText(/identity provider is unavailable/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /password/i })).toBeNull();
+    expect(screen.getByText(/An administrator can add a password from People/)).toBeTruthy();
     expect(screen.queryByText('Two-factor authentication')).toBeNull();
   });
 

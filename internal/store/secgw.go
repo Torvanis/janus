@@ -581,6 +581,10 @@ func (s *Store) ListSecgwViolations(ctx context.Context, f SecgwViolationFilter)
 		where = append(where, "policy_id = ?")
 		args = append(args, f.PolicyID)
 	}
+	if f.MatchHash != "" {
+		where = append(where, "match_hash = ?")
+		args = append(args, f.MatchHash)
+	}
 	if f.ModelName != "" {
 		where = append(where, "model_name = ?")
 		args = append(args, f.ModelName)

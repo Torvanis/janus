@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -106,6 +107,53 @@ type KeyAuth interface {
 // accounts to different hosts).
 type ConnectionRouter interface {
 	ConnectionBaseURL(meta map[string]string) string
+}
+
+// EndpointOwner is implemented by providers to say which URLs are their own:
+// the sign-in, account and inference endpoints Janus calls for them. The
+// provider's header policy goes out on Janus's own requests to those URLs
+// and to no other (a redirect elsewhere never carries it).
+type EndpointOwner interface {
+	OwnsURL(u *url.URL) bool
+}
+
+// OwnsURL reports whether u is one of p's own endpoints. A provider that
+// does not say owns only the origin of its inference base URL.
+func OwnsURL(p Provider, u *url.URL) bool {
+	if p == nil || u == nil {
+		return false
+	}
+	if o, ok := p.(EndpointOwner); ok {
+		return o.OwnsURL(u)
+	}
+	return sameOrigin(u, p.InferenceBaseURL())
+}
+
+// sameOrigin reports whether u is on the scheme, host and port of any of bases.
+func sameOrigin(u *url.URL, bases ...string) bool {
+	for _, base := range bases {
+		b, err := url.Parse(base)
+		if err != nil || b.Host == "" {
+			continue
+		}
+		if strings.EqualFold(u.Scheme, b.Scheme) && strings.EqualFold(originHost(u), originHost(b)) {
+			return true
+		}
+	}
+	return false
+}
+
+func originHost(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		switch strings.ToLower(u.Scheme) {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+	return u.Hostname() + ":" + port
 }
 
 // ErrNotSupported is returned by device methods of key-based providers.

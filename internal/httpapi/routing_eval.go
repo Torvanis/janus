@@ -317,7 +317,7 @@ func (s *Server) evalDefaultBody(ctx context.Context, j *evalJob, def store.Reso
 		adapterType = up.AdapterType
 	}
 	effort := j.defaultThinking
-	if facts := s.routedReasoning(def.Model.ID); facts != nil && effort != "none" {
+	if facts := s.modelReasoning(def.Model); facts != nil && effort != "none" {
 		if fitted, changed := facts.Fit(effort); changed && fitted != "" {
 			effort = fitted
 		}
@@ -557,8 +557,11 @@ func (s *Server) internalChatTo(ctx context.Context, resolved store.ResolvedMode
 	if rewritten, ok := rewriteJSONModelField(ensureModelField(body), model.Name); ok {
 		body = rewritten
 	}
+	// Fit the request to what is known about the model, as the proxy does
+	// (the Responses route for tools is not taken here: these calls carry none).
+	body, _, _ = s.fitCatalogBody(model, body, catalogFit{})
 	req := &adapter.Request{Method: http.MethodPost, Path: "/v1/chat/completions", Header: http.Header{"Content-Type": {"application/json"}},
-		Body: body, Model: model.Name, Context: ctx, Client: s.upstreamHTTPClient(ctx)}
+		Body: body, Model: model.Name, Context: ctx, Client: s.ownUpstreamClient(ctx, upstream.ID, upstream.BaseURL)}
 	prepared, err := provider.Prepare(adapter.Upstream{ID: upstream.ID, Name: upstream.Name, BaseURL: upstream.BaseURL, APIKey: apiKey, AdapterType: upstream.AdapterType}, req)
 	if err != nil {
 		return "", 0, err
@@ -569,7 +572,7 @@ func (s *Server) internalChatTo(ctx context.Context, resolved store.ResolvedMode
 			return nil, err
 		}
 		hreq.Header = p.Header
-		return s.upstreamHTTPClient(ctx).Do(hreq)
+		return s.ownUpstreamClient(ctx, upstream.ID, upstream.BaseURL).Do(hreq)
 	}
 	started := time.Now()
 	resp, err := send(prepared)

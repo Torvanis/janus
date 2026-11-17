@@ -3,6 +3,7 @@ import { RetainedPanel, RouteTopNav } from '../../components/RouteTopNav';
 import { SystemPage } from './System';
 import { ProvisioningPage } from './Provisioning';
 import { LicenseCard } from './LicenseCard';
+import { PriceCatalogCard } from './PriceCatalogCard';
 import { CertificatesCard } from './CertificatesCard';
 import { ListenerTLSCard } from './ListenerTLSCard';
 import { SecuritySettingsPage } from './SecuritySettings';
@@ -60,8 +61,9 @@ export function AdminSettingsPage() {
         </div>
       </RetainedPanel>
       <RetainedPanel active={tab === 'license'}>
-        <div id="license">
+        <div id="license" className="stack">
           <LicenseCard />
+          <PriceCatalogCard />
         </div>
       </RetainedPanel>
     </div>

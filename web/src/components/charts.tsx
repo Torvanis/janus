@@ -485,8 +485,7 @@ export function LineChart({
   return (
     <figure style={{ margin: 0 }}>
       <figcaption className="sr-only">
-        {label}:{' '}
-        {series.map((line) => `${line.label}${line.summary ? ` ${line.summary}` : ''}`).join('; ')}.
+        {label}: {series.map((line) => `${line.label}${line.summary ? ` ${line.summary}` : ''}`).join('; ')}.
       </figcaption>
       <ChartScale max={max} metric="requests" height={height} format={format}>
         <svg
@@ -551,6 +550,60 @@ export function LineChart({
         ))}
       </ul>
     </figure>
+  );
+}
+
+/**
+ * A word-sized trend line with no axis, for a figure shown beside its value
+ * (the model pop-up). Null points are gaps; a point between two gaps is a
+ * dot; fewer than two measured points draw nothing. Decorative:
+ * the value next to it carries the meaning, so it is hidden from screen
+ * readers unless a label is given.
+ */
+export function Sparkline({
+  values,
+  width = 72,
+  height = 18,
+  label,
+}: {
+  values: (number | null)[];
+  width?: number;
+  height?: number;
+  label?: string;
+}): ReactNode {
+  const measured = values.filter((v): v is number => v !== null);
+  // One measured point is not a trend; the value beside it says it all.
+  if (measured.length < 2) return null;
+  const peak = Math.max(...measured);
+  const low = Math.min(0, ...measured);
+  const span = peak - low || 1;
+  const x = (i: number): number => (values.length === 1 ? width / 2 : (i / (values.length - 1)) * (width - 4) + 2);
+  const y = (v: number): number => height - 2 - ((v - low) / span) * (height - 4);
+  let d = '';
+  const dots: Array<[number, number]> = [];
+  values.forEach((v, i) => {
+    if (v === null) return;
+    const prevNull = i === 0 || values[i - 1] === null;
+    const nextNull = i === values.length - 1 || values[i + 1] === null;
+    if (prevNull && nextNull) dots.push([x(i), y(v)]);
+    d += `${prevNull ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)} `;
+  });
+  return (
+    <svg
+      className="sparkline"
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      data-points={measured.length}
+    >
+      <path d={d.trim()} fill="none" stroke={seriesColor(0)} strokeWidth="1.5" strokeLinejoin="round" />
+      {dots.map(([cx, cy], i) => (
+        <circle key={i} cx={cx} cy={cy} r="2.2" fill={seriesColor(0)} />
+      ))}
+    </svg>
   );
 }
 

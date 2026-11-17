@@ -340,6 +340,39 @@ describe('SubscriptionsPage tabs', () => {
     expect(screen.getByTestId('where').textContent).toBe('/subscriptions/xai');
   });
 
+  it('opens Capabilities with Set and Measure from the Models page link', async () => {
+    const list = { available: true, model_prefix: 'my/', providers: [provider('openai', 'OpenAI', ['m-a', 'm-b'])] };
+    mocked.get.mockImplementation(async (path: string) =>
+      path === '/api/v1/me/subscriptions/conn-openai/capabilities'
+        ? {
+            subscription_id: 'conn-openai',
+            provider: 'openai',
+            provider_name: 'OpenAI',
+            keys: [],
+            max_requests: 30,
+            measure_every_seconds: 600,
+            models: [
+              {
+                model: 'm-b',
+                name: 'my/openai/m-b',
+                selected: true,
+                resolved: {},
+                defaults: {},
+                reported: {},
+                measured: {},
+                set: {},
+              },
+            ],
+          }
+        : list,
+    );
+    wrapPage('/subscriptions/openai?capabilities=m-b');
+    const drawer = await screen.findByRole('dialog', { name: 'my/openai/m-b' });
+    expect(await within(drawer).findByRole('button', { name: 'Measure' })).toBeTruthy();
+    expect(within(drawer).getByRole('group', { name: 'Set Images' })).toBeTruthy();
+    expect(within(drawer).queryByRole('link', { name: 'Change on Subscriptions' })).toBeNull();
+  });
+
   it('shows a Connect panel with no dot for a provider that is not connected', async () => {
     mocked.get.mockResolvedValue({
       available: true,

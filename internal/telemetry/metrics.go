@@ -111,7 +111,7 @@ func New(version, sha string) *Metrics {
 	m.GatewayLatency = histogram("janus_gateway_latency_seconds", "End-to-end gateway latency.", latencyBuckets, "endpoint", "modality")
 	m.TTFB = histogram("janus_ttfb_seconds", "Time to first byte from the upstream.", latencyBuckets, "upstream")
 	m.UpstreamLatency = histogram("janus_upstream_latency_seconds", "Upstream call latency.", latencyBuckets, "upstream")
-	m.TokensIn = counter("janus_tokens_in_total", "Input tokens consumed.", "model", "modality", "upstream")
+	m.TokensIn = counter("janus_tokens_in_total", "Input tokens consumed: the whole prompt, cached tokens and cache writes included, as providers bill them.", "model", "modality", "upstream")
 	m.TokensOut = counter("janus_tokens_out_total", "Output tokens generated.", "model", "modality", "upstream")
 	m.TokensCached = counter("janus_tokens_cached_total", "Cached input tokens served by the upstream.", "model", "modality", "upstream")
 	m.TokensCacheWrite5m = counter("janus_tokens_cache_write_5m_total", "Prompt-cache write tokens billed at the 5-minute TTL rate.", "model", "modality", "upstream")

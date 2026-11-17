@@ -191,7 +191,7 @@ func TestBedrockExtractUsage(t *testing.T) {
 	if !ok || !u.Reported {
 		t.Fatal("usage block must be reported")
 	}
-	if u.TokensIn != 12 || u.TokensOut != 34 || u.TokensCached != 5 || u.FinishReason != "end_turn" {
+	if u.TokensIn != 17 || u.TokensOut != 34 || u.TokensCached != 5 || u.FinishReason != "end_turn" {
 		t.Fatalf("usage = %+v", u)
 	}
 

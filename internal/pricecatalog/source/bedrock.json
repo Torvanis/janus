@@ -1,0 +1,317 @@
+{
+  "provider": "bedrock",
+  "entries": [
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "au.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 1100000000,
+        "rate_out_nanousd": 5500000000,
+        "rate_cached_nanousd": 110000000,
+        "rate_cache_write_5m_nanousd": 1375000000,
+        "rate_cache_write_1h_nanousd": 2200000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-opus-4-1-20250805-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-opus-4-1-20250805-v1:0",
+        "au.anthropic.claude-opus-4-1-20250805-v1:0",
+        "eu.anthropic.claude-opus-4-1-20250805-v1:0",
+        "jp.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 15000000000,
+        "rate_out_nanousd": 75000000000,
+        "rate_cached_nanousd": 1500000000,
+        "rate_cache_write_5m_nanousd": 18750000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-opus-4-20250514-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-opus-4-20250514-v1:0",
+        "au.anthropic.claude-opus-4-20250514-v1:0",
+        "eu.anthropic.claude-opus-4-20250514-v1:0",
+        "jp.anthropic.claude-opus-4-20250514-v1:0",
+        "us.anthropic.claude-opus-4-20250514-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 15000000000,
+        "rate_out_nanousd": 75000000000,
+        "rate_cached_nanousd": 1500000000,
+        "rate_cache_write_5m_nanousd": 18750000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-opus-4-5-20251101-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-opus-4-5-20251101-v1:0",
+        "au.anthropic.claude-opus-4-5-20251101-v1:0",
+        "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+        "jp.anthropic.claude-opus-4-5-20251101-v1:0",
+        "us.anthropic.claude-opus-4-5-20251101-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5500000000,
+        "rate_out_nanousd": 27500000000,
+        "rate_cached_nanousd": 550000000,
+        "rate_cache_write_5m_nanousd": 6875000000,
+        "rate_cache_write_1h_nanousd": 11000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-opus-5-5",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-opus-5-5",
+        "au.anthropic.claude-opus-5-5",
+        "eu.anthropic.claude-opus-5-5",
+        "jp.anthropic.claude-opus-5-5",
+        "us.anthropic.claude-opus-5-5"
+      ],
+      "lines": {
+        "rate_in_nanousd": 4400000000,
+        "rate_out_nanousd": 22000000000,
+        "rate_cached_nanousd": 220000000,
+        "rate_cache_write_5m_nanousd": 5500000000,
+        "rate_cache_write_1h_nanousd": 8800000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-4-20250514-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-sonnet-4-20250514-v1:0",
+        "au.anthropic.claude-sonnet-4-20250514-v1:0",
+        "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+        "jp.anthropic.claude-sonnet-4-20250514-v1:0",
+        "us.anthropic.claude-sonnet-4-20250514-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      ],
+      "lines": {
+        "rate_in_nanousd": 3300000000,
+        "rate_out_nanousd": 16500000000,
+        "rate_cached_nanousd": 330000000,
+        "rate_cache_write_5m_nanousd": 4125000000,
+        "rate_cache_write_1h_nanousd": 6600000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-5-5",
+      "type": "chat",
+      "aliases": [
+        "apac.anthropic.claude-sonnet-5-5",
+        "au.anthropic.claude-sonnet-5-5",
+        "eu.anthropic.claude-sonnet-5-5",
+        "jp.anthropic.claude-sonnet-5-5",
+        "us.anthropic.claude-sonnet-5-5"
+      ],
+      "lines": {
+        "rate_in_nanousd": 2200000000,
+        "rate_out_nanousd": 11000000000,
+        "rate_cached_nanousd": 110000000,
+        "rate_cache_write_5m_nanousd": 2750000000,
+        "rate_cache_write_1h_nanousd": 4400000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": " In-region and geographic (us./eu./apac.) profiles; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 5000000000,
+        "rate_cached_nanousd": 100000000,
+        "rate_cache_write_5m_nanousd": 1250000000,
+        "rate_cache_write_1h_nanousd": 2000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-haiku-5-5",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 500000000,
+        "rate_cached_nanousd": 10000000,
+        "rate_cache_write_5m_nanousd": 125000000,
+        "rate_cache_write_1h_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=100000": 500000000,
+        "rate_out_nanousd@prompt_over=100000": 2500000000,
+        "rate_cached_nanousd@prompt_over=100000": 50000000,
+        "rate_cache_write_5m_nanousd@prompt_over=100000": 625000000,
+        "rate_cache_write_1h_nanousd@prompt_over=100000": 1000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices. Prompts over 100,000 tokens bill at the higher prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-opus-4-5-20251101-v1:0",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-opus-5-5",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 4000000000,
+        "rate_out_nanousd": 20000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 5000000000,
+        "rate_cache_write_1h_nanousd": 8000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-sonnet-4-20250514-v1:0",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000,
+        "rate_cache_write_1h_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    },
+    {
+      "provider": "bedrock",
+      "model": "global.anthropic.claude-sonnet-5-5",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 100000000,
+        "rate_cache_write_5m_nanousd": 2500000000,
+        "rate_cache_write_1h_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrockFoundationModels/current/us-east-1/index.json",
+        "read_at": "2026-11-06"
+      },
+      "note": "Global cross-region profile; us-east-1 prices."
+    }
+  ]
+}

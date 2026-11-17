@@ -55,7 +55,7 @@ func TestReportingQueryHistoricalGroupsNoCap(t *testing.T) {
 	for i := 0; i < 65; i++ {
 		groups = append(groups, fmt.Sprintf("group-%02d", i))
 	}
-	reportSnapshot(t, s, UsageEvent{ID: NewID(), CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), UserID: "alice", TeamIDs: "old-team,other-team", ModelName: "deleted", HTTPStatus: 500, CostNano: 1500000001, TokensIn: 100, TokensCached: 25, TokensCacheWrite5m: 100, LatencyMs: 10}, groups, "priced")
+	reportSnapshot(t, s, UsageEvent{ID: NewID(), CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), UserID: "alice", TeamIDs: "old-team,other-team", ModelName: "deleted", HTTPStatus: 500, CostNano: 1500000001, TokensIn: 225, TokensCached: 25, TokensCacheWrite5m: 100, LatencyMs: 10}, groups, "priced")
 	d := reportDefinition()
 	d.Dimensions = []string{"group"}
 	d.Metrics = []string{"requests", "cost_usd", "errors", "cache_hit_rate"}
@@ -66,7 +66,7 @@ func TestReportingQueryHistoricalGroupsNoCap(t *testing.T) {
 	if len(r.Rows) != 65 || r.SourceRows != 1 || *r.Totals["requests"] != 1 {
 		t.Fatalf("overlap or truncation: rows=%d source=%d", len(r.Rows), r.SourceRows)
 	}
-	if *r.Totals["cost_usd"] != 1.500000001 || *r.Totals["cache_hit_rate"] != 0.125 || len(r.Warnings) == 0 {
+	if *r.Totals["cost_usd"] != 1.500000001 || *r.Totals["cache_hit_rate"] != 25.0/225 || len(r.Warnings) == 0 {
 		t.Fatalf("metrics %+v", r.Totals)
 	}
 	d.Filters = map[string][]string{"group": {"group-64"}}

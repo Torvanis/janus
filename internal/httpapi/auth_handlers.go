@@ -58,6 +58,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginError(w, r, "Sign-in could not be started. Try again.")
 		return
 	}
+	s.bindLoginToBrowser(w, target)
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -79,6 +80,11 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	if code == "" || state == "" {
 		s.renderLoginError(w, r, "The sign-in response was incomplete. Start again from the sign-in page.")
+		return
+	}
+	if !s.loginStartedHere(w, r, state) {
+		s.authAudit(r, "sign_in_failed", nil, "", store.AuditFailure, map[string]any{"reason": "not_started_in_this_browser", "method": "oidc"})
+		s.renderLoginError(w, r, loginNotStartedHere)
 		return
 	}
 	identity, redirectTo, err := s.OIDC.Exchange(r.Context(), code, state)
@@ -310,15 +316,15 @@ func (s *Server) handleAuthHealth(w http.ResponseWriter, r *http.Request) {
 	local := s.localAuthEnabled(r)
 	setup := s.needsSetup(r)
 	if s.Config.DevAuth() {
-		WriteJSON(w, http.StatusOK, map[string]any{
+		WriteJSON(w, http.StatusOK, s.signInNameHints(r, map[string]any{
 			"status": "ok", "provider": "Local evaluation sign-in", "dev_auth": true, "local_auth": local, "needs_setup": false,
-		})
+		}))
 		return
 	}
 	if s.OIDC == nil {
 		if local || setup {
 			// No IdP, but local accounts (or first-run setup) work: healthy.
-			WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "provider": "Janus accounts", "dev_auth": false, "local_auth": true, "needs_setup": setup})
+			WriteJSON(w, http.StatusOK, s.signInNameHints(r, map[string]any{"status": "ok", "provider": "Janus accounts", "dev_auth": false, "local_auth": true, "needs_setup": setup}))
 			return
 		}
 		WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -328,13 +334,13 @@ func (s *Server) handleAuthHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.OIDC.Healthy(r.Context()) {
-		WriteJSON(w, http.StatusServiceUnavailable, map[string]any{
+		WriteJSON(w, http.StatusServiceUnavailable, s.signInNameHints(r, map[string]any{
 			"status": "unavailable", "provider": s.providerLabel(),
 			"detail": "The identity provider is not responding.", "local_auth": local, "needs_setup": false,
-		})
+		}))
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "provider": s.providerLabel(), "dev_auth": false, "local_auth": local, "needs_setup": false})
+	WriteJSON(w, http.StatusOK, s.signInNameHints(r, map[string]any{"status": "ok", "provider": s.providerLabel(), "dev_auth": false, "local_auth": local, "needs_setup": false}))
 }
 
 // renderLoginError sends the browser back to the sign-in page carrying a
@@ -347,6 +353,17 @@ func (s *Server) renderLoginError(w http.ResponseWriter, r *http.Request, messag
 // cannot be used as an open redirect.
 func safeRedirect(target string) string {
 	if target == "" || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
+		return "/dashboard"
+	}
+	// Browsers read a backslash as a slash, so "/\\host" leaves the site
+	// like "//host" does; control characters are dropped by browsers and
+	// can hide either. A path on this site has neither.
+	for _, c := range target {
+		if c == '\\' || c < 0x20 || c == 0x7f {
+			return "/dashboard"
+		}
+	}
+	if u, err := url.Parse(target); err != nil || u.Host != "" || u.Scheme != "" {
 		return "/dashboard"
 	}
 	return target

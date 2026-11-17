@@ -190,6 +190,12 @@
     background-color var(--janus-duration-fast) var(--janus-ease-standard),
     color var(--janus-duration-fast) var(--janus-ease-standard);
 }
+/* Touch screens: a 40px tap area per menu entry (the tablet icon rail too). */
+@media (pointer: coarse) {
+  .nav-item {
+    min-height: 40px;
+  }
+}
 .nav-item:hover {
   background: var(--janus-state-hover);
   color: var(--janus-color-text-primary);
@@ -272,12 +278,16 @@
   flex-direction: column;
 }
 
+/* Top bar: one row from 768px up (breadcrumb, "Working under", controls).
+   Its height is a minimum, never a clip: nothing in it may wrap, so the
+   breadcrumb gives way first (see .breadcrumb) and the controls keep their
+   size. Phones get a deliberate second row for "Working under". */
 .topbar {
-  height: var(--janus-topbar-height);
+  min-height: var(--janus-topbar-height);
   display: flex;
   align-items: center;
   gap: var(--janus-space-2);
-  padding: 0 var(--janus-page-gutter);
+  padding: 6px var(--janus-page-gutter);
   border-bottom: 1px solid var(--janus-color-border-default);
   background: color-mix(in srgb, var(--janus-color-bg-canvas) 76%, transparent);
   backdrop-filter: blur(12px);
@@ -285,36 +295,134 @@
   top: 0;
   z-index: var(--janus-z-sticky);
 }
+.topbar > .row {
+  flex: none;
+}
 
 .active-team-context {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--janus-space-3);
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: 360px;
 }
-.active-team-context select {
+.active-team-field {
+  display: flex;
+  align-items: center;
+  gap: var(--janus-space-2);
   min-width: 0;
-  max-width: 240px;
+  white-space: nowrap;
+  font-size: var(--janus-text-sm);
+  color: var(--janus-color-text-secondary);
+}
+.active-team-label {
+  flex: none;
+}
+/* The shared .select, sized for a toolbar (it is a full-width form field). */
+.topbar .active-team-select {
+  width: auto;
+  min-width: 7.5rem;
+  max-width: 15rem;
+  min-height: 32px;
+  padding: 4px 8px 4px 10px;
+  text-overflow: ellipsis;
+}
+.active-team-tokens {
+  display: none;
+  flex: none;
+  white-space: nowrap;
+}
+@media (min-width: 1440px) {
+  .active-team-tokens {
+    display: inline;
+  }
+}
+.active-team-error {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  padding: 4px 8px;
+  border-radius: var(--janus-radius-md);
+  border: 1px solid var(--janus-color-danger-border);
+  background: var(--janus-color-bg-surface-overlay);
+  color: var(--janus-color-danger-fg);
+  font-size: var(--janus-text-xs);
+  white-space: nowrap;
 }
 @media (max-width: 767px) {
   .topbar {
     flex-wrap: wrap;
-    height: auto;
-    min-height: var(--janus-topbar-height);
-    padding-block: 8px;
+    row-gap: 6px;
+    padding-block: 6px 8px;
   }
+  /* Row 2: the full width for "Working under". */
   .active-team-context {
     order: 2;
     flex: 1 1 100%;
-    max-width: 100%;
   }
-  .active-team-context select {
+  .active-team-field {
     flex: 1;
-    max-width: 100%;
+  }
+  .topbar .active-team-select {
+    flex: 1;
+    max-width: none;
+  }
+}
+/* The page's name outranks the signed-in user's name (the avatar and its
+   menu still identify them) until the bar has room for both. */
+@media (max-width: 1279px) {
+  .topbar .avatar-menu .hide-sm {
+    display: none;
+  }
+}
+/* Below 380px the menu button, logo, theme, motion, notifications and avatar
+   only fit on row 1 with the logo's mark alone. */
+@media (max-width: 379px) {
+  .topbar .brand-word {
+    display: none;
   }
 }
 
+/* One line. Middle crumbs only get the room the page's own name leaves
+   (flex-basis 0 + grow, capped at their full text), so they give way first,
+   down to "…"; only then does the page's name ellipsize. Each name has a
+   title with the full text. */
 .breadcrumb {
+  display: flex;
+  align-items: baseline;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: var(--janus-text-sm);
-  text-transform: capitalize;
+  margin-right: var(--janus-space-2);
+}
+.breadcrumb-root {
+  flex: none;
+}
+.breadcrumb-crumb {
+  display: flex;
+  align-items: baseline;
+  flex: 1 1 0;
+  /* Room for the separator and "…" (the automatic minimum would be the
+     full name). */
+  min-width: 2.4em;
+  max-width: max-content;
+}
+.breadcrumb-last {
+  flex: 0 1 auto;
+  min-width: 4em;
+  max-width: none;
+}
+.breadcrumb-sep {
+  flex: none;
+  white-space: pre;
+}
+.breadcrumb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shell-content {

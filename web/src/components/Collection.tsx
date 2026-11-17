@@ -21,6 +21,7 @@ export function Collection<T>({
   children,
   resetKey,
   hideSearch = false,
+  compact = false,
 }: {
   rows: readonly T[];
   columns: CollectionColumn<T>[];
@@ -30,6 +31,11 @@ export function Collection<T>({
   children?: (rows: T[]) => ReactNode;
   resetKey?: string;
   hideSearch?: boolean;
+  /**
+   * Drop the search, page size and row count when every row fits on the
+   * smallest page (10), so a short list inside a dialog is just the list.
+   */
+  compact?: boolean;
 }): ReactNode {
   const [search] = useUrlState(`${name}.q`, '');
   const [sort] = useUrlState(`${name}.sort`, '');
@@ -38,7 +44,8 @@ export function Collection<T>({
   const batch = useUrlStateBatch();
   const limit = [10, 25, 50, 100].includes(Number(size)) ? Number(size) : 25;
   const update = (key: string, value: string) => batch({ [`${name}.${key}`]: value, [`${name}.page`]: null });
-  const term = hideSearch ? '' : search.trim().toLowerCase();
+  const quiet = compact && rows.length <= 10;
+  const term = hideSearch || quiet ? '' : search.trim().toLowerCase();
   const filtered = term
     ? rows.filter((row) =>
         columns.some((c) =>
@@ -60,38 +67,40 @@ export function Collection<T>({
   }, [page, offset, name, batch]);
   return (
     <section className="stack" aria-label={name} data-collection-mode={scope}>
-      <div className="row wrap">
-        {!hideSearch && (
-          <input
-            className="input"
-            type="search"
-            aria-label={`Search ${name}`}
-            placeholder={`Search ${name}`}
-            value={search}
-            onChange={(e) => update('q', e.target.value)}
-          />
-        )}
-        <label className="page-size">
-          Rows per page{' '}
-          <select className="select" value={limit} onChange={(e) => update('size', e.target.value)}>
-            {[10, 25, 50, 100].map((n) => (
-              <option key={n}>{n}</option>
-            ))}
-          </select>
-        </label>
-        <span className="small muted">
-          {filtered.length} of {rows.length} {scope === 'frozen-report' ? 'snapshot rows' : 'rows'}
-        </span>
-        {((!hideSearch && search) || (!children && sort)) && (
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => batch({ [`${name}.q`]: null, [`${name}.sort`]: null, [`${name}.page`]: null })}
-          >
-            Clear filters and sort
-          </button>
-        )}
-      </div>
+      {quiet ? null : (
+        <div className="row wrap">
+          {!hideSearch && (
+            <input
+              className="input"
+              type="search"
+              aria-label={`Search ${name}`}
+              placeholder={`Search ${name}`}
+              value={search}
+              onChange={(e) => update('q', e.target.value)}
+            />
+          )}
+          <label className="page-size">
+            Rows per page{' '}
+            <select className="select" value={limit} onChange={(e) => update('size', e.target.value)}>
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <span className="small muted">
+            {filtered.length} of {rows.length} {scope === 'frozen-report' ? 'snapshot rows' : 'rows'}
+          </span>
+          {((!hideSearch && search) || (!children && sort)) && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => batch({ [`${name}.q`]: null, [`${name}.sort`]: null, [`${name}.page`]: null })}
+            >
+              Clear filters and sort
+            </button>
+          )}
+        </div>
+      )}
       {children ? (
         <div className="table-wrap" role="region" aria-label={`${name} table`} tabIndex={0}>
           {children(ordered.slice(offset, offset + limit))}

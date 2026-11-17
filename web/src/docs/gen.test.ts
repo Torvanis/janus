@@ -62,10 +62,10 @@ describe('generated changelog (gen-docs.mjs)', () => {
   it('ends the public history with the initial public release and leads with the newest', () => {
     expect(CHANGELOG.length).toBeGreaterThanOrEqual(2);
     const latest = CHANGELOG[0];
-    expect(latest?.version).toBe('2026.11.1');
-    expect(latest?.date).toBe('2026-11-07');
-    expect(JSON.stringify(latest)).toContain('Janus FIPS edition');
-    expect(JSON.stringify(latest)).toContain('STIG profile');
+    expect(latest?.version).toBe('2026.11.2');
+    expect(latest?.date).toBe('2026-11-17');
+    expect(JSON.stringify(latest)).toContain('Janus Chat is generally available');
+    expect(JSON.stringify(latest)).toContain('Signed Janus price catalog');
     const release = CHANGELOG[CHANGELOG.length - 1];
     expect(release?.version).toBe('2026.9.1');
     expect(release?.date).toBe('2026-09-20');

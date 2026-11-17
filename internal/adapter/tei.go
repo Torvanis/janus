@@ -74,8 +74,10 @@ func (a *TEI) Discover(ctx context.Context, up Upstream, client *http.Client) ([
 		m.ClassifierRole = ClassifierRoleTextClassification
 	case info.ModelType.Reranker != nil:
 		m.Modalities = []string{ModalityEmbedding}
+		m.Capabilities = Capabilities{CapInText: true, CapOutRerank: true}
 	default:
 		m.Modalities = []string{ModalityEmbedding}
+		m.Capabilities = Capabilities{CapInText: true, CapOutEmbedding: true}
 	}
 	return []DiscoveredModel{m}, nil
 }

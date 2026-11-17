@@ -174,8 +174,9 @@ describe('AdminModelsPage drawer alias', () => {
     await user.click(await screen.findByRole('button', { name: `Edit ${renamedModel.name}` }));
     const input = screen.getByRole('textbox', { name: `Display name for ${renamedModel.name}` });
 
-    // The draft equals the stored alias, so Save is disabled.
-    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    // The draft equals the stored alias, so there is nothing to save: the
+    // save bar appears only once something changed.
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
 
     await user.type(input, '{Escape}');
     await waitFor(() => expect(screen.queryByRole('textbox', { name: `Display name for ${renamedModel.name}` })).toBeNull());

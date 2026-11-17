@@ -17,7 +17,6 @@ import (
 func chatHarness(t *testing.T) (*harness, *auth.Session) {
 	t.Helper()
 	h := newHarness(t)
-	h.server.Config.ChatPreview = true
 	return h, adminSession(t, h)
 }
 
@@ -270,15 +269,41 @@ func TestChatReaperInterruptsOrphanedRuns(t *testing.T) {
 	}
 }
 
-// TestChatNeedsSessionAndFlag: bearer tokens cannot drive chat, and the
-// whole surface 404s while the preview is off.
-func TestChatNeedsSessionAndFlag(t *testing.T) {
+// TestChatNeedsSessionAndAdminSwitch: Chat is on out of the box with no
+// startup flag, bearer tokens cannot drive it, and Administration → Chat's
+// switch alone turns the whole surface off (403 with the reason; /me says so).
+func TestChatNeedsSessionAndAdminSwitch(t *testing.T) {
+	t.Setenv("JANUS_CHAT_PREVIEW", "false") // removed: must change nothing
 	h, sess := chatHarness(t)
+	if rec := h.doAsSession(sess, http.MethodGet, "/api/v1/chat/conversations", nil); rec.Code != http.StatusOK {
+		t.Fatalf("default = %d %s", rec.Code, rec.Body.String())
+	}
+	var me map[string]any
+	decodeRec(t, h.doAsSession(sess, http.MethodGet, "/api/v1/me", nil), &me)
+	if me["chat_enabled"] != true || me["chat_available"] != true {
+		t.Fatalf("/me default = %v / %v", me["chat_enabled"], me["chat_available"])
+	}
+	if _, ok := me["chat_preview"]; ok {
+		t.Fatalf("/me still carries chat_preview: %v", me)
+	}
 	if rec := h.do(http.MethodGet, "/api/v1/chat/conversations", nil); rec.Code != http.StatusForbidden {
 		t.Errorf("bearer = %d", rec.Code)
 	}
-	h.server.Config.ChatPreview = false
-	if rec := h.doAsSession(sess, http.MethodGet, "/api/v1/chat/conversations", nil); rec.Code != http.StatusNotFound {
-		t.Errorf("flag off = %d", rec.Code)
+	var view map[string]any
+	decodeRec(t, h.doAsSession(sess, http.MethodGet, "/api/v1/admin/chat", nil), &view)
+	if _, ok := view["preview_on"]; ok {
+		t.Fatalf("admin view still carries preview_on")
+	}
+	if res := chatAdminPut(t, h, sess, func(m map[string]any) { m["enabled"] = false }); res.StatusCode != http.StatusOK {
+		t.Fatalf("turn off = %d", res.StatusCode)
+	}
+	rec := h.doAsSession(sess, http.MethodGet, "/api/v1/chat/conversations", nil)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "turned off") {
+		t.Fatalf("admin switch off = %d %s", rec.Code, rec.Body.String())
+	}
+	me = nil
+	decodeRec(t, h.doAsSession(sess, http.MethodGet, "/api/v1/me", nil), &me)
+	if me["chat_enabled"] != false || me["chat_available"] != false || me["chat_unavailable_reason"] == "" {
+		t.Fatalf("/me off = %v", me)
 	}
 }

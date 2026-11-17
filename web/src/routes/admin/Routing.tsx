@@ -14,6 +14,7 @@ import { api, ApiError } from '../../lib/api';
 import { formatDateTime, formatDuration, formatNumber, formatRelative, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast, type Tone } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { Truncate, UsedBy } from '../../components/TableText';
 import { RetainedPanel, RouteTopNav } from '../../components/RouteTopNav';
 import { seriesColor } from '../../components/charts';
 import { useLocalOnly } from '../../app/session';
@@ -487,18 +488,25 @@ function RoutersPanel(): ReactNode {
                     return (
                       <tr key={r.id} data-clickable="true" onClick={() => navigate(`/admin/routing/routers/${r.id}`)}>
                         <th scope="row">
-                          <div className="mono">{r.name}</div>
+                          <div className="mono nowrap">{r.name}</div>
                           {r.problems.length > 0 ? (
-                            <div className="small routing-cell-note" style={{ color: 'var(--janus-color-warning-fg)' }}>
-                              ⚠ {r.problems[0]}
-                            </div>
+                            <Truncate as="div" lines={2} className="small routing-cell-note" title={r.problems.join('\n')}>
+                              <span style={{ color: 'var(--janus-color-warning-fg)' }}>⚠ {r.problems[0]}</span>
+                            </Truncate>
                           ) : null}
-                          {r.description ? <div className="small muted routing-cell-note">{r.description}</div> : null}
+                          {r.description ? (
+                            <Truncate as="div" lines={2} className="small muted routing-cell-note">
+                              {r.description}
+                            </Truncate>
+                          ) : null}
                         </th>
                         <td>
                           <Badge tone={statusTone(r.status)}>{STATUS_LABEL[r.status]}</Badge>
                         </td>
-                        <td className="small">
+                        <td
+                          className="small routing-route-list"
+                          title={r.config.routes.map((x) => x.name || x.model_name).join('\n') || undefined}
+                        >
                           {r.config.routes.length === 0
                             ? 'none'
                             : r.config.routes
@@ -1825,9 +1833,9 @@ function CategoriesPanel(): ReactNode {
                   <tr key={c.id} data-clickable="true" onClick={() => open(c)}>
                     <th scope="row">
                       <div>{c.name}</div>
-                      <div className="small muted routing-cell-note">
+                      <Truncate as="div" lines={2} className="small muted routing-cell-note">
                         {c.linked_slug ? `Follows Usage insights: ${c.linked_name ?? c.linked_slug}` : c.includes}
-                      </div>
+                      </Truncate>
                     </th>
                     <td className="small">
                       {c.linked_slug ? (
@@ -1843,7 +1851,7 @@ function CategoriesPanel(): ReactNode {
                       {c.examples.length === 0 ? <span className="muted">0</span> : formatNumber(c.examples.length)}
                     </td>
                     <td className="small mono">
-                      {c.used_by.length === 0 ? <span className="muted">—</span> : c.used_by.join(', ')}
+                      {c.used_by.length === 0 ? <span className="muted">—</span> : <UsedBy names={c.used_by} />}
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <label className="switch">

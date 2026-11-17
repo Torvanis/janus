@@ -105,6 +105,77 @@ describe('DirectoryCard', () => {
     );
   });
 
+  it('saves a default domain and shows the full name a short test login searched for', async () => {
+    mocked.get.mockResolvedValue({ directory: dir, licensed: true });
+    mocked.post.mockResolvedValue({
+      ok: true,
+      login: 'ada@example.com',
+      user: { dn: 'cn=ada,dc=example,dc=com', email: 'ada@example.com', name: 'Ada', groups: [], would_be_admin: false },
+    });
+    mocked.put.mockResolvedValue({ ...dir, default_domain: 'example.com' });
+    wrap(<DirectoryCard />);
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('ldaps://ad.example.com:636');
+    const domain = screen.getByLabelText('Default domain', { selector: 'input' });
+    expect((domain as HTMLInputElement).value).toBe('');
+    await user.type(domain, ' example.com ');
+    await user.type(screen.getByLabelText('Login to resolve (optional)', { selector: 'input' }), 'ada');
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+    await screen.findByText('Searched for ada@example.com');
+    expect(mocked.post).toHaveBeenCalledWith(
+      '/api/v1/admin/directory/test',
+      expect.objectContaining({ login: 'ada', default_domain: 'example.com' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocked.put).toHaveBeenCalledWith(
+        '/api/v1/admin/directory',
+        expect.objectContaining({ default_domain: 'example.com' }),
+      ),
+    );
+  });
+
+  it('loads a saved default domain', async () => {
+    mocked.get.mockResolvedValue({ directory: { ...dir, default_domain: 'corp.example.com' }, licensed: true });
+    wrap(<DirectoryCard />);
+    await screen.findByDisplayValue('corp.example.com');
+  });
+
+  it('derives the Windows domain placeholder, saves a set one, and shows the name a DOMAIN\\name test searched for', async () => {
+    mocked.get.mockResolvedValue({ directory: { ...dir, default_domain: 'corp.example.com' }, licensed: true });
+    mocked.post.mockResolvedValue({
+      ok: true,
+      login: 'ada@lab.example.org',
+      user: { dn: 'cn=ada,dc=corp', email: 'ada@lab.example.org', name: 'Ada', groups: [], would_be_admin: false },
+    });
+    mocked.put.mockResolvedValue({ ...dir, default_domain: 'corp.example.com', windows_domain: 'ACME' });
+    wrap(<DirectoryCard />);
+    const user = userEvent.setup();
+    await screen.findByDisplayValue('corp.example.com');
+    const windows = screen.getByLabelText('Windows domain name', { selector: 'input' }) as HTMLInputElement;
+    expect(windows.value).toBe('');
+    expect(windows.placeholder).toBe('CORP');
+    expect(screen.getByText(/The short name people type before a backslash/)).toBeTruthy();
+    // The placeholder follows the default domain as it is edited.
+    const domain = screen.getByLabelText('Default domain', { selector: 'input' });
+    await user.clear(domain);
+    expect(windows.placeholder).toBe('CORP');
+    expect(screen.getByText('Set a default domain first.')).toBeTruthy();
+    await user.type(domain, 'lab.example.org');
+    expect(windows.placeholder).toBe('LAB');
+    await user.type(screen.getByLabelText('Login to resolve (optional)', { selector: 'input' }), 'LAB\\ada');
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+    await screen.findByText('Searched for ada@lab.example.org');
+    await user.type(windows, 'acme');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(mocked.put).toHaveBeenCalledWith(
+        '/api/v1/admin/directory',
+        expect.objectContaining({ default_domain: 'lab.example.org', windows_domain: 'acme' }),
+      ),
+    );
+  });
+
   it('disconnects after confirmation', async () => {
     mocked.get.mockResolvedValue({ directory: dir, licensed: true });
     mocked.del.mockResolvedValue(undefined);

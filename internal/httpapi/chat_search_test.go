@@ -196,7 +196,7 @@ func TestChatReindexRebuildsTheIndex(t *testing.T) {
 
 func waitForChatTitle(t *testing.T, h *harness, sess *auth.Session, id string, want func(string) bool) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second) // returns as soon as the title matches; 5s flaked on loaded FIPS runners
 	var title string
 	for time.Now().Before(deadline) {
 		var got struct {

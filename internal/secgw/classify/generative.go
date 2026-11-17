@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/torvanis/janus/internal/adapter"
 	dec "github.com/torvanis/janus/internal/classify"
 )
 
@@ -157,9 +158,9 @@ func (g *generativeGuard) Judge(ctx context.Context, turns []Turn) (Verdict, err
 			} `json:"message"`
 		} `json:"choices"`
 		Usage *struct {
-			PromptTokens        int64    `json:"prompt_tokens"`
-			CompletionTokens    int64    `json:"completion_tokens"`
-			Cost                *float64 `json:"cost"`
+			PromptTokens        int64           `json:"prompt_tokens"`
+			CompletionTokens    int64           `json:"completion_tokens"`
+			Cost                json.RawMessage `json:"cost"`
 			PromptTokensDetails struct {
 				CachedTokens int64 `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
@@ -171,8 +172,9 @@ func (g *generativeGuard) Judge(ctx context.Context, turns []Turn) (Verdict, err
 	}
 	if u := cc.Usage; u != nil {
 		used = dec.Usage{TokensIn: u.PromptTokens, TokensOut: u.CompletionTokens, TokensCached: u.PromptTokensDetails.CachedTokens}
-		if u.Cost != nil {
-			used.CostUSD, used.CostReported = *u.Cost, true
+		if nano, ok := adapter.QuotedCostNano(u.Cost); ok {
+			used.CostNano, used.CostReported = nano, true
+			used.CostUSD = float64(nano) / 1e9
 		}
 	}
 	v, perr := ParseGuardVerdict(cc.Choices[0].Message.Content)

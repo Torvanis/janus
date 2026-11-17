@@ -1,0 +1,46 @@
+{
+  "provider": "fireworks",
+  "entries": [
+    {
+      "provider": "fireworks",
+      "model": "accounts/fireworks/models/kimi-k3",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000
+      },
+      "source": {
+        "url": "https://docs.fireworks.ai/serverless/pricing",
+        "read_at": "2026-11-06"
+      },
+      "note": "Standard tier."
+    },
+    {
+      "provider": "fireworks",
+      "model": "fireworks/qwen3-embedding-8b",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.fireworks.ai/guides/querying-embeddings-models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "fireworks",
+      "model": "fireworks/qwen3-reranker-8b",
+      "type": "rerank",
+      "lines": {
+        "rate_in_nanousd": 200000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://docs.fireworks.ai/guides/querying-embeddings-models",
+        "read_at": "2026-11-06"
+      }
+    }
+  ]
+}

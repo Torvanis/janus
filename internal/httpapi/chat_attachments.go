@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/torvanis/janus/internal/adapter"
 	"io"
 	"mime"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/torvanis/janus/internal/blobstore"
 	"github.com/torvanis/janus/internal/chatfile"
 	"github.com/torvanis/janus/internal/store"
+	"github.com/torvanis/janus/internal/subscription"
 )
 
 // Janus Chat attachments.
@@ -509,84 +511,32 @@ func (s *Server) chatAttachmentSearchText(ctx context.Context, atts []*store.Cha
 
 // --- vision capability ------------------------------------------------------------
 
-// chatVisionNameHints are model-name fragments of families that accept
-// image input. TODO: this is a stopgap; the real fix is model metadata (an
-// "image input" capability recorded by discovery or set by the admin).
-var chatVisionNameHints = []string{
-	"gpt-4o", "gpt-4.1", "gpt-5", "gpt-6", "chatgpt-4o", "o3", "o4-mini", "claude", "gemini", "grok-2-vision", "grok-vision",
-	"grok-4", "llava", "bakllava", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "qwen-vl", "pixtral", "gemma3", "gemma-3",
-	"minicpm-v", "llama3.2-vision", "internvl", "moondream",
+// chatVision reports whether Chat sends this model the images people
+// attach. Only the model's capability record decides (input.image:
+// administrator > measured > provider). An unknown value is treated like
+// "no" (owner rule: nothing is inferred from a model's name), so the model
+// gets a description of the image instead; an administrator sets it under
+// Models → the model → Capabilities, or measures it with the probe.
+func (s *Server) chatVision(ctx context.Context, user *store.User, model string) bool {
+	return s.chatModelTakesInput(ctx, user, model, adapter.CapInImage)
 }
 
-// chatVisionNonChat are name fragments of image-blind variants inside
-// otherwise vision-capable families.
-var chatVisionNonChat = []string{"embed", "tts", "audio", "transcribe", "realtime", "whisper", "dall-e", "image-gen", "imagen"}
-
-// chatModelAcceptsImages decides whether a chat model takes image input:
-// a "vision" modality, or "image" next to "chat", wins; otherwise the name
-// is matched against known vision families. ("image" on its own is an
-// image-GENERATION model in Janus's modality list, not image input.)
-func chatModelAcceptsImages(name string, modalities []string) bool {
-	hasChat, hasImage := false, false
-	for _, m := range modalities {
-		switch strings.ToLower(m) {
-		case "vision":
-			return true
-		case "chat":
-			hasChat = true
-		case "image":
-			hasImage = true
-		}
-	}
-	if hasChat && hasImage {
-		return true
-	}
-	n := strings.ToLower(name)
-	if i := strings.LastIndex(n, "/"); i >= 0 {
-		n = n[i+1:]
-	}
-	for _, bad := range chatVisionNonChat {
-		if strings.Contains(n, bad) {
-			return false
-		}
-	}
-	if strings.HasPrefix(n, "llama-3.2-") && strings.Contains(n, "vision") {
-		return true
-	}
-	for _, hint := range chatVisionNameHints {
-		if hint == "o3" || hint == "o4-mini" {
-			if n == hint || strings.HasPrefix(n, hint+"-") {
-				return true
-			}
-			continue
-		}
-		if strings.Contains(n, hint) {
-			return true
-		}
-	}
-	return false
-}
-
-// chatVision resolves the model the way the proxy does and applies
-// chatModelAcceptsImages to the served model (and the requested name).
-func (s *Server) chatVision(ctx context.Context, model string) bool {
-	// The admin's word wins (Admin → Chat → Models → Sees images).
-	switch s.chatAdmin(ctx).Models[model].Images {
-	case "yes":
-		return true
-	case "no":
-		return false
+// chatModelTakesInput resolves the model the way the proxy does and reads
+// one input capability from the record of the model that answers. A
+// personal-plan model (my/<provider>/<model>) is read from the caller's own
+// connection: its owner's setting, measurement, the vendor's list, then the
+// built-in plan default. Unknown is no, for both.
+func (s *Server) chatModelTakesInput(ctx context.Context, user *store.User, model, key string) bool {
+	if subscription.IsPersonalModel(model) {
+		takes, known := s.planCapabilityProfile(ctx, user, model).Bool(key)
+		return known && takes
 	}
 	resolved, err := s.Store.ResolveModelForRequest(ctx, model)
-	if err == nil && resolved.Model != nil {
-		if chatModelAcceptsImages(resolved.Model.Name, resolved.Model.Modalities) {
-			return true
-		}
+	if err != nil || resolved.Model == nil {
+		return false
 	}
-	if err == nil && resolved.Managed != nil && chatModelAcceptsImages(resolved.Managed.TargetName, resolved.Managed.Modalities) {
-		return true
-	}
-	return chatModelAcceptsImages(model, nil)
+	takes, known := resolved.Model.CapabilityProfile().Bool(key)
+	return known && takes
 }
 
 // --- history with content parts ----------------------------------------------------

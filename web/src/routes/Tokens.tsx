@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
-import { isTokenRevoked, type ApiToken, type Breakdown, type Totals, type UsageEvent } from '../lib/types';
+import { isLongRevoked, isTokenRevoked, type ApiToken, type Breakdown, type Totals, type UsageEvent } from '../lib/types';
 import { formatDateTime, formatNumber, formatRelative, formatUSD } from '../lib/format';
 import {
   AsyncSection,
@@ -19,6 +19,8 @@ import {
   Pagination,
   useToast,
 } from '../components/ui';
+import { IconButton, RowActions } from '../components/IconButton';
+import { TopModel } from '../components/TableText';
 import { BarList } from '../components/charts';
 import { ChargedTeam } from '../components/ChargedTeam';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../lib/hooks';
@@ -83,16 +85,22 @@ export function TokensPage(): ReactNode {
     | 'spend_asc'
   >('sort', 'created');
   const [page, setPage] = useUrlState('page', '0');
+  // Tokens revoked more than a week ago are clutter for most visits; they stay
+  // one click away (and in the URL, so a shared link keeps the choice).
+  const [revokedView] = useUrlState<'' | 'all'>('revoked', '');
+  const showOldRevoked = revokedView === 'all';
   // Filter/search changes must atomically reset the page offset, otherwise a
   // user standing on page ≥2 who narrows the list lands on an out-of-range
   // offset: an empty table body with the pagination control hidden.
   const batchParams = useUrlStateBatch();
   const setSearch = (next: string) => batchParams({ q: next, page: null });
   const setStatus = (next: typeof status) => batchParams({ status: next === 'all' ? null : next, page: null });
+  const setShowOldRevoked = (next: boolean) => batchParams({ revoked: next ? 'all' : null, page: null });
   const [createOpen, setCreateOpen] = useState(false);
   const [revealed, setRevealed] = useState<{ token: ApiToken; value: string } | null>(null);
   const [confirming, setConfirming] = useState<ApiToken | null>(null);
   const [changingTeam, setChangingTeam] = useState<ApiToken | null>(null);
+  const [reissuing, setReissuing] = useState<ApiToken | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkConfirm, setBulkConfirm] = useState(false);
 
@@ -113,7 +121,7 @@ export function TokensPage(): ReactNode {
     onError: (error: Error) => toast(error.message, 'danger'),
   });
 
-  const filtered = useMemo(() => {
+  const { filtered, hiddenOld, oldRevoked } = useMemo(() => {
     const all = tokens.data?.tokens ?? [];
     const term = debouncedSearch.trim().toLowerCase();
     const matched = all.filter((token) => {
@@ -147,8 +155,16 @@ export function TokensPage(): ReactNode {
       },
       !descending,
     );
-    return sorted;
-  }, [tokens.data, debouncedSearch, status, sort]);
+    // The age rule runs last so the hidden count answers "what would I see
+    // with the current search and status if I showed everything?".
+    const now = Date.now();
+    const old = sorted.filter((token) => isLongRevoked(token, now)).length;
+    return {
+      filtered: showOldRevoked ? sorted : sorted.filter((token) => !isLongRevoked(token, now)),
+      hiddenOld: showOldRevoked ? 0 : old,
+      oldRevoked: old,
+    };
+  }, [tokens.data, debouncedSearch, status, sort, showOldRevoked]);
 
   useRepairCollectionPage(tokens.data ? filtered.length : undefined, PAGE_SIZE);
   const pageItems = filtered.slice(offset, offset + PAGE_SIZE);
@@ -207,7 +223,7 @@ export function TokensPage(): ReactNode {
         <AsyncSection
           query={tokens}
           empty={{
-            when: () => filtered.length === 0 && !debouncedSearch && status === 'all',
+            when: () => filtered.length === 0 && hiddenOld === 0 && !debouncedSearch && status === 'all',
             title: t('tokens.emptyTitle'),
             body: t('tokens.emptyBody'),
             action: (
@@ -218,7 +234,22 @@ export function TokensPage(): ReactNode {
           }}
         >
           {() =>
-            filtered.length === 0 ? (
+            filtered.length === 0 && hiddenOld > 0 ? (
+              <EmptyState
+                title={debouncedSearch || status !== 'all' ? t('tokens.noMatchTitle') : t('tokens.allHiddenTitle')}
+                body={hiddenOld === 1 ? t('tokens.oldRevokedHiddenOne') : t('tokens.oldRevokedHiddenMany', { count: hiddenOld })}
+                action={
+                  <div className="row wrap">
+                    <button type="button" className="btn" onClick={() => setShowOldRevoked(true)}>
+                      {t('tokens.showAllRevoked')}
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
+                      {t('tokens.create')}
+                    </button>
+                  </div>
+                }
+              />
+            ) : filtered.length === 0 ? (
               <EmptyState
                 title={t('tokens.noMatchTitle')}
                 body={t('tokens.noMatchBody')}
@@ -309,7 +340,9 @@ export function TokensPage(): ReactNode {
                           <td className="small">
                             <TokenContext token={token} />
                           </td>
-                          <td className="mono small muted">{token.prefix}…</td>
+                          <td className="mono small muted nowrap" title={t('tokens.prefixTitle', { prefix: token.prefix })}>
+                            {token.prefix}…
+                          </td>
                           <td className="small muted">{formatDateTime(token.created_at)}</td>
                           <td className="small muted">{formatRelative(token.last_used_at)}</td>
                           <td className="num small">{formatNumber(token.requests_30d ?? 0)}</td>
@@ -317,32 +350,53 @@ export function TokensPage(): ReactNode {
                           {localOnly ? null : (
                             <td className="num small">{formatUSD((token.spend_30d_usd ?? 0) * 1_000_000_000)}</td>
                           )}
-                          <td className="small muted truncate" style={{ maxWidth: 180 }}>
-                            {token.top_model_30d || '—'}
-                            {(token.model_count_30d ?? 0) > 1 ? (
-                              <span className="muted"> {t('tokens.plusMore', { count: (token.model_count_30d ?? 1) - 1 })}</span>
-                            ) : null}
+                          <td className="small muted">
+                            <TopModel name={token.top_model_30d} count={token.model_count_30d} />
                           </td>
                           <td>
                             <TokenStatus token={token} />
                           </td>
-                          <td style={{ textAlign: 'right' }}>
-                            {!isTokenRevoked(token) ? (
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setChangingTeam(token)}>
-                                Change team
-                              </button>
-                            ) : null}
-                            {!isTokenRevoked(token) ? (
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirming(token)}>
-                                {t('tokens.revoke')}
-                              </button>
-                            ) : null}
+                          <td>
+                            <RowActions>
+                              {!isTokenRevoked(token) ? (
+                                <IconButton icon="edit" label={t('tokens.changeTeam')} onClick={() => setChangingTeam(token)} />
+                              ) : null}
+                              <IconButton icon="rotate" label={t('tokens.reissue')} onClick={() => setReissuing(token)} />
+                              {!isTokenRevoked(token) ? (
+                                <IconButton
+                                  icon="revoke"
+                                  danger
+                                  label={t('tokens.revoke')}
+                                  onClick={() => setConfirming(token)}
+                                />
+                              ) : null}
+                            </RowActions>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {oldRevoked > 0 ? (
+                  <div className="row wrap small muted" style={{ padding: 'var(--janus-space-3) var(--janus-card-padding)' }}>
+                    {hiddenOld > 0 ? (
+                      <>
+                        <span>
+                          {hiddenOld === 1
+                            ? t('tokens.oldRevokedHiddenOne')
+                            : t('tokens.oldRevokedHiddenMany', { count: hiddenOld })}
+                        </span>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowOldRevoked(true)}>
+                          {t('tokens.showAllRevoked')}
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowOldRevoked(false)}>
+                        {t('tokens.hideOldRevoked')}
+                      </button>
+                    )}
+                  </div>
+                ) : null}
                 <Pagination
                   offset={offset}
                   limit={PAGE_SIZE}
@@ -369,6 +423,18 @@ export function TokensPage(): ReactNode {
 
       <RevealTokenModal reveal={revealed} endpoint={me?.endpoint ?? ''} onClose={() => setRevealed(null)} />
       {changingTeam ? <ChangeTokenTeamModal token={changingTeam} onClose={() => setChangingTeam(null)} /> : null}
+      {reissuing ? (
+        <ReissueTokenModal
+          token={reissuing}
+          onClose={() => setReissuing(null)}
+          onReissued={(token, value, revokedOld) => {
+            setReissuing(null);
+            setRevealed({ token, value });
+            void queryClient.invalidateQueries({ queryKey: ['tokens'] });
+            if (revokedOld) toast(t('tokens.reissuedRevokedToast'));
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={Boolean(confirming)}
@@ -505,6 +571,79 @@ function ChangeTokenTeamModal({ token, onClose }: { token: ApiToken; onClose: ()
       ) : null}
       {change.isError ? (
         <p role="alert">{change.error instanceof Error ? change.error.message : 'Unable to change token team.'}</p>
+      ) : null}
+    </Modal>
+  );
+}
+
+function ReissueTokenModal({
+  token,
+  onClose,
+  onReissued,
+}: {
+  token: ApiToken;
+  onClose: () => void;
+  onReissued: (token: ApiToken, value: string, revokedOld: boolean) => void;
+}): ReactNode {
+  const active = !isTokenRevoked(token);
+  const [revokeOld, setRevokeOld] = useState(true);
+  const reissue = useMutation({
+    mutationFn: () =>
+      api.post<{ token: ApiToken; value: string; revoked_old: boolean }>(`/api/v1/tokens/${token.id}/reissue`, {
+        revoke_old: active && revokeOld,
+      }),
+    onSuccess: (result) => onReissued(result.token, result.value, result.revoked_old),
+  });
+
+  return (
+    <Modal
+      open
+      onClose={() => {
+        if (!reissue.isPending) onClose();
+      }}
+      title={t('tokens.reissueTitle', { name: token.description || token.prefix })}
+      description={t('tokens.reissueDescription')}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={reissue.isPending}>
+            {t('common.cancel')}
+          </button>
+          <button type="button" className="btn btn-primary" disabled={reissue.isPending} onClick={() => reissue.mutate()}>
+            {reissue.isPending ? t('tokens.reissuing') : t('tokens.reissueConfirm')}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <DetailRow label={t('tokens.colDescription')}>{token.description || t('tokens.untitled')}</DetailRow>
+        <DetailRow label="Context">
+          <TokenContext token={token} />
+        </DetailRow>
+      </div>
+      {active ? (
+        <>
+          <label className="row" style={{ gap: 'var(--janus-space-2)' }}>
+            <input
+              type="checkbox"
+              checked={revokeOld}
+              disabled={reissue.isPending}
+              onChange={(event) => setRevokeOld(event.target.checked)}
+            />
+            {t('tokens.reissueRevokeOld')} <span className="mono small muted">({token.prefix}…)</span>
+          </label>
+          <p className="small muted" style={{ margin: 0 }}>
+            {revokeOld ? t('tokens.reissueRevokeOldOn') : t('tokens.reissueRevokeOldOff')}
+          </p>
+        </>
+      ) : (
+        <p className="small muted" style={{ margin: 0 }}>
+          {t('tokens.reissueAlreadyRevoked')}
+        </p>
+      )}
+      {reissue.isError ? (
+        <p role="alert" className="small" style={{ color: 'var(--janus-color-danger-fg)', margin: 0 }}>
+          {reissue.error instanceof Error ? reissue.error.message : 'Unable to re-issue this token.'}
+        </p>
       ) : null}
     </Modal>
   );

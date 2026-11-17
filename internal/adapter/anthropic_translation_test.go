@@ -303,7 +303,9 @@ func TestAnthropicTransformResponseWrapsMessage(t *testing.T) {
 		c.Message.ToolCalls[0].Function.Name != "get_weather" || c.Message.ToolCalls[0].Function.Arguments != `{"city":"Paris"}` {
 		t.Fatalf("tool_calls = %+v", c.Message.ToolCalls)
 	}
-	if resp.Usage.PromptTokens != 25 || resp.Usage.CompletionTokens != 9 || resp.Usage.TotalTokens != 34 || resp.Usage.Details.Cached != 5 {
+	// OpenAI's convention: prompt_tokens is the whole prompt (25 fresh + 5
+	// cache reads), cached_tokens the reads within it.
+	if resp.Usage.PromptTokens != 30 || resp.Usage.CompletionTokens != 9 || resp.Usage.TotalTokens != 39 || resp.Usage.Details.Cached != 5 {
 		t.Fatalf("usage = %+v", resp.Usage)
 	}
 	var raw map[string]any
@@ -495,7 +497,8 @@ func TestAnthropicStreamTransformerRewritesToChunks(t *testing.T) {
 		t.Fatalf("usage chunk must carry empty choices: %v", usageChunk)
 	}
 	u := usageChunk["usage"].(map[string]any)
-	if u["prompt_tokens"] != float64(25) || u["completion_tokens"] != float64(15) || u["total_tokens"] != float64(40) ||
+	// Whole prompt: 25 fresh + 4 cache reads.
+	if u["prompt_tokens"] != float64(29) || u["completion_tokens"] != float64(15) || u["total_tokens"] != float64(44) ||
 		u["prompt_tokens_details"].(map[string]any)["cached_tokens"] != float64(4) {
 		t.Fatalf("usage = %v", u)
 	}

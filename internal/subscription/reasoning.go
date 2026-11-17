@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/torvanis/janus/internal/adapter"
 )
 
 // Reasoning-effort fitting for personal subscriptions.
@@ -38,10 +40,13 @@ type Reasoning struct {
 	Learned bool `json:"learned,omitempty"`
 }
 
-// ModelInfo is one catalog entry with its reasoning facts.
+// ModelInfo is one catalog entry with its reasoning facts and whatever else
+// the vendor's list says about the model (vision, tools, ...), under the
+// capability keys of internal/adapter.
 type ModelInfo struct {
-	ID        string
-	Reasoning *Reasoning
+	ID           string
+	Reasoning    *Reasoning
+	Capabilities adapter.Capabilities
 }
 
 // ModelLister is implemented by providers whose catalog carries per-model
@@ -51,26 +56,47 @@ type ModelLister interface {
 }
 
 // FetchModels lists a provider's models and, where the catalog says, each
-// model's reasoning facts.
-func FetchModels(ctx context.Context, p Provider, client *http.Client, accessToken string) ([]string, map[string]Reasoning, error) {
+// model's reasoning facts and capabilities ("Reported by <vendor>"). A
+// catalog's reasoning levels are reported capabilities too
+// (thinking.levels, thinking.default_level), so Chat's thinking picker
+// reads the same record as everything else.
+func FetchModels(ctx context.Context, p Provider, client *http.Client, accessToken string) ([]string, map[string]Reasoning, map[string]adapter.Capabilities, error) {
 	lister, ok := p.(ModelLister)
 	if !ok {
 		ids, err := p.Models(ctx, client, accessToken)
-		return ids, nil, err
+		return ids, nil, nil, err
 	}
 	infos, err := lister.ListModels(ctx, client, accessToken)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ids := make([]string, 0, len(infos))
-	caps := map[string]Reasoning{}
+	reasoning := map[string]Reasoning{}
+	caps := map[string]adapter.Capabilities{}
 	for _, m := range infos {
 		ids = append(ids, m.ID)
+		c := adapter.Capabilities{}
+		for k, v := range m.Capabilities {
+			c[k] = v
+		}
 		if m.Reasoning != nil {
-			caps[m.ID] = *m.Reasoning
+			reasoning[m.ID] = *m.Reasoning
+			if e := m.Reasoning.Efforts(); e != nil {
+				if _, said := c[adapter.CapThinkingLevels]; !said {
+					c[adapter.CapThinkingLevels] = e
+				}
+			}
+			if d := m.Reasoning.Default; d != "" {
+				if _, said := c[adapter.CapThinkingDefaultLevel]; !said {
+					c[adapter.CapThinkingDefaultLevel] = d
+				}
+			}
+		}
+		if len(c) > 0 {
+			caps[m.ID] = c
 		}
 	}
-	return ids, caps, nil
+	return ids, reasoning, caps, nil
 }
 
 func idsOf(infos []ModelInfo) []string {

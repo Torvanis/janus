@@ -22,7 +22,19 @@ import remarkMath from 'remark-math';
 import { Icon } from '../../components/IconButton';
 import { highlight, type HighlightToken } from './highlight';
 import { closeOpenFences, hasOpenFence, isSafeDataImage, normalizeMathDelimiters, safeUrl, splitBlocks } from './markdown-text';
-import { type DocKind, downloadText, fileName, formatSize, previewDocument, wholeDocument } from './chat-files';
+import {
+  type DocKind,
+  PREVIEW_BLOCKED,
+  PREVIEW_DOCUMENT,
+  PREVIEW_FRAME,
+  PREVIEW_READY,
+  blockedHost,
+  downloadText,
+  fileName,
+  formatSize,
+  previewDocument,
+  wholeDocument,
+} from './chat-files';
 
 type PluggableList = NonNullable<Options['rehypePlugins']>;
 
@@ -194,6 +206,36 @@ export function FileCard({
   const [copied, markCopied] = useCopied();
   const frame = useRef<HTMLIFrameElement>(null);
   const text = code.endsWith('\n') ? code.slice(0, -1) : code;
+  // Hosts the open preview tried to reach and was stopped from reaching.
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const previewing = view === 'preview';
+  useEffect(() => {
+    if (!previewing) return;
+    setBlocked([]);
+    const add = (host: string) => {
+      if (host) setBlocked((cur) => (cur.includes(host) || cur.length >= 6 ? cur : [...cur, host]));
+    };
+    const onMessage = (e: MessageEvent) => {
+      const from = frame.current?.contentWindow;
+      if (!from || e.source !== from || typeof e.data !== 'object' || e.data === null) return;
+      const data = e.data as Record<string, unknown>;
+      // The preview page has loaded and asks for the document to show. Its
+      // origin is opaque (sandboxed), so there is no origin to address it by.
+      if (data[PREVIEW_READY] === true && kind) from.postMessage({ [PREVIEW_DOCUMENT]: previewDocument(text, kind) }, '*');
+      // Requests: the preview reports its own.
+      add(blockedHost(data[PREVIEW_BLOCKED]));
+    };
+    // Navigation: stopped by this page's policy, so reported here.
+    const onViolation = (e: SecurityPolicyViolationEvent) => {
+      if (e.effectiveDirective === 'frame-src') add(blockedHost(e.blockedURI));
+    };
+    window.addEventListener('message', onMessage);
+    document.addEventListener('securitypolicyviolation', onViolation);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      document.removeEventListener('securitypolicyviolation', onViolation);
+    };
+  }, [previewing, text, kind]);
   const name = given ?? fileName(text, lang);
   const lines = text.split('\n').length;
   const size = formatSize(new Blob([text]).size);
@@ -265,8 +307,15 @@ export function FileCard({
             sandbox="allow-scripts allow-pointer-lock allow-modals"
             allow="autoplay; fullscreen; gamepad"
             referrerPolicy="no-referrer"
-            srcDoc={previewDocument(text, kind)}
+            src={PREVIEW_FRAME}
           />
+          {blocked.length > 0 ? (
+            <p className="chat-file-blocked" role="status">
+              <strong>Blocked:</strong> this preview tried to reach {blocked.join(', ')}. Previews have no network access, so
+              nothing was sent or loaded, and parts of the page may be missing. To run it with network access, download the file
+              and open it yourself.
+            </p>
+          ) : null}
         </div>
       ) : null}
       {view === 'code' ? <CodeBlock code={code} lang={lang || kind || ''} /> : null}

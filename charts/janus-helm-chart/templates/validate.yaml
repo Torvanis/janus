@@ -29,7 +29,10 @@
 {{- if and .Values.serviceMonitor.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) -}}
 {{- fail "serviceMonitor.enabled requires the monitoring.coreos.com/v1/ServiceMonitor CRD" -}}
 {{- end -}}
-{{- $reserved := list "JANUS_ENCRYPTION_KEY" "JANUS_DATABASE_URL" "JANUS_PUBLIC_URL" "JANUS_LISTEN_ADDR" "JANUS_ENV" "JANUS_DEV_AUTH" "JANUS_DEV_AUTH_ALLOW_UNSAFE" "JANUS_COOKIE_SECURE" "JANUS_LICENSE_FILE" -}}
+{{- if and .Values.serviceMonitor.enabled (not .Values.metrics.enabled) -}}
+{{- fail "serviceMonitor.enabled requires metrics.enabled=true" -}}
+{{- end -}}
+{{- $reserved := list "JANUS_ENCRYPTION_KEY" "JANUS_DATABASE_URL" "JANUS_PUBLIC_URL" "JANUS_LISTEN_ADDR" "JANUS_METRICS_ADDR" "JANUS_ENV" "JANUS_DEV_AUTH" "JANUS_DEV_AUTH_ALLOW_UNSAFE" "JANUS_COOKIE_SECURE" "JANUS_LICENSE_FILE" -}}
 {{- range $settings := list .Values.extraEnv .Values.secretEnv -}}
 {{- range $key, $value := $settings -}}
 {{- if or (has $key $reserved) (hasPrefix "PG" $key) -}}

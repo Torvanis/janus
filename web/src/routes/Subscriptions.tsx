@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Navigate, useMatch } from 'react-router-dom';
+import { Navigate, useMatch, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type {
@@ -10,10 +10,23 @@ import type {
   SubscriptionProvider,
 } from '../lib/types';
 import { formatNumber, formatRelative } from '../lib/format';
-import { AsyncSection, Badge, ConfirmDialog, CopyButton, Drawer, EmptyState, Modal, Spinner, useToast } from '../components/ui';
+import {
+  AsyncSection,
+  Badge,
+  BreakAfterSlash,
+  ConfirmDialog,
+  CopyButton,
+  Drawer,
+  EmptyState,
+  Modal,
+  Spinner,
+  useToast,
+} from '../components/ui';
 import { CopyIconButton } from '../components/IconButton';
 import { RouteTopNav } from '../components/RouteTopNav';
 import { t } from '../lib/i18n';
+import type { PlanCapabilityView } from '../lib/capabilities';
+import { PlanCapabilities, planCapabilityChips, usePlanCapabilities } from './PlanCapabilities';
 
 interface ListResponse {
   available: boolean;
@@ -263,19 +276,9 @@ function shortName(name: string): string {
  * only when it alone is too wide), never mid-word on a narrow screen.
  */
 function ModelId({ value }: { value: string }): ReactNode {
-  const parts = value.split('/');
   return (
-    <span className="mono small" style={{ display: 'block', overflowWrap: 'break-word' }}>
-      {parts.map((part, i) => (
-        <span key={i}>
-          {part}
-          {i < parts.length - 1 ? (
-            <>
-              /<wbr />
-            </>
-          ) : null}
-        </span>
-      ))}
+    <span className="mono small break-slash" style={{ display: 'block' }}>
+      <BreakAfterSlash text={value} />
     </span>
   );
 }
@@ -571,6 +574,21 @@ function ReasoningHint({ efforts, compact }: { efforts: string[] | undefined; co
   );
 }
 
+/** What a selected model is known to take, as short chips under its name. */
+function PlanChips({ view }: { view: PlanCapabilityView | undefined }): ReactNode {
+  const chips = planCapabilityChips(view);
+  if (chips.length === 0) return null;
+  return (
+    <div className="row" style={{ gap: 'var(--janus-space-1)', flexWrap: 'wrap', marginTop: 'var(--janus-space-1)' }}>
+      {chips.map((c) => (
+        <Badge key={c} tone="neutral">
+          {c}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The models this user chose from the plan: one row each with the name to
  * call, a copy button and a remove button (immediate, with Undo). Adding
@@ -590,6 +608,21 @@ export function SelectedModels({
   onRemove: (model: string) => void;
 }): ReactNode {
   const [adding, setAdding] = useState(false);
+  // ?capabilities=<model> (the Models page's "Change on Subscriptions") opens that model's pop-up.
+  const [params, setParams] = useSearchParams();
+  const linked = params.get('capabilities');
+  const [capsFor, setCapsFor] = useState<string | null>(() =>
+    linked && (connection.selected_models ?? []).includes(linked) ? linked : null,
+  );
+  const closeCaps = () => {
+    setCapsFor(null);
+    if (linked !== null) {
+      const next = new URLSearchParams(params);
+      next.delete('capabilities');
+      setParams(next, { replace: true });
+    }
+  };
+  const caps = usePlanCapabilities(connection.models.length > 0 ? connection.id : undefined);
   const selected = (connection.selected_models ?? []).filter((m) => connection.models.includes(m));
   if (connection.models.length === 0) {
     return (
@@ -642,7 +675,17 @@ export function SelectedModels({
               <div style={{ minWidth: 0, flex: 1 }}>
                 <ModelId value={modelName(m)} />
                 <ReasoningHint efforts={connection.reasoning_efforts?.[m]} compact />
+                <PlanChips view={caps.data?.models?.find((v) => v.model === m)} />
               </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label={`Capabilities of ${m}`}
+                title={`Capabilities of ${m}`}
+                onClick={() => setCapsFor(m)}
+              >
+                Capabilities
+              </button>
               <CopyIconButton
                 value={modelName(m)}
                 label={t('subscriptions.copyModelName', { name: modelName(m) })}
@@ -661,6 +704,14 @@ export function SelectedModels({
           ))}
         </ul>
       )}
+      <Drawer
+        open={capsFor !== null}
+        onClose={closeCaps}
+        title={capsFor ? modelName(capsFor) : ''}
+        description={t('subscriptions.capabilitiesHint')}
+      >
+        {capsFor ? <PlanCapabilities mode="manage" subscriptionId={connection.id} model={capsFor} /> : null}
+      </Drawer>
       {adding ? (
         <ModelPicker
           connection={connection}

@@ -367,7 +367,7 @@ func reportAggregate(facts []*reportFact, dims, metrics []string, loc *time.Loca
 }
 func reportMetrics(facts []*reportFact, metrics []string) map[string]*float64 {
 	vals := map[string]*float64{}
-	var nano, in, out, cached, writes int64
+	var nano, in, out, cached int64
 	var errors, complete, success, quota, security, fallback, estimated, unpriced int
 	known := true
 	users := map[string]bool{}
@@ -382,7 +382,6 @@ func reportMetrics(facts []*reportFact, metrics []string) map[string]*float64 {
 		in += e.TokensIn
 		out += e.TokensOut
 		cached += e.TokensCached
-		writes += e.TokensCacheWrite5m + e.TokensCacheWrite1h
 		if e.HTTPStatus >= 400 {
 			errors++
 		}
@@ -437,7 +436,7 @@ func reportMetrics(facts []*reportFact, metrics []string) map[string]*float64 {
 		case "success_rate":
 			v = reportRatio(float64(success), float64(complete))
 		case "cache_hit_rate":
-			v = reportRatio(float64(cached), float64(in+writes))
+			v = reportRatio(float64(cached), float64(in))
 		case "active_users":
 			v = reportNumber(float64(len(users)))
 		case "latency_p50_ms":

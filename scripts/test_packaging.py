@@ -255,11 +255,11 @@ class ComposeBundleTests(unittest.TestCase):
 
     def test_compose_runs_released_image_and_hides_database(self):
         text = (ROOT / 'deploy/compose/compose.yaml').read_text()
-        release.check_compose(text, release.os.environ.get('VERSION', '2026.11.1'), release.chart_digest())
+        release.check_compose(text, release.os.environ.get('VERSION', '2026.11.2'), release.chart_digest())
         with self.assertRaises(SystemExit):
-            release.check_compose(text, '2026.11.1', 'sha256:' + '0' * 64)
+            release.check_compose(text, '2026.11.2', 'sha256:' + '0' * 64)
         with self.assertRaises(SystemExit):
-            release.check_compose(text.replace('@sha256:', ':x@sha:', 1), '2026.11.1', release.chart_digest())
+            release.check_compose(text.replace('@sha256:', ':x@sha:', 1), '2026.11.2', release.chart_digest())
         postgres = text[text.index('\n  postgres:'):text.index('\n  janus:')]
         self.assertNotIn('ports:', postgres)
         self.assertIn('"${JANUS_BIND:-127.0.0.1}:${JANUS_HTTPS_PORT:-443}:8443"', text)
@@ -271,9 +271,9 @@ class ComposeBundleTests(unittest.TestCase):
         second = self.path / 'b'
         first.mkdir()
         second.mkdir()
-        bundle = release.compose_bundle(first, '2026.11.1', 0)
-        self.assertEqual(bundle.name, 'janus-compose-bundle-2026.11.1.tar.gz')
-        self.assertEqual(bundle.read_bytes(), release.compose_bundle(second, '2026.11.1', 0).read_bytes())
+        bundle = release.compose_bundle(first, '2026.11.2', 0)
+        self.assertEqual(bundle.name, 'janus-compose-bundle-2026.11.2.tar.gz')
+        self.assertEqual(bundle.read_bytes(), release.compose_bundle(second, '2026.11.2', 0).read_bytes())
         with tarfile.open(bundle) as tar:
             members = {m.name: m for m in tar.getmembers()}
         expected = {'janus-compose/' + n for n in release.COMPOSE_FILES + release.LEGAL}

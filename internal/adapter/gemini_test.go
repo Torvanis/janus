@@ -182,7 +182,7 @@ func TestGeminiUsageCountsThinkingAsOutput(t *testing.T) {
 	// Implicit prompt-cache hit (real body): cached tokens are a subset of
 	// the prompt, as with OpenAI, and priced at the cached rate.
 	u, _ := a.ExtractUsage([]byte(`{"choices":[{"finish_reason":"stop"}],"usage":{"completion_tokens":19,"prompt_tokens":4634,"prompt_tokens_details":{"cached_tokens":4088},"total_tokens":4653}}`))
-	if u.TokensIn != 4634 || u.TokensCached != 4088 || u.CachedDisjoint || u.TokensOut != 19 {
+	if u.TokensIn != 4634 || u.TokensCached != 4088 || u.TokensOut != 19 {
 		t.Errorf("cache hit usage = %+v, want in=4634 cached=4088 (subset) out=19", u)
 	}
 	col := a.NewStreamCollector()

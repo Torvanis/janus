@@ -1,9 +1,9 @@
 # Janus Edge Helm chart
 
-Chart **2026.11.1**, application **2026.11.1**. From 2026.11.1 the chart is
+Chart **2026.11.2**, application **2026.11.2**. From 2026.11.2 the chart is
 versioned with Janus (`YEAR.MONTH.RELEASE_NUMBER`; earlier charts were
 `0.1.x`/`0.2.x`). The default public gateway
-image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.11.1`.
+image is pinned to the multiarchitecture digest of `ghcr.io/torvanis/janus:2026.11.2`.
 A nonempty `image.digest` takes precedence over `image.tag`; clear the digest
 explicitly when selecting a different tag.
 
@@ -17,7 +17,7 @@ point it at the new file.
 
 The Janus FIPS edition image is `ghcr.io/torvanis/janus:<version>-fips`
 (Business; PostgreSQL only). Select it with
-`--set image.tag=2026.11.1-fips --set image.digest=`, or set `image.digest` to
+`--set image.tag=2026.11.2-fips --set image.digest=`, or set `image.digest` to
 that image's digest. Its offline archives are
 `janus-fips-container-image-<version>-linux-<arch>.tar`.
 
@@ -30,16 +30,55 @@ can reach your private registry, push it there, and set `image.repository`
 (and clear `image.digest`, or set it to the digest your registry reports):
 
 ```bash
-podman load -i janus-container-image-2026.11.1-linux-amd64.tar   # or: docker load -i …
-podman tag ghcr.io/torvanis/janus:2026.11.1 registry.example.internal/janus:2026.11.1
-podman push registry.example.internal/janus:2026.11.1
-helm upgrade --install janus ./janus-helm-chart-2026.11.1.tgz --namespace janus \
-  --set image.repository=registry.example.internal/janus --set image.tag=2026.11.1 \
+podman load -i janus-container-image-2026.11.2-linux-amd64.tar   # or: docker load -i …
+podman tag ghcr.io/torvanis/janus:2026.11.2 registry.example.internal/janus:2026.11.2
+podman push registry.example.internal/janus:2026.11.2
+helm upgrade --install janus ./janus-helm-chart-2026.11.2.tgz --namespace janus \
+  --set image.repository=registry.example.internal/janus --set image.tag=2026.11.2 \
   --set image.digest= …
 ```
 
 The bundled PostgreSQL uses `postgres:16-alpine`; mirror it the same way and
 set `postgresql.image`, or use an existing PostgreSQL.
+
+## kind, k3d or a cluster without registry access (evaluation)
+
+A nonempty `image.digest` (this chart pins one) makes the kubelet resolve the
+image by digest, and that needs DNS and HTTPS to the registry (`ghcr.io`) from
+the node. It does so **even when an image with the same tag is already on the
+node**: `kind load`, `k3d image import` and `ctr images import` keep the tag,
+and a tag does not satisfy a digest reference. When the node cannot reach the
+registry (for example `lookup ghcr.io on 172.18.0.1:53: server misbehaving`
+inside kind), pods stay in `ImagePullBackOff`.
+
+Preload the image and select it by tag instead:
+
+```bash
+podman pull ghcr.io/torvanis/janus:2026.11.2       # or: docker pull …
+kind load docker-image ghcr.io/torvanis/janus:2026.11.2 --name <cluster>
+# podman: podman save ghcr.io/torvanis/janus:2026.11.2 -o janus.tar && kind load image-archive janus.tar --name <cluster>
+# or use the release's janus-container-image-2026.11.2-linux-<arch>.tar: kind load image-archive <file> --name <cluster>
+```
+
+```yaml
+# values-kind.yaml (evaluation only)
+image:
+  repository: ghcr.io/torvanis/janus
+  tag: "2026.11.2"
+  digest: ""              # select by tag: no registry lookup needed
+  pullPolicy: Never       # or IfNotPresent: use the preloaded image, never pull
+```
+
+```bash
+helm upgrade --install janus ./janus-helm-chart-2026.11.2.tgz --namespace janus --create-namespace \
+  -f values-kind.yaml …   # plus the Secrets from "First installation" below
+```
+
+`pullPolicy: IfNotPresent` also works once the image is on every node; `Never`
+fails fast with `ErrImageNeverPull` if it is missing, which is easier to read.
+Mirror `postgres:16-alpine` the same way (or use SQLite evaluation, below).
+For a real air-gapped install, push to your own registry as described above
+and keep a digest pin to that registry.
 
 ## Architecture and requirements
 
@@ -136,8 +175,9 @@ ingress:
 from the URL. No certificate issuer is installed. Configure trusted proxy CIDRs
 explicitly for your deployment through `extraEnv`; do not trust every source.
 Set ingress-controller-specific streaming timeouts/body limits in
-`ingress.annotations` for your workload. Protect `/metrics` at the network/proxy
-layer if exposing the entire service: it is an unauthenticated metrics endpoint.
+`ingress.annotations` for your workload. Prometheus `/metrics` is served only on
+its own port (`metrics.port`, default 9464; the Service port named `metrics`),
+never through the Ingress; it is unauthenticated, so keep it inside the cluster.
 
 ## Existing external PostgreSQL
 
@@ -244,7 +284,8 @@ See `values.yaml` and `values.schema.json` for the complete interface.
 | `podAnnotations` | Gateway pod annotations; change a rollout annotation to restart after Secret changes |
 | `extraEnv` | Map of additional **string** application env values |
 | `secretEnv` | Map of env names to `{name: existing-secret, key: secret-key}` |
-| `serviceMonitor.enabled` | Requires Prometheus Operator ServiceMonitor CRD, otherwise render fails |
+| `metrics.enabled`, `metrics.port` | Separate Prometheus metrics listener (`JANUS_METRICS_ADDR`), default on at 9464 and published on the ClusterIP Service as port `metrics`; `false` turns it off |
+| `serviceMonitor.enabled` | Requires Prometheus Operator ServiceMonitor CRD and `metrics.enabled`, otherwise render fails; scrapes the `metrics` port |
 | `serviceMonitor.labels` | Labels matching your Prometheus serviceMonitorSelector |
 
 Chart-managed database/encryption/listen/public URL/auth-safety variables and

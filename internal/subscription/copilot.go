@@ -73,6 +73,15 @@ func (c *Copilot) AdminNote() string {
 // github_copilot adapter strips it from the client's path.
 func (c *Copilot) AdapterType() string { return adapter.CopilotAdapterType }
 
+// OwnsURL implements EndpointOwner: GitHub's sign-in and API hosts, and any
+// of GitHub's Copilot hosts (each account is served from its own).
+func (c *Copilot) OwnsURL(u *url.URL) bool {
+	if sameOrigin(u, pick(c.DeviceURL, githubDeviceURL), pick(c.TokenURL, githubTokenURL), pick(c.APIURL, githubAPIURL), c.apiHost(nil)) {
+		return true
+	}
+	return validCopilotAPI(u.Scheme + "://" + u.Host)
+}
+
 // InferenceBaseURL implements Provider: the individual-plan host, used only
 // when a connection has no recorded host.
 func (c *Copilot) InferenceBaseURL() string { return c.apiHost(nil) }
@@ -320,8 +329,14 @@ func (c *Copilot) ListModels(ctx context.Context, client *http.Client, accessTok
 			Capabilities struct {
 				Type     string `json:"type"`
 				Supports struct {
-					ReasoningEffort []string `json:"reasoning_effort"`
+					ReasoningEffort   []string `json:"reasoning_effort"`
+					Vision            *bool    `json:"vision"`
+					ToolCalls         *bool    `json:"tool_calls"`
+					StructuredOutputs *bool    `json:"structured_outputs"`
 				} `json:"supports"`
+				Limits struct {
+					MaxOutputTokens int64 `json:"max_output_tokens"`
+				} `json:"limits"`
 			} `json:"capabilities"`
 			Policy *struct {
 				State string `json:"state"`
@@ -350,7 +365,20 @@ func (c *Copilot) ListModels(ctx context.Context, client *http.Client, accessTok
 			continue
 		}
 		seen[id] = true
-		models = append(models, ModelInfo{ID: id, Reasoning: ReasoningLevels(m.Capabilities.Supports.ReasoningEffort, "")})
+		// GitHub's list says per model whether it takes images
+		// (supports.vision), function tools and JSON schema output. A
+		// flag that is absent is not said, never a no.
+		caps := adapter.Capabilities{}
+		sup := m.Capabilities.Supports
+		for key, v := range map[string]*bool{adapter.CapInImage: sup.Vision, adapter.CapTools: sup.ToolCalls, adapter.CapStructured: sup.StructuredOutputs} {
+			if v != nil {
+				caps[key] = *v
+			}
+		}
+		if n := m.Capabilities.Limits.MaxOutputTokens; n > 0 {
+			caps[adapter.CapMaxOutput] = n
+		}
+		models = append(models, ModelInfo{ID: id, Reasoning: ReasoningLevels(sup.ReasoningEffort, ""), Capabilities: caps})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil

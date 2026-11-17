@@ -57,7 +57,7 @@ function statusFixture(database: SystemStatus['database']): SystemStatus {
     identity_provider: { ok: true, provider: 'Authentik', dev_auth: false },
     quota_ledger: { ok: true, mode: 'durable ledger with event-log reconciliation' },
     email: { ok: true, detail: 'SMTP is configured; email alerts will be delivered.' },
-    telemetry: { prometheus: '/metrics' },
+    telemetry: { prometheus: ':9464/metrics' },
     upstreams: [],
     discovery: {
       last_run_at: '2025-01-02T10:00:00Z',
@@ -659,6 +659,46 @@ describe('Metering health tile', () => {
         .getByRole('link', { name: /View unmetered requests/ })
         .getAttribute('href'),
     ).toBe('/admin/requests?accounting=unmetered_modality');
+  });
+  it('names models whose measured requests have no price, apart from the unmetered ones', async () => {
+    serveStatus({
+      ...sqliteStatus,
+      metering: {
+        ok: false,
+        window_days: 30,
+        summary: {
+          upstream_reported: 120,
+          upstream_reported_cost: 3,
+          byte_estimated: 0,
+          unmetered: 0,
+          measured: 4,
+          measured_unpriced: 9,
+          gaps: [
+            {
+              model_name: 'veo-3.1-lite',
+              upstream_id: 'up-3',
+              upstream_name: 'gemini',
+              modality: 'video',
+              accounting: 'measured_unpriced',
+              requests: 9,
+              last_seen_at: '2025-01-02T10:00:00Z',
+            },
+          ],
+        },
+      },
+    });
+    renderPage();
+    const tile = await screen.findByTestId('metering-tile');
+    expect(within(tile).getByText('Attention')).toBeTruthy();
+    expect(within(tile).queryByText(/media response\(s\)/)).toBeNull();
+    const unpriced = within(tile).getByTestId('metering-unpriced');
+    expect(within(unpriced).getByText(/9 request\(s\) in the last 30 days were measured/)).toBeTruthy();
+    expect(within(unpriced).getByText('veo-3.1-lite')).toBeTruthy();
+    expect(
+      within(unpriced)
+        .getByRole('link', { name: /View unpriced requests/ })
+        .getAttribute('href'),
+    ).toBe('/admin/requests?accounting=measured_unpriced');
   });
 });
 

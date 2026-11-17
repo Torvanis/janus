@@ -74,7 +74,7 @@ func (s *Server) chatAccessLicensed() bool {
 // chatAllowedFor reports whether user may use Chat, and the message to show
 // when not. Admins always may (they configure it).
 func (s *Server) chatAllowedFor(ctx context.Context, user *store.User) (bool, string) {
-	if !s.chatEnabled() || user == nil {
+	if user == nil {
 		return false, ""
 	}
 	cfg := s.chatAdmin(ctx)
@@ -297,8 +297,6 @@ type chatAdminView struct {
 	// AccessLicensed is false on Community: a restriction can be drafted
 	// but is not saved/applied.
 	AccessLicensed bool `json:"access_licensed"`
-	// PreviewOn mirrors JANUS_CHAT_PREVIEW (the hard switch above Enabled).
-	PreviewOn bool `json:"preview_on"`
 	// SearchKeysSet reports which search services have a stored key (the
 	// keys themselves are never sent). Read-only.
 	SearchKeysSet map[string]bool `json:"search_keys_set"`
@@ -327,7 +325,7 @@ func (s *Server) adminChatView(cfg store.ChatAdminSettings) chatAdminView {
 			cfg.Naming = store.ChatNamingOff
 		}
 	}
-	return chatAdminView{ChatAdminSettings: cfg, AccessLicensed: s.chatAccessLicensed(), PreviewOn: s.chatEnabled(), SearchKeysSet: set,
+	return chatAdminView{ChatAdminSettings: cfg, AccessLicensed: s.chatAccessLicensed(), SearchKeysSet: set,
 		WebPagePolicy: websearch.CurrentPagePolicy().Summary()}
 }
 

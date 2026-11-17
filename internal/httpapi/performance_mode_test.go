@@ -146,6 +146,14 @@ func TestShouldTouchThrottlesPerCredential(t *testing.T) {
 // Concurrent enqueue from many goroutines races a stop; every event is
 // written exactly once and done is called exactly once per event.
 func TestUsageBatcherConcurrentEnqueueAndStop(t *testing.T) {
+	// A test budget, not the product's: after the stop, about half of the
+	// events are written one by one through the test database's single
+	// connection, and on a loaded CI runner under the race detector the last
+	// of them waited longer than the 15 second write timeout (265 of 300
+	// written). This test is about ordering, not about that timeout.
+	saved := usageWriteTimeout
+	usageWriteTimeout = 3 * time.Minute
+	t.Cleanup(func() { usageWriteTimeout = saved })
 	h := newHarness(t)
 	b := newUsageBatcher(h.store, h.server.Logger)
 	const n = 300

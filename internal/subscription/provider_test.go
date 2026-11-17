@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -88,4 +89,43 @@ func TestRegistry(t *testing.T) {
 		}
 	}()
 	Register(&XAI{})
+}
+
+// Which URLs each provider's header policy may go to on Janus's own calls.
+func TestOwnsURL(t *testing.T) {
+	for _, tc := range []struct {
+		provider, url string
+		want          bool
+	}{
+		{"xai", "https://auth.x.ai/oauth2/token", true},
+		{"xai", "https://api.x.ai/v1/models", true},
+		{"xai", "https://x.ai/", false},
+		{"xai", "http://api.x.ai/v1/models", false},
+		{"openai", "https://auth.openai.com/oauth/token", true},
+		{"openai", "https://chatgpt.com/backend-api/wham/usage", true},
+		{"openai", "https://api.openai.com/v1/models", false},
+		{"copilot", "https://github.com/login/device/code", true},
+		{"copilot", "https://api.github.com/copilot_internal/user", true},
+		{"copilot", "https://api.business.githubcopilot.com/models", true},
+		{"copilot", "http://api.business.githubcopilot.com/models", false},
+		{"copilot", "https://githubcopilot.com.evil.net/models", false},
+		{"copilot", "https://raw.githubusercontent.com/x", false},
+		{"mistral", "https://api.mistral.ai/v1/models", true},
+		{"mistral", "https://chat.mistral.ai/code/extensions", false},
+	} {
+		p, ok := Get(tc.provider)
+		if !ok {
+			t.Fatalf("%s not registered", tc.provider)
+		}
+		u, err := url.Parse(tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := OwnsURL(p, u); got != tc.want {
+			t.Errorf("OwnsURL(%s, %s) = %v, want %v", tc.provider, tc.url, got, tc.want)
+		}
+	}
+	if OwnsURL(nil, &url.URL{}) {
+		t.Error("no provider owns nothing")
+	}
 }

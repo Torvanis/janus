@@ -1,19 +1,20 @@
 import { Collection } from '../../components/Collection';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
 import { listAdminModels } from '../../api/client';
 import type { Model, Upstream } from '../../lib/types';
 import { formatDateTime, formatModelRate, formatRelative, titleCase } from '../../lib/format';
-import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
+import { AsyncSection, Badge, Drawer, Field, Modal, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { Truncate } from '../../components/TableText';
 import { RateCardDialog } from './RateCardDialog';
 import { useDebounced, useUnsavedGuard, useUrlState } from '../../lib/hooks';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useLocalOnly } from '../../app/session';
 import { SearchInput, SortHeader, useTableSort } from '../shared';
-import { availablePresets, presetForUpstream, type ProviderPreset } from './providerPresets';
+import { availablePresets, presetForUpstream, providerLabel, type ProviderPreset } from './providerPresets';
 
 interface UpstreamsResponse {
   upstreams: Upstream[];
@@ -47,7 +48,7 @@ const ADAPTER_HELP_KEYS: Record<string, MessageKey> = {
 /** Sort accessors for the upstreams table; see useTableSort. */
 const UPSTREAM_SORTS = {
   name: (u: Upstream) => u.name.toLowerCase(),
-  provider: (u: Upstream) => u.adapter_type,
+  provider: (u: Upstream) => providerLabel(u.adapter_type, u.base_url).toLowerCase(),
   health: (u: Upstream) => (u.last_error ? 0 : 1),
   models: (u: Upstream) => u.model_count ?? 0,
 };
@@ -89,16 +90,16 @@ export function UpstreamsPage(): ReactNode {
   };
 
   const remove = useMutation({
-    mutationFn: ({ id, force, purgeGrants }: { id: string; force: boolean; purgeGrants: boolean }) =>
+    mutationFn: ({ id, force, purgeGrants }: { id: string; name: string; force: boolean; purgeGrants: boolean }) =>
       api.del<{ models_disabled: number; managed_models_broken: string[]; grants_removed: number }>(
         `/api/v1/admin/upstreams/${id}${qs({ force: force ? 'true' : '', purge_grants: purgeGrants ? 'true' : '' })}`,
       ),
-    onSuccess: (data) => {
+    onSuccess: (data, { name }) => {
       setDeleting(null);
       if (data.managed_models_broken.length > 0) {
         toast(t('adminUpstreams.deletedBrokeAliasesToast', { count: data.managed_models_broken.length }), 'danger');
       } else {
-        toast(t('adminUpstreams.disabledToast'));
+        toast(t('adminUpstreams.deletedToast', { name }));
       }
       void queryClient.invalidateQueries({ queryKey: ['admin'] });
     },
@@ -214,9 +215,11 @@ export function UpstreamsPage(): ReactNode {
                               {upstream.name}
                             </button>
                           </td>
-                          <td className="small">{upstream.adapter_type}</td>
-                          <td className="small muted truncate" style={{ maxWidth: 260 }}>
-                            {upstream.base_url}
+                          <td className="small">{providerLabel(upstream.adapter_type, upstream.base_url)}</td>
+                          <td className="small muted">
+                            <Truncate as="div" maxWidth={200}>
+                              {upstream.base_url}
+                            </Truncate>
                           </td>
                           <td className="mono small muted">{upstream.api_key_mask || t('adminUpstreams.credentialNone')}</td>
                           <td>
@@ -278,7 +281,7 @@ export function UpstreamsPage(): ReactNode {
         onClose={() => setDeleting(null)}
         busy={remove.isPending}
         onConfirm={(options) => {
-          if (deleting) remove.mutate({ id: deleting.id, ...options });
+          if (deleting) remove.mutate({ id: deleting.id, name: deleting.name, ...options });
         }}
       />
     </div>
@@ -293,12 +296,18 @@ interface UpstreamDependents {
   blocking_managed_models: number;
 }
 
+/** Picks the singular or plural message for a count. */
+function counted(count: number, one: MessageKey, many: MessageKey): string {
+  return t(count === 1 ? one : many, { count });
+}
+
 /**
- * Delete confirmation that shows what the delete will break before the admin
- * commits: the hosted models (all disabled), the managed models targeting
- * them (broken until repointed — enabled ones block the delete unless the
- * admin explicitly forces it), and the direct grants that would dangle (with
- * an opt-in to remove them as part of the delete).
+ * Delete confirmation that shows what the delete breaks before the admin
+ * commits: the models that turn off, the managed models that stop working
+ * (each with a link to fix it first; enabled ones block the delete unless the
+ * admin explicitly chooses "Delete anyway"), and the grants left behind (with
+ * an opt-in to remove them). Typing the name is required only when something
+ * in use breaks.
  */
 function DeleteUpstreamDialog({
   upstream,
@@ -311,116 +320,219 @@ function DeleteUpstreamDialog({
   onConfirm: (options: { force: boolean; purgeGrants: boolean }) => void;
   busy: boolean;
 }): ReactNode {
-  // The caller keys this component by upstream id, so the acknowledgments
-  // below start unticked for every upstream — a "force" ticked for one never
+  // The caller keys this component by upstream id, so the choices below start
+  // unticked for every upstream: a "Delete anyway" ticked for one never
   // carries over to the next.
   const [force, setForce] = useState(false);
   const [purgeGrants, setPurgeGrants] = useState(false);
+  const [typed, setTyped] = useState('');
+  const typedRef = useRef<HTMLInputElement>(null);
   const dependents = useQuery({
     queryKey: ['admin', 'upstreams', upstream?.id, 'dependents'],
     queryFn: () => api.get<UpstreamDependents>(`/api/v1/admin/upstreams/${upstream?.id}/dependents`),
     enabled: Boolean(upstream),
   });
   const deps = dependents.data;
+  const name = upstream?.name ?? '';
   const blocking = deps?.blocking_managed_models ?? 0;
-  const enabledAliases = deps?.managed_models.filter((mm) => mm.status === 'enabled') ?? [];
-  const disabledAliases = deps?.managed_models.filter((mm) => mm.status !== 'enabled') ?? [];
+  const inUse = deps?.models.filter((m) => m.status === 'enabled').length ?? 0;
+  const aliases = [
+    ...(deps?.managed_models.filter((mm) => mm.status === 'enabled') ?? []),
+    ...(deps?.managed_models.filter((mm) => mm.status !== 'enabled') ?? []),
+  ];
+  // Typing the name is a speed bump for deletes that break something in use.
+  // An upstream with nothing live on it deletes with one click.
+  const needsTyped = Boolean(deps) && (inUse > 0 || blocking > 0);
+  const ready =
+    Boolean(deps) &&
+    !dependents.isFetching &&
+    !dependents.isError &&
+    (!needsTyped || typed.trim() === name) &&
+    (blocking === 0 || force);
+
+  // Focus starts on Cancel (the safe choice); once the check shows the name
+  // must be typed, move to that field unless the admin has moved on already.
+  useEffect(() => {
+    if (!needsTyped) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || active.hasAttribute('data-autofocus')) typedRef.current?.focus();
+  }, [needsTyped]);
 
   return (
-    <ConfirmDialog
+    <Modal
       open={Boolean(upstream)}
-      onClose={onClose}
-      onConfirm={() => onConfirm({ force, purgeGrants })}
-      title={t('adminUpstreams.deleteTitle', { name: upstream?.name ?? '' })}
-      consequence={t('adminUpstreams.deleteConsequence', { count: deps?.models.length ?? upstream?.model_count ?? 0 })}
-      confirmLabel={t('adminUpstreams.deleteConfirm')}
-      requireTyped={upstream?.name}
-      busy={busy}
-      // Never let the delete through while the blast radius is unknown or an
-      // enabled alias depends on this upstream without an explicit force.
-      confirmDisabled={!deps || dependents.isFetching || dependents.isError || (blocking > 0 && !force)}
+      onClose={busy ? () => undefined : onClose}
+      title={t('adminUpstreams.deleteTitle', { name })}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose} disabled={busy} data-autofocus>
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => onConfirm({ force: blocking > 0 && force, purgeGrants })}
+            disabled={!ready || busy}
+          >
+            {busy ? t('adminUpstreams.deleting') : t('adminUpstreams.deleteConfirm')}
+          </button>
+        </>
+      }
     >
+      <p className="secondary" style={{ margin: 0 }}>
+        {t('adminUpstreams.deleteConsequence', { name })}
+      </p>
       {dependents.isPending ? (
-        <p className="small muted">{t('adminUpstreams.dependentsLoading')}</p>
-      ) : dependents.isError ? (
-        <p className="small" style={{ color: 'var(--janus-color-danger-fg)' }}>
-          {t('adminUpstreams.dependentsFailed')}
+        <p className="small muted" role="status" style={{ margin: 0 }}>
+          {t('adminUpstreams.dependentsLoading', { name })}
         </p>
+      ) : dependents.isError ? (
+        <div className="banner banner-danger delete-check-failed" role="alert">
+          <span>{t('adminUpstreams.dependentsFailed', { name })}</span>
+          <button type="button" className="btn btn-sm" onClick={() => void dependents.refetch()} disabled={dependents.isFetching}>
+            {t('common.tryAgain')}
+          </button>
+        </div>
       ) : deps ? (
-        <div className="stack" data-testid="upstream-dependents">
-          {deps.models.length > 0 ? (
-            <details>
-              <summary className="small">{t('adminUpstreams.dependentsModels', { count: deps.models.length })}</summary>
-              <Collection
-                name="Hosted dependents"
-                rows={deps.models}
-                rowKey={(m) => m.id}
-                columns={[
-                  {
-                    id: 'name',
-                    label: 'Model',
-                    value: (m) => `${m.display_name} ${m.name}`,
-                    render: (m) => m.display_name || m.name,
-                  },
-                  { id: 'status', label: 'Status', value: (m) => m.status, render: (m) => m.status },
-                ]}
-              />
-            </details>
-          ) : null}
-          {deps.managed_models.length > 0 ? (
-            <div className="banner banner-warning" role="alert">
-              <p className="small" style={{ margin: 0 }}>
-                <strong>{t('adminUpstreams.dependentsAliasesTitle', { count: deps.managed_models.length })}</strong>{' '}
-                {t('adminUpstreams.dependentsAliasesBody')}
-              </p>
-              <Collection
-                name="Managed alias dependents"
-                rows={[...enabledAliases, ...disabledAliases]}
-                rowKey={(mm) => mm.id}
-                columns={[
-                  { id: 'name', label: 'Alias', value: (mm) => mm.name, render: (mm) => mm.name },
-                  { id: 'target', label: 'Target', value: (mm) => mm.target_model_name, render: (mm) => mm.target_model_name },
-                  { id: 'status', label: 'Status', value: (mm) => mm.status, render: (mm) => mm.status },
-                ]}
-              >
-                {(visible) => (
-                  <ul className="small" style={{ margin: 'var(--janus-space-2) 0 0', paddingLeft: 'var(--janus-space-5)' }}>
-                    {visible.map((mm) => (
-                      <li key={mm.id}>
-                        <span className="mono">{mm.name}</span>
-                        <span className="muted">
-                          {' → '}
-                          {mm.target_model_name}
-                          {mm.status !== 'enabled' ? ` (${t('adminUpstreams.dependentsAliasDisabled')})` : ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Collection>
-              <p className="small">Deletion affects all dependents, not just the matching or visible rows.</p>
-              <p className="small" style={{ margin: 'var(--janus-space-2) 0 0' }}>
-                <Link to="/admin/managed-models" onClick={onClose}>
-                  {t('adminUpstreams.dependentsRepointLink')}
-                </Link>
-              </p>
-              {blocking > 0 ? (
-                <label className="row small" style={{ marginTop: 'var(--janus-space-2)', gap: 'var(--janus-space-2)' }}>
-                  <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-                  <span>{t('adminUpstreams.dependentsForce', { count: blocking })}</span>
+        <div className="stack delete-upstream" data-testid="upstream-dependents">
+          <ul className="delete-impact">
+            <li>
+              {deps.models.length > 0 ? (
+                <details>
+                  <summary>
+                    <strong>
+                      {counted(deps.models.length, 'adminUpstreams.impactModelsOne', 'adminUpstreams.impactModels')}
+                    </strong>
+                    {inUse > 0 ? (
+                      <span className="muted"> · {t('adminUpstreams.impactModelsInUse', { count: inUse })}</span>
+                    ) : null}
+                  </summary>
+                  <Collection
+                    compact
+                    name="Affected models"
+                    rows={deps.models}
+                    rowKey={(m) => m.id}
+                    columns={[
+                      {
+                        id: 'name',
+                        label: 'Model',
+                        value: (m) => `${m.display_name} ${m.name}`,
+                        render: (m) => m.display_name || m.name,
+                      },
+                      { id: 'status', label: 'Status', value: (m) => m.status, render: (m) => m.status },
+                    ]}
+                  >
+                    {(visible) => (
+                      <ul className="delete-impact-rows">
+                        {visible.map((m) => (
+                          <li key={m.id}>
+                            <span className="mono">{m.display_name || m.name}</span>
+                            {m.status === 'enabled' ? null : (
+                              <span className="muted small">
+                                {m.status === 'pending_approval' ? t('adminModels.pendingApproval') : titleCase(m.status)}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Collection>
+                </details>
+              ) : (
+                <span className="muted">{t('adminUpstreams.impactNoModels')}</span>
+              )}
+            </li>
+            {deps.grant_count > 0 ? (
+              <li>
+                <label className="delete-choice">
+                  <input type="checkbox" checked={purgeGrants} onChange={(e) => setPurgeGrants(e.target.checked)} />
+                  <span>
+                    {counted(deps.grant_count, 'adminUpstreams.impactGrantsOne', 'adminUpstreams.impactGrants')}
+                    <span className="small muted delete-choice-hint">{t('adminUpstreams.impactGrantsHint')}</span>
+                  </span>
                 </label>
-              ) : null}
-            </div>
+              </li>
+            ) : null}
+            {aliases.length > 0 ? (
+              <li>
+                <strong className={blocking > 0 ? 'delete-impact-danger' : undefined}>
+                  {blocking > 0
+                    ? counted(blocking, 'adminUpstreams.impactAliasesOne', 'adminUpstreams.impactAliases')
+                    : t('adminUpstreams.impactAliasesAllOff', { count: aliases.length })}
+                </strong>
+                {blocking > 0 ? (
+                  <span className="small delete-impact-hint" role="alert">
+                    {t(blocking === 1 ? 'adminUpstreams.blockerHintOne' : 'adminUpstreams.blockerHint')}
+                  </span>
+                ) : null}
+                <Collection
+                  compact
+                  name="Affected managed models"
+                  rows={aliases}
+                  rowKey={(mm) => mm.id}
+                  columns={[
+                    { id: 'name', label: 'Managed model', value: (mm) => mm.name, render: (mm) => mm.name },
+                    { id: 'target', label: 'Target', value: (mm) => mm.target_model_name, render: (mm) => mm.target_model_name },
+                    { id: 'status', label: 'Status', value: (mm) => mm.status, render: (mm) => mm.status },
+                  ]}
+                >
+                  {(visible) => (
+                    <ul className="delete-impact-rows">
+                      {visible.map((mm) => (
+                        <li key={mm.id}>
+                          <span className="delete-impact-alias">
+                            <span className="mono">{mm.name}</span>
+                            <span className="muted small">
+                              {' → '}
+                              {mm.target_model_name}
+                              {mm.status !== 'enabled' ? ` · ${t('adminUpstreams.impactAliasOff')}` : ''}
+                            </span>
+                          </span>
+                          <Link
+                            to={`/admin/managed-models?q=${encodeURIComponent(mm.name)}`}
+                            className="btn btn-sm"
+                            aria-label={t('adminUpstreams.impactFixLabel', { name: mm.name })}
+                            onClick={onClose}
+                          >
+                            {t('adminUpstreams.impactFix')}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Collection>
+              </li>
+            ) : null}
+          </ul>
+          {blocking > 0 ? (
+            <label className="delete-choice delete-force">
+              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              <span>
+                {counted(blocking, 'adminUpstreams.forceDeleteOne', 'adminUpstreams.forceDelete')}
+                <span className="small delete-choice-hint">
+                  {t(blocking === 1 ? 'adminUpstreams.forceHintOne' : 'adminUpstreams.forceHint')}
+                </span>
+              </span>
+            </label>
           ) : null}
-          {deps.grant_count > 0 ? (
-            <label className="row small" style={{ gap: 'var(--janus-space-2)' }}>
-              <input type="checkbox" checked={purgeGrants} onChange={(e) => setPurgeGrants(e.target.checked)} />
-              <span>{t('adminUpstreams.dependentsPurgeGrants', { count: deps.grant_count })}</span>
+          {needsTyped ? (
+            <label className="field">
+              <span className="field-label">
+                {t('confirmDialog.typePrefix')} <strong className="mono">{name}</strong> {t('confirmDialog.typeSuffix')}
+              </span>
+              <input
+                ref={typedRef}
+                className="input"
+                value={typed}
+                onChange={(event) => setTyped(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
             </label>
           ) : null}
         </div>
       ) : null}
-    </ConfirmDialog>
+    </Modal>
   );
 }
 

@@ -67,20 +67,13 @@ const (
 )
 
 // ProcessedInputTokens is the input the provider actually had to process for a
-// request: everything it read, minus what it served from its prompt cache.
+// request: the whole prompt minus what it served from its prompt cache.
 // Cache reads cost the provider almost no compute, so counting them as
 // processed input makes a cache-heavy request look many times faster than the
 // model really is (a 1,000-token prompt with 900 cached would otherwise report
-// 10x its true prefill speed).
-//
-// The two cache conventions (see TokenCounts.CachedDisjoint) need opposite
-// arithmetic: when cached tokens are a SUBSET of In (OpenAI, Gemini) they are
-// subtracted; when they are DISJOINT (Anthropic, Bedrock) In already excludes
-// them, and cache WRITES are extra input the provider did process.
+// 10x its true prefill speed). Cache writes are input the provider did
+// process, so they stay in.
 func ProcessedInputTokens(t TokenCounts) int64 {
-	if t.CachedDisjoint {
-		return max(0, t.In) + max(0, t.CacheWrite5m) + max(0, t.CacheWrite1h)
-	}
 	return max(0, t.In-max(0, t.Cached))
 }
 
@@ -103,43 +96,38 @@ type Rates struct {
 	CachedNano       int64
 	CacheWrite5mNano int64
 	CacheWrite1hNano int64
+	// Lines are the model's price lines (lines.go): conditional token rates
+	// and unit prices. Nil for a model priced by the five rates alone.
+	Lines map[string]int64
 }
 
-// TokenCounts carries every token dimension of one request that has a price.
-// CacheWrite5m and CacheWrite1h are ADDITIVE to In: upstreams that bill cache
-// writes (Anthropic) report them separately from input_tokens, so they are
-// never subtracted from the fresh-input count the way Cached is.
-//
-// CachedDisjoint selects between the two providers' opposite cache conventions
-// (see adapter.Usage): false = Cached is a SUBSET of In and must be subtracted
-// before applying the fresh-input rate (OpenAI, Gemini); true = Cached is
-// DISJOINT from In and is billed on top (Anthropic).
+// TokenCounts carries every token dimension of one request that has a price,
+// in the one convention Janus records for every provider (see adapter.Usage):
+// In is the whole prompt; Cached (cache reads) and CacheWrite5m /
+// CacheWrite1h (cache writes) are parts of In billed at their own rates.
 type TokenCounts struct {
-	In             int64
-	Out            int64
-	Cached         int64
-	CacheWrite5m   int64
-	CacheWrite1h   int64
-	CachedDisjoint bool
+	In           int64
+	Out          int64
+	Cached       int64
+	CacheWrite5m int64
+	CacheWrite1h int64
 }
 
 // ComputeCostAll prices one request in nano-USD across all five billing
-// dimensions.
+// dimensions. Every prompt token is billed once, at the rate of its part:
 //
-// Cache-read tokens are billed at the cached rate in both conventions; what
-// differs is whether they were already counted inside In:
+//	fresh = in − cached − cache writes
+//	cost  = fresh·rate_in + cached·rate_cached + cw5m·rate_cw5m + cw1h·rate_cw1h + out·rate_out
 //
-//	subset   (OpenAI):    (in − cached)·rate_in + cached·rate_cached + …
-//	disjoint (Anthropic):  in·rate_in           + cached·rate_cached + …
+// which is how Anthropic and Bedrock bill (input, cache reads and cache
+// writes each at their own rate) and how OpenAI bills (cached tokens are part
+// of prompt_tokens at the cached rate).
 //
-// The subset branch clamps Cached to In because a cached count larger than the
-// input count is only meaningful under the disjoint convention; clamping a
-// genuinely disjoint count would discard the entire cached prefix (a measured
-// 23x undercharge on a real Anthropic cache hit).
-//
-// Cache-write tokens are reported separately from input tokens under both
-// conventions and are always billed on top, adding the terms
-// cw5m*rate_cw5m + cw1h*rate_cw1h.
+// Bad data never bills a negative part: cache writes are clamped to the
+// prompt, and cache reads to what is left of it (only an inconsistent
+// provider report — an OpenAI-style server claiming more cached tokens than
+// prompt tokens — can produce either), so the fresh part is never below zero
+// and every prompt token is billed exactly once.
 //
 // The five products are summed BEFORE the single truncating division so a
 // request with zero cache-write tokens (or zero cache-write rates) produces
@@ -147,16 +135,24 @@ type TokenCounts struct {
 // integer and truncating, which biases cost very slightly downward — never
 // upward — so the gateway can never over-report spend.
 func ComputeCostAll(t TokenCounts, r Rates) int64 {
-	fresh := t.In
-	if !t.CachedDisjoint {
-		if t.Cached > t.In {
-			t.Cached = t.In
-		}
-		fresh = t.In - t.Cached
-	}
-	total := fresh*r.InNano + t.Cached*r.CachedNano + t.Out*r.OutNano +
-		t.CacheWrite5m*r.CacheWrite5mNano + t.CacheWrite1h*r.CacheWrite1hNano
+	in := max(0, t.In)
+	w5m := min(max(0, t.CacheWrite5m), in)
+	w1h := min(max(0, t.CacheWrite1h), in-w5m)
+	cached := min(max(0, t.Cached), in-w5m-w1h)
+	fresh := in - w5m - w1h - cached
+	total := fresh*r.InNano + cached*r.CachedNano + t.Out*r.OutNano +
+		w5m*r.CacheWrite5mNano + w1h*r.CacheWrite1hNano
 	return total / TokensPerRateUnit
+}
+
+// TokenPrice is what Janus charges for a request's tokens at these rates:
+// ComputeCostAll at the rates for the prompt's size (a provider that charges
+// more for long prompts charges the whole request at the higher rates once
+// the whole prompt passes the threshold). The proxy bills with it, and it
+// prices Janus's own estimate of a call whose cost the provider quoted, so
+// the two can never be computed differently.
+func TokenPrice(t TokenCounts, r Rates) int64 {
+	return ComputeCostAll(t, r.ForPrompt(t.In))
 }
 
 // ComputeCost is the pre-cache-write, three-dimension form of ComputeCostAll.

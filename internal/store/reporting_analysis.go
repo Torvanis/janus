@@ -103,7 +103,7 @@ func (s *Store) reportAnalysis(ctx context.Context, r *reporting.Result, facts [
 				err = add("reliability_errors", "Observed error codes", []string{"error"}, []string{"requests", "errors"}, "Error codes are aggregates, not causal diagnoses.")
 			}
 		case "efficiency":
-			err = add("efficiency", "Cache and output efficiency", []string{"model"}, []string{"requests", "tokens_in", "tokens_out", "tokens_cached", "cache_hit_rate", "cost_usd", "errors", "fallbacks"}, "Cache ratio = cached / (input + 5m cache writes + 1h cache writes); cached tokens are a subset of input. Observed failures and fallbacks do not include invisible retry-attempt spend.")
+			err = add("efficiency", "Cache and output efficiency", []string{"model"}, []string{"requests", "tokens_in", "tokens_out", "tokens_cached", "cache_hit_rate", "cost_usd", "errors", "fallbacks"}, "Cache ratio = cached / input. Input tokens include cached tokens and cache writes, as providers bill them. Observed failures and fallbacks do not include invisible retry-attempt spend.")
 			totals := reportMetrics(facts, []string{"tokens_in", "tokens_out", "tokens_cached", "cost_usd"})
 			ratio := reportRatio(*totals["tokens_out"], *totals["tokens_in"])
 			r.Sections = append(r.Sections, reportStatSection("efficiency_ratios", "Output ratio", map[string]*float64{"output_input_ratio": ratio}, "Output/input token ratio; null when no input tokens are observed."))

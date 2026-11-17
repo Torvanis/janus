@@ -1,0 +1,399 @@
+{
+  "provider": "anthropic",
+  "entries": [
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "type": "chat",
+      "aliases": [
+        "claude-fable-5-latest"
+      ],
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 1000000000,
+        "rate_cache_write_5m_nanousd": 12500000000,
+        "rate_cache_write_1h_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-1",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 250000000,
+        "rate_cache_write_5m_nanousd": 12500000000,
+        "rate_cache_write_1h_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-2",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 8000000000,
+        "rate_out_nanousd": 40000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 10000000000,
+        "rate_cache_write_1h_nanousd": 16000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "type": "chat",
+      "aliases": [
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-latest"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 5000000000,
+        "rate_cached_nanousd": 100000000,
+        "rate_cache_write_5m_nanousd": 1250000000,
+        "rate_cache_write_1h_nanousd": 2000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 500000000,
+        "rate_cached_nanousd": 10000000,
+        "rate_cache_write_5m_nanousd": 125000000,
+        "rate_cache_write_1h_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=100000": 500000000,
+        "rate_out_nanousd@prompt_over=100000": 2500000000,
+        "rate_cached_nanousd@prompt_over=100000": 50000000,
+        "rate_cache_write_5m_nanousd@prompt_over=100000": 625000000,
+        "rate_cache_write_1h_nanousd@prompt_over=100000": 1000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Prompts over 100,000 tokens (cache reads and writes included) bill every token at the higher prices."
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5",
+      "type": "chat",
+      "aliases": [
+        "claude-mythos-5-latest"
+      ],
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 1000000000,
+        "rate_cache_write_5m_nanousd": 12500000000,
+        "rate_cache_write_1h_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5-1",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 250000000,
+        "rate_cache_write_5m_nanousd": 12500000000,
+        "rate_cache_write_1h_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5-2",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 8000000000,
+        "rate_out_nanousd": 40000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 10000000000,
+        "rate_cache_write_1h_nanousd": 16000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-1-20250805",
+      "type": "chat",
+      "aliases": [
+        "claude-opus-4-1"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 15000000000,
+        "rate_out_nanousd": 75000000000,
+        "rate_cached_nanousd": 1500000000,
+        "rate_cache_write_5m_nanousd": 18750000000,
+        "rate_cache_write_1h_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-20250514",
+      "type": "chat",
+      "aliases": [
+        "claude-opus-4-0"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 15000000000,
+        "rate_out_nanousd": 75000000000,
+        "rate_cached_nanousd": 1500000000,
+        "rate_cache_write_5m_nanousd": 18750000000,
+        "rate_cache_write_1h_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5-20251101",
+      "type": "chat",
+      "aliases": [
+        "claude-opus-4-5"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "type": "chat",
+      "aliases": [
+        "claude-opus-5-latest"
+      ],
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 25000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_cache_write_5m_nanousd": 6250000000,
+        "rate_cache_write_1h_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 4000000000,
+        "rate_out_nanousd": 20000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 5000000000,
+        "rate_cache_write_1h_nanousd": 8000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "type": "chat",
+      "aliases": [
+        "claude-sonnet-4-0"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000,
+        "rate_cache_write_1h_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5-20250929",
+      "type": "chat",
+      "aliases": [
+        "claude-sonnet-4-5"
+      ],
+      "context_window": 200000,
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000,
+        "rate_cache_write_1h_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3750000000,
+        "rate_cache_write_1h_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "type": "chat",
+      "aliases": [
+        "claude-sonnet-5-latest"
+      ],
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 2500000000,
+        "rate_cache_write_1h_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "type": "chat",
+      "context_window": 1000000,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 100000000,
+        "rate_cache_write_5m_nanousd": 2500000000,
+        "rate_cache_write_1h_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "read_at": "2026-11-16"
+      }
+    }
+  ]
+}

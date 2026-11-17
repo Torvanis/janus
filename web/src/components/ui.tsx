@@ -189,9 +189,11 @@ function useFocusTrap(open: boolean) {
     if (!open || !ref.current) return undefined;
     const container = ref.current;
     const previous = document.activeElement as HTMLElement | null;
-    const focusable = container.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
+    // A dialog can name its safest starting point (e.g. Cancel on a delete)
+    // with data-autofocus; otherwise focus the first focusable element.
+    const focusable =
+      container.querySelector<HTMLElement>('[data-autofocus]') ??
+      container.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     focusable?.focus();
 
     const handler = (event: KeyboardEvent) => {
@@ -243,7 +245,7 @@ export function Modal({
     <>
       <div className="scrim" onClick={onClose} aria-hidden="true" />
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
-        <div className="row-between" style={{ marginBottom: 'var(--janus-space-4)' }}>
+        <div className="row-between modal-header" style={{ marginBottom: 'var(--janus-space-4)' }}>
           <h2 id={titleId}>{title}</h2>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} aria-label={t('common.closeDialog')}>
             ✕
@@ -394,6 +396,33 @@ export function ConfirmDialog({
         </label>
       ) : null}
     </Modal>
+  );
+}
+
+/* --- Long identifiers ----------------------------------------------------- */
+
+/**
+ * Text holding URLs, paths or model ids (`provider/model`) that may be wider
+ * than a phone: it offers a line break after every "/" so a long URL wraps at
+ * a path boundary instead of widening the page. Pair it with
+ * `overflow-wrap: break-word` (the `.break-slash` class) so a single segment
+ * that is still too wide breaks too, as a last resort.
+ */
+export function BreakAfterSlash({ text }: { text: string }): ReactNode {
+  const parts = text.split('/');
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 ? (
+            <>
+              /<wbr />
+            </>
+          ) : null}
+        </span>
+      ))}
+    </>
   );
 }
 

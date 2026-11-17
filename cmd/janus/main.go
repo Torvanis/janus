@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/torvanis/janus/internal/safehttp"
 	"log/slog"
 	"net"
 	"net/http"
@@ -34,6 +35,7 @@ import (
 	"github.com/torvanis/janus/internal/jobs"
 	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/listenertls"
+	"github.com/torvanis/janus/internal/pricecatalog"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/revocation"
 	"github.com/torvanis/janus/internal/stigprofile"
@@ -398,7 +400,7 @@ func run() error {
 	// The shared outbound client (discovery, alert webhooks, OIDC) uses the
 	// trust store like the proxy transport does, so internally signed
 	// endpoints verify and trust-store changes apply without a restart.
-	httpClient := &http.Client{Timeout: cfg.UpstreamTotalTimeout, Transport: &truststore.Transport{}}
+	httpClient := &http.Client{Timeout: cfg.UpstreamTotalTimeout, Transport: &truststore.Transport{}, CheckRedirect: safehttp.CheckRedirect(nil)}
 
 	alerts := alerting.New(db, alerting.SMTPConfig{
 		Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.SMTPFrom,
@@ -410,6 +412,18 @@ func run() error {
 	quotaEngine.SetRuleCacheTTL(cfg.ConfigCacheTTL)
 
 	discoverySvc := discovery.New(db, cipher, httpClient, metrics, alerts, logger, cfg.DiscoveryInterval)
+
+	// Price catalog: the signed copy built into this binary, replaced by a
+	// newer downloaded one only when an administrator (or
+	// JANUS_PRICE_CATALOG_REFRESH) turns the daily refresh on.
+	priceCatalog := pricecatalog.NewManager(httpapi.PriceCatalogConfig(cfg), db, httpapi.PriceCatalogClient(), logger)
+	if b, err := pricecatalog.Bundled(); err == nil {
+		n, d := b.Counts()
+		logger.Info("price catalog", "bundled", b.Version, "models", n, "defaults", d, "key_id", b.KeyID)
+	}
+	if cfg.PriceCatalogSignatureOff {
+		logger.Warn("JANUS_PRICE_CATALOG_REQUIRE_SIGNATURE=false: a downloaded price catalog is used without checking its signature")
+	}
 
 	var oidcProvider *auth.OIDCProvider
 	if !cfg.DevAuth() && !cfg.OIDCEnabled() {
@@ -439,6 +453,9 @@ func run() error {
 		logger.Info("identity provider ready", "issuer", oidcProvider.Metadata().Issuer)
 	} else if cfg.DevAuth() {
 		logger.Warn("JANUS_DEV_AUTH is enabled: local sign-in is active and no identity provider is contacted. Do not use this in production.")
+	}
+	for _, v := range config.RemovedVariablesSet() {
+		logger.Warn(v.Message, "variable", v.Name)
 	}
 	// Admin-configured providers (Business: multi_oidc) are built lazily on
 	// first use, so an unreachable one never blocks boot.
@@ -506,22 +523,23 @@ func run() error {
 		Store:  db,
 		// Built here rather than lazily in Handler() because the instance
 		// heartbeat feeds it the replica count before the first request.
-		RateLimits:  quota.NewRateLimiter(),
-		Sessions:    auth.NewDBSessionStore(db, cfg.SessionTTL, cfg.SessionIdleTimeout),
-		OIDC:        oidcProvider,
-		Registry:    registry,
-		Cipher:      cipher,
-		Quota:       quotaEngine,
-		Metrics:     metrics,
-		Trace:       otlp,
-		Alerts:      alerts,
-		Discovery:   discoverySvc,
-		License:     licenseMgr,
-		LicenseSync: licenseSync,
-		Updates:     updater,
-		Logger:      logger,
-		WebAssets:   webAssets,
-		StartedAt:   time.Now().UTC(),
+		RateLimits:   quota.NewRateLimiter(),
+		Sessions:     auth.NewDBSessionStore(db, cfg.SessionTTL, cfg.SessionIdleTimeout),
+		OIDC:         oidcProvider,
+		Registry:     registry,
+		Cipher:       cipher,
+		Quota:        quotaEngine,
+		Metrics:      metrics,
+		Trace:        otlp,
+		Alerts:       alerts,
+		Discovery:    discoverySvc,
+		License:      licenseMgr,
+		LicenseSync:  licenseSync,
+		Updates:      updater,
+		PriceCatalog: priceCatalog,
+		Logger:       logger,
+		WebAssets:    webAssets,
+		StartedAt:    time.Now().UTC(),
 		// Troubleshooting mode: captures only while an admin has enabled a
 		// session; the recorder itself is inert otherwise.
 		Troubleshoot: troubleshoot.New(db, cipher, cfg.TroubleshootDir, logger),
@@ -542,6 +560,10 @@ func run() error {
 	if cfg.TroubleshootDir != "" {
 		logger.Info("troubleshooting disk backend available", "dir", cfg.TroubleshootDir)
 	}
+	// Old per-model "Sees images / Hears sound / Sees video" Chat answers
+	// become model capabilities. Before anything else saves the Chat
+	// settings: saving drops the old fields.
+	server.MigrateChatMediaSettings(ctx)
 	// A SearXNG installed with the deployment turns Chat web search on.
 	server.ApplyDeploymentChatSearch(ctx)
 	perf := httpapi.DecidePerformanceMode(cfg.PerformanceMode, licenseMgr.State())
@@ -563,7 +585,13 @@ func run() error {
 		defer wg.Done()
 		auditFwd.Run(ctx)
 	}()
+	server.WireDiscovery() // before the first run: discovery carries header policies
 	discoverySvc.Start(ctx, &wg)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		priceCatalog.Run(ctx)
+	}()
 	purger.Start(ctx, &wg)
 	jobs.StartQuotaCheckpoint(ctx, &wg, quotaEngine, cfg.QuotaCheckpointEvery, logger)
 	jobs.StartTroubleshootRetention(ctx, &wg, server.Troubleshoot, jobs.TroubleshootRetentionInterval, logger)
@@ -571,6 +599,9 @@ func run() error {
 	jobs.StartInstanceHeartbeat(ctx, &wg, db, server.RateLimits, jobs.NewInstanceID(), logger, jobs.WithLicensedNodes(func() int { return licenseMgr.State().Nodes }))
 	server.StartSubscriptionChecks(ctx, &wg)
 	jobs.NewReportWorker(db, cfg.LocalOnly, logger).Start(ctx, &wg)
+	// Pricing accuracy: Janus's own price for older provider-quoted calls,
+	// from the price history (one pass per start; nothing billed changes).
+	jobs.StartQuotedEstimateBackfill(ctx, &wg, db, cfg.LocalOnly, jobs.QuotedEstimateBackfillDelay, logger)
 	// Load-balanced model pools: probe pooled upstreams' /health and
 	// /metrics. Probes nothing until an admin builds a pool.
 	server.StartPoolProber(ctx, &wg)
@@ -591,6 +622,8 @@ func run() error {
 	}()
 	startActiveUserGauge(ctx, &wg, db, metrics, logger)
 	startUsageRollup(ctx, &wg, db, logger)
+	// Batch and fine-tuning jobs are metered when the provider finishes them.
+	server.StartJobSettlement(ctx, &wg)
 	otlp.Start(ctx, &wg)
 
 	httpServer := &http.Server{
@@ -629,6 +662,36 @@ func run() error {
 	}
 
 	serveErr := make(chan error, 1)
+	// Metrics get a listener of their own, so the public port never serves
+	// them. It uses the same certificate as the main listener when Janus
+	// terminates TLS itself.
+	var metricsServer *http.Server
+	if addr := strings.TrimSpace(cfg.MetricsAddr); addr != "" && !strings.EqualFold(addr, "off") {
+		if addr == cfg.ListenAddr {
+			return fmt.Errorf("JANUS_METRICS_ADDR (%s) must differ from JANUS_LISTEN_ADDR: metrics are not served on the public port", addr)
+		}
+		metricsServer = &http.Server{
+			Addr: addr, Handler: server.MetricsHandler(),
+			ReadHeaderTimeout: 15 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
+		}
+		if listenerTLS.Enabled() {
+			metricsServer.TLSConfig = listenerTLS.TLSConfig().Clone()
+		}
+		go func() {
+			logger.Info("metrics listening", "addr", addr, "tls", listenerTLS.Enabled())
+			var err error
+			if listenerTLS.Enabled() {
+				err = metricsServer.ListenAndServeTLS("", "")
+			} else {
+				err = metricsServer.ListenAndServe()
+			}
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErr <- fmt.Errorf("metrics listener on %s: %w", addr, err)
+			}
+		}()
+	} else {
+		logger.Info("metrics listener is off (JANUS_METRICS_ADDR=off)")
+	}
 	go func() {
 		info := listenerTLS.Info()
 		logger.Info("janus listening",
@@ -657,6 +720,9 @@ func run() error {
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown incomplete", "error", err.Error())
+	}
+	if metricsServer != nil {
+		_ = metricsServer.Close()
 	}
 	// The listener has drained its handlers, but usage-event and quota-ledger
 	// writes run in post-response goroutines; wait for them too so the final

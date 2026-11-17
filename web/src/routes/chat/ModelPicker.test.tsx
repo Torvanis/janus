@@ -57,7 +57,14 @@ function mockGets(catalog: ChatCatalog) {
 
 function renderChat() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+  const me = {
+    id: 'u1',
+    active_team_id: '',
+    teams: [],
+    feature_flags: {},
+    chat_enabled: true,
+    chat_available: true,
+  } as unknown as Me;
   return render(
     <QueryClientProvider client={qc}>
       <SessionContext.Provider value={{ me, config: null, loading: false, error: null, refresh: () => {} }}>
@@ -107,6 +114,44 @@ describe('chat picker follows Administration → Chat', () => {
     const suggestions = await screen.findByRole('group', { name: 'Suggestions' });
     await user.click(within(suggestions).getByRole('button', { name: 'Draft an email' }));
     await waitFor(() => expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe('Draft an email'));
+  });
+
+  it('keeps the open menu on a phone screen and below the top bar', async () => {
+    mockGets(curated);
+    const user = userEvent.setup();
+    const topbar = document.createElement('header');
+    topbar.className = 'topbar';
+    document.body.append(topbar);
+    const size = { w: window.innerWidth, h: window.innerHeight };
+    Object.assign(window, { innerWidth: 360, innerHeight: 800 });
+    let anchorTop = 600;
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === topbar) return { top: 0, bottom: 95, left: 0, right: 360, width: 360, height: 95 } as DOMRect;
+      if (this.classList.contains('chat-picker'))
+        return { top: anchorTop, bottom: anchorTop + 32, left: 60, right: 230, width: 170, height: 32 } as DOMRect;
+      return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 } as DOMRect;
+    });
+    try {
+      renderChat();
+      const button = await screen.findByRole('button', { name: 'Model: gpt-6' });
+      expect(button.getAttribute('title')).toBe('gpt-6');
+      await user.click(button);
+      // Opens upward: slid left to a 12px margin, 336px wide, height capped.
+      let menu = document.querySelector<HTMLElement>('.chat-picker-menu')!;
+      expect([menu.style.left, menu.style.width, menu.style.maxHeight, menu.style.top]).toEqual(['-48px', '336px', '440px', '']);
+      await user.click(button);
+      // A composer high on the screen (empty chat): opens downward instead
+      // of sliding under the top bar.
+      anchorTop = 200;
+      await user.click(button);
+      menu = document.querySelector<HTMLElement>('.chat-picker-menu')!;
+      expect(menu.style.top).toBe('calc(100% + 8px)');
+      expect(menu.style.maxHeight).toBe('440px');
+    } finally {
+      rect.mockRestore();
+      topbar.remove();
+      Object.assign(window, { innerWidth: size.w, innerHeight: size.h });
+    }
   });
 
   it('falls back to the plain grouping when nothing is curated', () => {

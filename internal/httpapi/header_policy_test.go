@@ -142,6 +142,12 @@ func TestHeaderPolicyPerUpstreamOverride(t *testing.T) {
 		t.Fatalf("assign: %d %s", rec.Code, rec.Body.String())
 	}
 
+	// Values are logged only when chosen (the default is names only), and
+	// masking is about values.
+	if rec = h.doAsSession(sess, http.MethodPut, "/api/v1/admin/header-policies/settings", map[string]any{"mode": "values"}); rec.Code != http.StatusOK {
+		t.Fatalf("settings: %d %s", rec.Code, rec.Body.String())
+	}
+	h.server.InvalidateConfigCache()
 	got := h.chatWithHeaders(t, tunnelHeaders)
 	if got.Get("X-Request-Id") != "" {
 		t.Error("upstream policy did not remove X-Request-Id")

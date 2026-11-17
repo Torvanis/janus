@@ -80,8 +80,8 @@ func TestChatAccessRestrictionIsBusinessAndApplies(t *testing.T) {
 	}
 	var me map[string]any
 	decodeRec(t, h.doAsSession(outsider, http.MethodGet, "/api/v1/me", nil), &me)
-	if me["chat_preview"] != false || me["chat_unavailable_reason"] != "Ask IT for Chat access." {
-		t.Fatalf("/me for outsider = %v / %v", me["chat_preview"], me["chat_unavailable_reason"])
+	if me["chat_available"] != false || me["chat_enabled"] != true || me["chat_unavailable_reason"] != "Ask IT for Chat access." {
+		t.Fatalf("/me for outsider = %v / %v / %v", me["chat_available"], me["chat_enabled"], me["chat_unavailable_reason"])
 	}
 	if rec := h.doAsSession(insider, http.MethodGet, "/api/v1/chat/conversations", nil); rec.Code != http.StatusOK {
 		t.Fatalf("group member = %d", rec.Code)

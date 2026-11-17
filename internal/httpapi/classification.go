@@ -167,7 +167,7 @@ func (s *Server) buildClassificationPlan(ctx context.Context, settings store.Cla
 		}
 		dialect := decisionDialect(prof, upstream.BaseURL)
 		plan.Backend = &classify.SystemOne{URL: decisions.Endpoint(upstream.BaseURL, dialect), APIKey: apiKey, Model: settings.Model,
-			Client: s.upstreamHTTPClient(ctx), Style: style, MaxOptions: maxOpts, Label: plan.Classifier, Dialect: dialect}
+			Client: s.ownUpstreamClient(ctx, upstream.ID, upstream.BaseURL), Style: style, MaxOptions: maxOpts, Label: plan.Classifier, Dialect: dialect}
 		// Price calls through the catalog row of this classifier, when
 		// there is one (its rate card, cost source and per-call fee).
 		if m != nil {
@@ -232,7 +232,7 @@ func (s *Server) classifierChatSender(provider adapter.Adapter, up adapter.Upstr
 func (s *Server) classifierChatCall(provider adapter.Adapter, up adapter.Upstream, modelName string) func(ctx context.Context, body []byte) ([]byte, classify.Usage, []byte, error) {
 	return func(ctx context.Context, body []byte) ([]byte, classify.Usage, []byte, error) {
 		req := &adapter.Request{Method: http.MethodPost, Path: "/v1/chat/completions", Header: http.Header{"Content-Type": {"application/json"}},
-			Body: body, Model: modelName, Context: ctx, Client: s.upstreamHTTPClient(ctx)}
+			Body: body, Model: modelName, Context: ctx, Client: s.ownUpstreamClient(ctx, up.ID, up.BaseURL)}
 		prepared, err := provider.Prepare(up, req)
 		if err != nil {
 			return nil, classify.Usage{}, nil, fmt.Errorf("prepare: %w", err)
@@ -248,7 +248,7 @@ func (s *Server) classifierChatCall(provider adapter.Adapter, up adapter.Upstrea
 		if hreq.Header.Get("Content-Type") == "" {
 			hreq.Header.Set("Content-Type", "application/json")
 		}
-		resp, err := s.upstreamHTTPClient(ctx).Do(hreq)
+		resp, err := s.ownUpstreamClient(ctx, up.ID, up.BaseURL).Do(hreq)
 		if err != nil {
 			return nil, classify.Usage{}, nil, err
 		}
@@ -269,7 +269,9 @@ func (s *Server) classifierChatCall(provider adapter.Adapter, up adapter.Upstrea
 		if err != nil {
 			return nil, classify.Usage{}, nil, fmt.Errorf("translate response: %w", err)
 		}
-		return out, classify.Usage{TokensIn: u.TokensIn, TokensOut: u.TokensOut}, nil, nil
+		// TokensIn is the whole prompt (cache reads included, see
+		// adapter.Usage); the cached part is priced at its own rate.
+		return out, classify.Usage{TokensIn: u.TokensIn, TokensOut: u.TokensOut, TokensCached: u.TokensCached}, nil, nil
 	}
 }
 

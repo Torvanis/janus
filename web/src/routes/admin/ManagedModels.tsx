@@ -14,6 +14,7 @@ import {
 import { formatNumber, formatRelative, formatUSD } from '../../lib/format';
 import { AsyncSection, Badge, ConfirmDialog, Drawer, EmptyState, Field, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import { Truncate } from '../../components/TableText';
 import { useDebounced, useUrlState, useUrlStateBatch } from '../../lib/hooks';
 import { FilterSelect, SearchInput } from '../shared';
 import { useLicensed, useLocalOnly } from '../../app/session';
@@ -250,9 +251,9 @@ export function ManagedModelsPage(): ReactNode {
                                 </>
                               ) : null}
                               {m.description ? (
-                                <div className="small muted truncate" style={{ maxWidth: 240 }}>
+                                <Truncate as="div" lines={2} className="small muted" maxWidth={280}>
                                   {m.description}
-                                </div>
+                                </Truncate>
                               ) : null}
                             </td>
                             <td>

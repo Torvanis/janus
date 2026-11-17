@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/torvanis/janus/internal/headerpolicy"
 
 	"github.com/go-chi/chi/v5"
 	"net/http"
@@ -55,9 +56,14 @@ type poolRoute struct {
 // test wiring needs nothing extra.
 func (s *Server) poolRegistry() *balancer.Registry {
 	s.poolOnce.Do(func() {
-		s.pools = balancer.NewRegistry(&http.Client{Timeout: 3 * time.Second, Transport: &truststore.Transport{Fallback: s.Config.TLSClientConfig, Tune: func(t *http.Transport) {
+		probeClient := &http.Client{Timeout: 3 * time.Second, Transport: &truststore.Transport{Fallback: s.Config.TLSClientConfig, Tune: func(t *http.Transport) {
 			t.MaxIdleConnsPerHost, t.IdleConnTimeout = 4, 90*time.Second
-		}}}, s.Logger)
+		}}}
+		s.pools = balancer.NewRegistry(probeClient, s.Logger)
+		// Health and load probes go to the upstream too, so they carry its header policy.
+		s.pools.ClientFor = func(t balancer.Target) *http.Client {
+			return headerpolicy.Client(probeClient, t.BaseURL, s.upstreamPolicy(t.UpstreamID))
+		}
 	})
 	return s.pools
 }
@@ -231,6 +237,26 @@ func (s *Server) poolRetry(ctx context.Context, p *poolRoute, event *store.Usage
 // poolFailure records a member fault on this replica's breaker and, when it
 // opens the breaker, publishes the ejection so every replica takes the
 // member out together.
+// slowBufferedReply reports a non-streamed request that ran out of time
+// waiting for the reply to begin. A non-streamed reply sends nothing until
+// the whole answer is generated, so how long that takes is set by what the
+// caller asked for (a long output), not by the member's health: the member
+// was reached and was working. Counting it as a member fault let one caller
+// with slow requests eject every member of a pool for everyone, and trying
+// the next member ran the same long generation again, up to three times.
+//
+// So it is neither: the caller gets the timeout, and the member stays in
+// the pool. A member that has really stopped answering is still found by
+// the pool's health checks and by streamed requests, whose first byte does
+// not wait for the answer to be finished.
+func slowBufferedReply(event *store.UsageEvent, err error) bool {
+	if event.Streaming || err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "awaiting response headers") || strings.Contains(msg, "while awaiting headers")
+}
+
 func (s *Server) poolFailure(ctx context.Context, p *poolRoute, why string) {
 	model := p.current()
 	until := s.poolRegistry().Breaker(p.poolID, model.ID).Failure(time.Now())

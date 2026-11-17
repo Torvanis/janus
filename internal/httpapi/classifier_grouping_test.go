@@ -22,6 +22,8 @@ type fakeDecider struct {
 	mu      sync.Mutex
 	batches [][]string // question ids per request, sorted
 	delay   time.Duration
+	// inFlight and peak count requests being answered at once.
+	inFlight, peak int
 }
 
 func newFakeDecider(t *testing.T) *fakeDecider {
@@ -44,8 +46,15 @@ func newFakeDecider(t *testing.T) *fakeDecider {
 		f.mu.Lock()
 		f.batches = append(f.batches, ids)
 		delay := f.delay
+		f.inFlight++
+		if f.inFlight > f.peak {
+			f.peak = f.inFlight
+		}
 		f.mu.Unlock()
 		time.Sleep(delay)
+		f.mu.Lock()
+		f.inFlight--
+		f.mu.Unlock()
 		state := strings.ToLower(req.State)
 		answers := map[string]any{}
 		for id, q := range req.Questions {
@@ -160,12 +169,13 @@ func TestDecisionModelBacksBothGuardsInOneCombinedCall(t *testing.T) {
 func TestDecisionModelSeparateStyleAsksEachQuestionAloneInParallel(t *testing.T) {
 	h := newHarness(t)
 	f := newFakeDecider(t)
-	f.delay = 150 * time.Millisecond
+	// Long enough that two calls made one after the other could not be
+	// mistaken for two made together, even on a loaded runner. Whether they
+	// ran together is read from the guard itself, not from the clock.
+	f.delay = 400 * time.Millisecond
 	h.decisionGuard(t, f, "nimble", "llama_cpp") // self-hosted: separate by default
 
-	start := time.Now()
 	rec := h.do(http.MethodPost, "/v1/chat/completions", chatBody("summarize this meeting", false))
-	took := time.Since(start)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -173,12 +183,15 @@ func TestDecisionModelSeparateStyleAsksEachQuestionAloneInParallel(t *testing.T)
 	if len(got) != 2 || len(got[0]) != 1 || len(got[1]) != 1 {
 		t.Fatalf("separate style must send one question per request, got %v", got)
 	}
-	if took > 280*time.Millisecond {
-		t.Fatalf("the two 150 ms guard calls must run in parallel; request took %v", took)
+	f.mu.Lock()
+	peak := f.peak
+	f.mu.Unlock()
+	if peak != 2 {
+		t.Fatalf("the two guard calls must run in parallel; at most %d ran at once", peak)
 	}
 	ev := h.requestEvent(t)
-	if ev.ClassifierCalls != 2 || ev.ClassifierMs < 140 || ev.ClassifierMs > 280 {
-		t.Fatalf("classifier_ms must be the parallel wall time (~150), calls 2: ms=%d calls=%d", ev.ClassifierMs, ev.ClassifierCalls)
+	if ev.ClassifierCalls != 2 || ev.ClassifierMs < 390 || ev.ClassifierMs >= 800 {
+		t.Fatalf("classifier_ms must be the parallel wall time (about 400, under the 800 of two calls in a row), calls 2: ms=%d calls=%d", ev.ClassifierMs, ev.ClassifierCalls)
 	}
 }
 
@@ -299,7 +312,9 @@ func TestClassifierBenchmarkMeasuresLevelsAndMaxConcurrency(t *testing.T) {
 	var started store.ClassifierBenchmark
 	decodeInto(t, rec, &started)
 	var b store.ClassifierBenchmark
-	deadline := time.Now().Add(10 * time.Second)
+	// A test budget: the loop ends as soon as the run does. Ten seconds was
+	// not enough on a loaded CI runner under the race detector.
+	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		got := h.doAsSession(sess, http.MethodGet, "/api/v1/admin/classification/benchmarks/"+started.ID, nil)
 		decodeInto(t, got, &b)

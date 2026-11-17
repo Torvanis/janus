@@ -49,6 +49,7 @@ import { t, type MessageKey } from '../../lib/i18n';
 import { useLicensed, useSession } from '../../app/session';
 import { CategoriesTab, useSecurityCategories } from './SecurityCategories';
 import { categoryCalls, CRITICAL_SAFETY_SLUGS, type PolicyDraftTemplate } from '../../lib/securityTemplates';
+import { providerLabel } from './providerPresets';
 
 const BASE = '/api/v1/admin/secgw';
 const KEY = ['admin', 'secgw'] as const;
@@ -790,7 +791,10 @@ function PolicyDrawer({
   const [mandatory, setMandatory] = useState(policy?.mandatory ?? false);
   const [syntheticRefusal, setSyntheticRefusal] = useState(policy?.synthetic_refusal ?? false);
   const [refusalText, setRefusalText] = useState(policy?.refusal_text ?? '');
-  const [captureBodies, setCaptureBodies] = useState(policy?.capture?.prompt_injection_bodies ?? false);
+  // A stored policy with no value keeps flagged messages (the meaning an
+  // absent value has on policies from before the switch existed), so the
+  // switch must show on for it. A new policy starts off.
+  const [captureBodies, setCaptureBodies] = useState(policy ? (policy.capture?.prompt_injection_bodies ?? true) : false);
   const [checks, setChecks] = useState<SecgwCheck[]>(() => seedChecks(policy?.checks ?? template?.checks));
   const [open, setOpen] = useState<SecgwCheckKind | null>(null);
   const [testing, setTesting] = useState(false);
@@ -2070,7 +2074,10 @@ function BindingDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       case 'group':
         return (groups.data?.groups ?? []).map((g) => ({ id: g.id, label: g.name }));
       case 'upstream':
-        return (upstreams.data?.upstreams ?? []).map((u) => ({ id: u.id, label: `${u.name} · ${u.adapter_type}` }));
+        return (upstreams.data?.upstreams ?? []).map((u) => ({
+          id: u.id,
+          label: `${u.name} · ${providerLabel(u.adapter_type, u.base_url)}`,
+        }));
       case 'service_token':
         return (tokens.data?.service_tokens ?? []).map((s) => ({ id: s.id, label: s.name }));
       case 'model':
@@ -2855,16 +2862,18 @@ function ViolationsTab(): ReactNode {
   const [action, setAction] = useCollectionState('action', '');
   const [since, setSince] = useCollectionState('since', '24h');
   const [category, setCategory] = useCollectionState('category', '');
+  // The keyed hash of one matched text: every request that carried it.
+  const [match, setMatch] = useCollectionState('match', '');
   const [page, setPage] = useUrlState('page', '0');
   const cats = useSecurityCategories();
   const offset = pageOffset(page, 200);
   const [selected, setSelected] = useState<SecgwViolation | null>(null);
 
   const violations = useQuery({
-    queryKey: [...KEY, 'violations', kind, action, since, category, offset],
+    queryKey: [...KEY, 'violations', kind, action, since, category, match, offset],
     queryFn: () =>
       api.get<{ violations: SecgwViolation[]; has_more: boolean }>(
-        `${BASE}/violations${qs({ kind, action, since, category, limit: 200, offset })}`,
+        `${BASE}/violations${qs({ kind, action, since, category, match, limit: 200, offset })}`,
       ),
   });
 
@@ -2921,6 +2930,14 @@ function ViolationsTab(): ReactNode {
             </div>
           </div>
         </div>
+        {match ? (
+          <span className="row small" style={{ gap: 'var(--janus-space-2)', alignItems: 'center' }}>
+            <Badge tone="info">{t('adminSecurity.violations.sameTextFilter')}</Badge>
+            <button type="button" className="btn btn-sm" onClick={() => setMatch('')}>
+              {t('adminSecurity.violations.sameTextClear')}
+            </button>
+          </span>
+        ) : null}
         {violations.data ? (
           <span className="small muted">
             {t('adminSecurity.violations.count', { count: (violations.data.violations ?? []).length })} on this page
@@ -3012,17 +3029,40 @@ function ViolationsTab(): ReactNode {
       <Continuation
         offset={offset}
         limit={200}
-        count={violations.data?.violations?.length ?? 0}
+        count={violations.data ? (violations.data.violations ?? []).length : undefined}
         hasMore={violations.data?.has_more ?? false}
         busy={violations.isFetching}
         onPage={(next) => setPage(String(next))}
       />
-      {selected ? <ViolationDrawer key={selected.id} violation={selected} onClose={() => setSelected(null)} /> : null}
+      {selected ? (
+        <ViolationDrawer
+          key={selected.id}
+          violation={selected}
+          onClose={() => setSelected(null)}
+          onSameText={(hash) => {
+            // Every kind, action and time: the point is to see all of them.
+            setKind('');
+            setAction('');
+            setCategory('');
+            setSince('30d');
+            setMatch(hash);
+            setSelected(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function ViolationDrawer({ violation, onClose }: { violation: SecgwViolation; onClose: () => void }): ReactNode {
+function ViolationDrawer({
+  violation,
+  onClose,
+  onSameText,
+}: {
+  violation: SecgwViolation;
+  onClose: () => void;
+  onSameText?: (hash: string) => void;
+}): ReactNode {
   const toast = useToast();
   const reveal = useMutation({
     mutationFn: () => api.get<{ violation: SecgwViolation }>(`${BASE}/violations/${violation.id}`),
@@ -3121,6 +3161,16 @@ function ViolationDrawer({ violation, onClose }: { violation: SecgwViolation; on
             <span className="secgw-fact-v mono muted" title={t('adminSecurity.violations.matchHashHint')}>
               {v.match_hash || '—'}
             </span>
+            {onSameText && v.match_hash.startsWith('hmac-sha256:') ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{ marginTop: 'var(--janus-space-2)' }}
+                onClick={() => onSameText(v.match_hash)}
+              >
+                {t('adminSecurity.violations.sameTextShow')}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -3254,7 +3304,7 @@ function ClassifiersTab(): ReactNode {
                   value: (m) => m.upstream_name,
                   render: (m) => (
                     <>
-                      {m.upstream_name} <span className="muted">({m.adapter_type})</span>
+                      {m.upstream_name} <span className="muted">({providerLabel(m.adapter_type)})</span>
                     </>
                   ),
                 },

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { AsyncSection, Badge, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
+import { AsyncSection, Badge, BreakAfterSlash, ConfirmDialog, Drawer, Field, useToast } from '../../components/ui';
 import { IconButton, RowActions } from '../../components/IconButton';
+import './header-policies.css';
 
 /**
  * Header policies: what the caller's request headers look like by the time
@@ -54,8 +55,12 @@ export interface HeaderPoliciesResponse {
 const ACTION_LABEL: Record<HeaderAction, string> = { remove: 'Remove', set: 'Set', append: 'Append' };
 
 const LOG_MODES: { mode: HeaderLogMode; label: string; hint: string }[] = [
-  { mode: 'values', label: 'Names and values', hint: 'Credentials, cookies, tokens and secret rule values are always masked.' },
-  { mode: 'names', label: 'Names only', hint: 'Which headers were present, without their values.' },
+  { mode: 'names', label: 'Names only', hint: 'Which headers were present, without their values. This is the default.' },
+  {
+    mode: 'values',
+    label: 'Names and values',
+    hint: 'Known credential, cookie and token headers and secret rule values are masked. Every other value is stored as sent, which can include client addresses, identity headers added by a proxy, and credentials in headers Janus does not recognize.',
+  },
   { mode: 'off', label: 'Off', hint: 'No header record is kept with requests.' },
 ];
 
@@ -121,9 +126,9 @@ export function HeaderPoliciesPanel(): ReactNode {
     <div className="stack">
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--janus-space-3)' }}>
         <p className="small muted" style={{ margin: 0, maxWidth: '72ch' }}>
-          Control which of the caller&apos;s request headers reach each provider: remove, set or add headers per upstream
-          and per personal-subscription provider. Credentials and provider identity headers are always set by Janus and
-          cannot be changed here.
+          Control which of the caller&apos;s request headers reach each provider: remove, set or add headers per upstream and per
+          personal-subscription provider. Credentials and provider identity headers are always set by Janus and cannot be changed
+          here.
         </p>
         <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>
           New policy
@@ -145,7 +150,7 @@ export function HeaderPoliciesPanel(): ReactNode {
                   </p>
                 </div>
                 <div className="table-wrap">
-                  <table className="data">
+                  <table className="data hp-targets">
                     <thead>
                       <tr>
                         <th scope="col">Target</th>
@@ -162,20 +167,30 @@ export function HeaderPoliciesPanel(): ReactNode {
                           <tr key={key}>
                             <th scope="row">
                               <div>{target.name}</div>
-                              {target.detail ? <div className="small muted truncate" style={{ maxWidth: 320 }}>{target.detail}</div> : null}
+                              {target.detail ? (
+                                <div className="hp-target-detail mono small muted break-slash" title={target.detail}>
+                                  <BreakAfterSlash text={target.detail} />
+                                </div>
+                              ) : null}
                             </th>
                             <td className="small">{TARGET_KIND[target.target_type]}</td>
                             <td>
                               <select
-                                className="select"
+                                className="select hp-policy-select"
                                 aria-label={`Policy for ${target.name}`}
                                 value={target.policy_id}
                                 disabled={assign.isPending}
                                 onChange={(e) =>
-                                  assign.mutate({ target_type: target.target_type, target_id: target.target_id, policy_id: e.target.value })
+                                  assign.mutate({
+                                    target_type: target.target_type,
+                                    target_id: target.target_id,
+                                    policy_id: e.target.value,
+                                  })
                                 }
                               >
-                                <option value="">{target.target_type === 'default' ? 'None (pass headers through)' : 'Inherit default'}</option>
+                                <option value="">
+                                  {target.target_type === 'default' ? 'None (pass headers through)' : 'Inherit default'}
+                                </option>
                                 {d.policies.map((p) => (
                                   <option key={p.id} value={p.id}>
                                     {p.name}
@@ -230,7 +245,12 @@ export function HeaderPoliciesPanel(): ReactNode {
                       {d.policies.map((p) => (
                         <tr key={p.id}>
                           <th scope="row">
-                            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, minHeight: 'auto' }} onClick={() => setEditing(p)}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: 0, minHeight: 'auto' }}
+                              onClick={() => setEditing(p)}
+                            >
                               {p.name}
                             </button>
                           </th>
@@ -240,7 +260,11 @@ export function HeaderPoliciesPanel(): ReactNode {
                               <span className="muted">Not assigned</span>
                             ) : (
                               p.assignments
-                                .map((a) => d.targets.find((t) => t.target_type === a.target_type && t.target_id === a.target_id)?.name ?? a.target_id)
+                                .map(
+                                  (a) =>
+                                    d.targets.find((t) => t.target_type === a.target_type && t.target_id === a.target_id)?.name ??
+                                    a.target_id,
+                                )
                                 .join(', ')
                             )}
                           </td>
@@ -365,7 +389,7 @@ function PolicyDrawer({
           .filter(Boolean),
         rules: rules.map(({ key: _key, has_value: _has, ...r }) => ({
           ...r,
-          value: r.action === 'remove' ? undefined : r.value ?? '',
+          value: r.action === 'remove' ? undefined : (r.value ?? ''),
           keep_value: r.secret && !r.value ? r.keep_value : undefined,
         })),
       };
@@ -380,7 +404,8 @@ function PolicyDrawer({
     onError: (e: Error) => toast(e.message, 'danger'),
   });
 
-  const update = (key: number, patch: Partial<DraftRule>) => setRules((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const update = (key: number, patch: Partial<DraftRule>) =>
+    setRules((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const move = (index: number, delta: number) =>
     setRules((rs) => {
       const next = [...rs];
@@ -399,14 +424,19 @@ function PolicyDrawer({
       open={value !== null}
       onClose={onClose}
       title={isNew ? 'New header policy' : `Edit ${name || 'policy'}`}
-      description="Rules run top to bottom on the caller's headers, before Janus adds the provider's credentials."
+      description="Rules run top to bottom on the caller's headers, before Janus adds the provider's credentials. Headers a rule sets or appends also go out on Janus's own calls to that upstream (refreshing its models, health checks, classifiers and decision models) and to a personal-subscription provider (sign-in, token renewal, model lists), so a policy can carry an access token the provider requires."
       wide
       footer={
         <div className="row" style={{ justifyContent: 'flex-end', gap: 'var(--janus-space-2)' }}>
           <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={save.isPending || !name.trim()} onClick={() => save.mutate()}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={save.isPending || !name.trim()}
+            onClick={() => save.mutate()}
+          >
             {save.isPending ? 'Saving…' : 'Save policy'}
           </button>
         </div>
@@ -417,7 +447,13 @@ function PolicyDrawer({
           <input className="input" aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
         </Field>
         <Field label="Description">
-          <textarea className="textarea" aria-label="Description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <textarea
+            className="textarea"
+            aria-label="Description"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </Field>
         <Field
           label="Allow only these caller headers"
@@ -446,7 +482,11 @@ function PolicyDrawer({
                   Add edge &amp; proxy headers
                 </button>
               ) : null}
-              <button type="button" className="btn btn-sm" onClick={() => setRules((rs) => [...rs, draftOf({ action: 'set', name: '', value: '' })])}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setRules((rs) => [...rs, draftOf({ action: 'set', name: '', value: '' })])}
+              >
                 Add rule
               </button>
             </div>
@@ -492,15 +532,29 @@ function PolicyDrawer({
                       onChange={(e) => update(r.key, { value: e.target.value })}
                     />
                     <label className="row small" style={{ gap: 4 }}>
-                      <input type="checkbox" checked={Boolean(r.secret)} onChange={(e) => update(r.key, { secret: e.target.checked, keep_value: false })} />
+                      <input
+                        type="checkbox"
+                        checked={Boolean(r.secret)}
+                        onChange={(e) => update(r.key, { secret: e.target.checked, keep_value: false })}
+                      />
                       Secret
                     </label>
                   </>
                 ) : null}
                 <RowActions>
                   <IconButton icon="up" label={`Move rule ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)} />
-                  <IconButton icon="down" label={`Move rule ${i + 1} down`} disabled={i === rules.length - 1} onClick={() => move(i, 1)} />
-                  <IconButton icon="delete" label={`Delete rule ${i + 1}`} danger onClick={() => setRules((rs) => rs.filter((x) => x.key !== r.key))} />
+                  <IconButton
+                    icon="down"
+                    label={`Move rule ${i + 1} down`}
+                    disabled={i === rules.length - 1}
+                    onClick={() => move(i, 1)}
+                  />
+                  <IconButton
+                    icon="delete"
+                    label={`Delete rule ${i + 1}`}
+                    danger
+                    onClick={() => setRules((rs) => rs.filter((x) => x.key !== r.key))}
+                  />
                 </RowActions>
               </li>
             ))}

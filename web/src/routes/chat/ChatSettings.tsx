@@ -3,6 +3,7 @@
  * effort) with the user's own instructions for every chat, and the row
  * menu in the history list (rename, pin, delete).
  */
+import type { CapabilityResolved } from '../../lib/capabilities';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
@@ -28,12 +29,74 @@ export function useChatSettings() {
   });
 }
 
-export const EFFORTS: { value: string; label: string; hint: string }[] = [
+export interface EffortOption {
+  value: string;
+  label: string;
+  hint: string;
+}
+
+/** Every thinking setting a chat can hold, least to most. */
+export const EFFORTS: EffortOption[] = [
   { value: '', label: 'Model default', hint: 'Let the model decide how long to think.' },
+  { value: 'none', label: 'Off', hint: 'Answers straight away, without thinking first.' },
+  { value: 'minimal', label: 'Minimal', hint: 'Barely any thinking.' },
   { value: 'low', label: 'Low', hint: 'Quick answers, least thinking.' },
   { value: 'medium', label: 'Medium', hint: 'A balance of speed and care.' },
-  { value: 'high', label: 'High', hint: 'Thinks longest; slower and uses more tokens.' },
+  { value: 'high', label: 'High', hint: 'Thinks longer; slower and uses more tokens.' },
+  { value: 'xhigh', label: 'Extra high', hint: 'Thinks longer still.' },
+  { value: 'max', label: 'Maximum', hint: 'Thinks as long as the model allows; slowest.' },
 ];
+
+const WHEN_UNKNOWN = ['', 'low', 'medium', 'high'];
+
+/**
+ * The thinking settings to offer for one model, from what is known about
+ * it (lib/capabilities.ts) and how Janus turns its thinking off
+ * (`thinkingOff`, the model's `thinking_off`). Off is offered only where
+ * the model can turn thinking off; a model that always thinks says so and
+ * names its lowest setting. Nothing known: the three every client knows.
+ * `current` stays listed even when the model does not take it, so a chat
+ * moved to another model still shows what it holds (Janus sends the
+ * nearest value the model takes).
+ */
+export function effortOptions(
+  caps: Record<string, CapabilityResolved> | undefined | null,
+  current = '',
+  thinkingOff?: string | null,
+): { options: EffortOption[]; note: string } {
+  const pick = (values: string[]) => EFFORTS.filter((e) => values.includes(e.value));
+  const levels = caps?.['thinking.levels']?.value;
+  const canTurnOff = !!thinkingOff && thinkingOff !== 'never';
+  const always = thinkingOff === 'never';
+  let values = WHEN_UNKNOWN;
+  let note = '';
+  let lowest: EffortOption | undefined;
+  if (caps?.['thinking.supported']?.value === false || (Array.isArray(levels) && levels.length === 0)) {
+    values = [''];
+    note = 'This model does not have a thinking setting.';
+  } else if (Array.isArray(levels)) {
+    values = ['', ...levels.filter((l) => l !== 'none')];
+    if (canTurnOff) values.push('none');
+    lowest = EFFORTS.find((e) => e.value !== '' && e.value !== 'none' && levels.includes(e.value));
+  } else if (canTurnOff) {
+    values = ['', 'none', 'low', 'medium', 'high'];
+  }
+  if (always) {
+    note = lowest
+      ? `This model always thinks and cannot turn it off. Its lowest setting is ${lowest.label}.`
+      : 'This model always thinks and cannot turn it off.';
+  }
+  const options = pick(values);
+  if (current && !values.includes(current)) {
+    const held = EFFORTS.find((e) => e.value === current);
+    const hint =
+      current === 'none' && always && lowest
+        ? `This model always thinks; ${lowest.label} is used instead.`
+        : 'This model does not take it; the nearest setting it takes is used.';
+    if (held) options.push({ ...held, hint });
+  }
+  return { options, note };
+}
 
 const MAX = 8000;
 
@@ -46,12 +109,18 @@ export function ChatSettingsDrawer({
   onClose,
   instructions,
   effort,
+  capabilities,
+  thinkingOff,
   onSave,
 }: {
   open: boolean;
   onClose: () => void;
   instructions: string;
   effort: string;
+  /** What is known about the chosen model; absent for managed models and personal plans. */
+  capabilities?: Record<string, CapabilityResolved> | null;
+  /** How Janus turns the chosen model's thinking off (the model's `thinking_off`). */
+  thinkingOff?: string | null;
   onSave: (v: { instructions: string; effort: string }) => Promise<void>;
 }): ReactNode {
   const qc = useQueryClient();
@@ -134,11 +203,11 @@ export function ChatSettingsDrawer({
             Thinking
           </span>
           <p className="chat-settings-hint">
-            For models that can reason before answering. Janus fits it to what the model takes, and models without the setting
-            ignore it.
+            For models that can reason before answering. The settings shown are the ones this model takes; if you switch models,
+            Janus uses the nearest one the new model takes. {effortOptions(capabilities, eff, thinkingOff).note}
           </p>
           <div className="chat-effort" role="radiogroup" aria-labelledby="chat-effort-label">
-            {EFFORTS.map((e) => (
+            {effortOptions(capabilities, eff, thinkingOff).options.map((e) => (
               <label key={e.value || 'default'} className={eff === e.value ? 'chat-effort-opt active' : 'chat-effort-opt'}>
                 <input
                   type="radio"

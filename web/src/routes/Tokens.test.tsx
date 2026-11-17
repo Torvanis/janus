@@ -36,6 +36,11 @@ function token(overrides: Partial<ApiToken> & Pick<ApiToken, 'id' | 'description
   };
 }
 
+/** An RFC 3339 time `days` before now; revoked fixtures must be recent to be listed by default. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 const cursor = token({ id: 'tok-a', description: 'Cursor' });
 const zed = token({ id: 'tok-b', description: 'Zed' });
 
@@ -178,7 +183,7 @@ describe('filtering resets pagination', () => {
         id: `tok-${String(i).padStart(2, '0')}`,
         description: `Token ${String(i).padStart(2, '0')}`,
         created_at: `2025-01-${String((i % 27) + 1).padStart(2, '0')}T10:00:00Z`,
-        revoked_at: i < 3 ? '2025-02-01T10:00:00Z' : '',
+        revoked_at: i < 3 ? daysAgo(1) : '',
       }),
     );
     mocked.get.mockResolvedValue({ tokens: many });
@@ -202,7 +207,7 @@ describe('filtering resets pagination', () => {
 
 describe('revocation status badges and filtering', () => {
   const laptop = token({ id: 'tok-act', description: 'Laptop' });
-  const oldCi = token({ id: 'tok-rev', description: 'Old CI', revoked_at: '2025-02-01T10:00:00Z' });
+  const oldCi = token({ id: 'tok-rev', description: 'Old CI', revoked_at: daysAgo(2) });
 
   it('badges active tokens as Active and revoked tokens as Revoked', async () => {
     mocked.get.mockResolvedValue({ tokens: [laptop, oldCi] });
@@ -272,5 +277,154 @@ describe('revocation status badges and filtering', () => {
       '/requests?token_id=tok-act&range=day',
     );
     expect(within(dialog).getByText(/up to 10/)).toBeTruthy();
+  });
+});
+
+describe('tokens revoked more than 7 days ago', () => {
+  const laptop = token({ id: 'tok-act', description: 'Laptop' });
+  const recent = token({ id: 'tok-recent', description: 'Recently revoked', revoked_at: daysAgo(6) });
+  const stale1 = token({ id: 'tok-old1', description: 'Old CI', revoked_at: daysAgo(8) });
+  const stale2 = token({ id: 'tok-old2', description: 'Old laptop', revoked_at: daysAgo(90) });
+
+  it('hides them by default, says how many, and shows them on request', async () => {
+    mocked.get.mockResolvedValue({ tokens: [laptop, recent, stale1, stale2] });
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    expect(await screen.findByText('Laptop')).toBeTruthy();
+    expect(screen.getByText('Recently revoked')).toBeTruthy();
+    expect(screen.queryByText('Old CI')).toBeNull();
+    expect(screen.queryByText('Old laptop')).toBeNull();
+    expect(screen.getByText('2 tokens revoked more than 7 days ago are hidden.')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Show all revoked' }));
+    expect(await screen.findByText('Old CI')).toBeTruthy();
+    expect(screen.getByText('Old laptop')).toBeTruthy();
+    expect(screen.queryByText(/are hidden/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Hide tokens revoked more than 7 days ago' }));
+    await waitFor(() => expect(screen.queryByText('Old CI')).toBeNull());
+    expect(screen.getByText('2 tokens revoked more than 7 days ago are hidden.')).toBeTruthy();
+  });
+
+  it('counts only hidden tokens that match the current search and status', async () => {
+    mocked.get.mockResolvedValue({ tokens: [laptop, recent, stale1, stale2] });
+    const user = userEvent.setup();
+    renderTokensPage('/tokens?status=revoked&q=laptop');
+
+    // "Old laptop" matches the search but is hidden; "Old CI" does not match.
+    expect(await screen.findByText('1 token revoked more than 7 days ago is hidden.')).toBeTruthy();
+    expect(screen.getByText('No tokens match those filters')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Show all revoked' }));
+    expect(await screen.findByText('Old laptop')).toBeTruthy();
+    expect(screen.queryByText('Old CI')).toBeNull();
+  });
+
+  it('keeps the choice in the URL so a reload still shows every revoked token', async () => {
+    mocked.get.mockResolvedValue({ tokens: [laptop, stale1] });
+    renderTokensPage('/tokens?revoked=all');
+    expect(await screen.findByText('Old CI')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hide tokens revoked more than 7 days ago' })).toBeTruthy();
+  });
+
+  it('offers to show them, or to create a token, when every token is an old revoked one', async () => {
+    mocked.get.mockResolvedValue({ tokens: [stale1] });
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    expect(await screen.findByText('No active or recently revoked tokens')).toBeTruthy();
+    // Not the first-run empty state: the user does have tokens.
+    expect(screen.queryByText('No tokens yet')).toBeNull();
+    // The page header's Create token plus the empty state's own.
+    expect(screen.getAllByRole('button', { name: 'Create token' })).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'Show all revoked' }));
+    expect(await screen.findByText('Old CI')).toBeTruthy();
+  });
+
+  it('shows no age note when nothing old is revoked', async () => {
+    mocked.get.mockResolvedValue({ tokens: [laptop, recent] });
+    renderTokensPage();
+    expect(await screen.findByText('Recently revoked')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show all revoked' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Hide tokens revoked/ })).toBeNull();
+  });
+});
+
+describe('re-issue', () => {
+  const fresh = token({ id: 'tok-new', description: 'Cursor', prefix: 'janus_NEWNEW' });
+
+  it('re-issues an active token, revoking the old one by default, and reveals the new value once', async () => {
+    mocked.post.mockResolvedValue({ token: fresh, value: 'janus_reissued_secret', revoked_old: true });
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    const row = (await screen.findByText('Cursor')).closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Re-issue' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Re-issue “Cursor”?')).toBeTruthy();
+    const revokeOld = within(dialog).getByRole('checkbox', { name: /Revoke the old token now/ }) as HTMLInputElement;
+    expect(revokeOld.checked).toBe(true);
+    // Says what happens to tools still on the old token.
+    expect(within(dialog).getByText(/refused with a 401 from the moment you re-issue/)).toBeTruthy();
+    expect(mocked.post).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Re-issue token' }));
+    expect(mocked.post).toHaveBeenCalledWith('/api/v1/tokens/tok-a/reissue', { revoke_old: true });
+    expect(await screen.findByText('janus_reissued_secret')).toBeTruthy();
+    expect(screen.getByText('This is the only time the value is shown.')).toBeTruthy();
+    expect(screen.getByText('New token created. The old one is revoked.')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'I’ve saved it' }));
+    expect(screen.queryByText('janus_reissued_secret')).toBeNull();
+  });
+
+  it('can keep the old token working and explains both tokens share the name', async () => {
+    mocked.post.mockResolvedValue({ token: fresh, value: 'janus_second', revoked_old: false });
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    const row = (await screen.findByText('Cursor')).closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Re-issue' }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('checkbox', { name: /Revoke the old token now/ }));
+    expect(within(dialog).getByText(/keeps working until you revoke it/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Re-issue token' }));
+
+    expect(mocked.post).toHaveBeenCalledWith('/api/v1/tokens/tok-a/reissue', { revoke_old: false });
+    expect(await screen.findByText('janus_second')).toBeTruthy();
+    expect(screen.queryByText('New token created. The old one is revoked.')).toBeNull();
+  });
+
+  it('re-issues a revoked token without a revoke choice', async () => {
+    const gone = token({ id: 'tok-gone', description: 'Old CI', revoked_at: daysAgo(1) });
+    mocked.get.mockResolvedValue({ tokens: [gone] });
+    mocked.post.mockResolvedValue({ token: { ...fresh, description: 'Old CI' }, value: 'janus_ci', revoked_old: false });
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    const row = (await screen.findByText('Old CI')).closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Re-issue' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('checkbox')).toBeNull();
+    expect(within(dialog).getByText(/The old token stays revoked/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Re-issue token' }));
+    expect(mocked.post).toHaveBeenCalledWith('/api/v1/tokens/tok-gone/reissue', { revoke_old: false });
+    expect(await screen.findByText('janus_ci')).toBeTruthy();
+  });
+
+  it('keeps the dialog open with the reason when the server refuses', async () => {
+    mocked.post.mockRejectedValue(new Error('You are no longer an active member of this token’s team.'));
+    const user = userEvent.setup();
+    renderTokensPage();
+
+    const row = (await screen.findByText('Zed')).closest('tr')!;
+    await user.click(within(row).getByRole('button', { name: 'Re-issue' }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Re-issue token' }));
+    expect(await within(dialog).findByRole('alert')).toBeTruthy();
+    expect(within(dialog).getByText(/no longer an active member/)).toBeTruthy();
+    // Cancel is still there; nothing was revealed.
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    expect(screen.queryByText('This is the only time the value is shown.')).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import {
   formatRate,
   formatTokenCount,
   formatUSD,
+  formatUSDPrecise,
   quotaTone,
   statusTone,
   usdFromNano,
@@ -21,6 +22,15 @@ describe('money formatting', () => {
     // routinely smaller than a cent and users need to see them.
     expect(formatUSD(3_000)).toContain('0.000003');
     expect(formatUSD(0)).toContain('0.00');
+  });
+
+  it('keeps the digits a price comparison needs', () => {
+    expect(formatUSDPrecise(48_718_000)).toBe('$0.0487');
+    expect(formatUSDPrecise(63_718_000)).toBe('$0.0637');
+    expect(formatUSDPrecise(906_000)).toBe('$0.000906');
+    expect(formatUSDPrecise(364_800_000)).toBe('$0.3648');
+    expect(formatUSDPrecise(1_234_000_000_000)).toBe('$1,234.00');
+    expect(formatUSDPrecise(0)).toBe('$0.00');
   });
 
   it('renders rate cards per million tokens', () => {

@@ -387,7 +387,7 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request, inbound 
 	if apiKey != "" {
 		out.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	resp, err := s.upstreamHTTPClient(ctx).Do(out)
+	resp, err := s.ownUpstreamClient(ctx, upstream.ID, upstream.BaseURL).Do(out)
 	if err != nil {
 		s.Metrics.UpstreamErrors.WithLabelValues(upstream.Name, "unreachable").Inc()
 		if route != nil {
@@ -444,9 +444,10 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request, inbound 
 	event.TokensIn, event.TokensOut, event.TokensCached = parsed.Usage.InputTokens, parsed.Usage.OutputTokens, parsed.Usage.CachedTokens
 	call := decisionCall{
 		TokensIn: parsed.Usage.InputTokens, TokensOut: parsed.Usage.OutputTokens, TokensCached: parsed.Usage.CachedTokens,
-		CostUSD: parsed.Usage.CostUSD, CostReported: parsed.Usage.CostReported,
+		CostUSD: parsed.Usage.CostUSD, CostNano: parsed.Usage.CostNano, CostReported: parsed.Usage.CostReported,
 	}
 	event.CostNano, event.AccountingMode = s.decisionCost(ctx, model, call)
+	event.EstimatedCostNano = s.decisionEstimate(ctx, model, call, event.AccountingMode)
 	event.CostStatus = s.decisionCostStatus(ctx, model, call, event.CostNano)
 	reply := raw
 	if translated {

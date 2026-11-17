@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image/png"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,6 +46,10 @@ const (
 	pendingTTL      = 5 * time.Minute
 	totpIssuer      = "Janus Edge"
 	loginRatePerMin = 20 // per client IP; the account lockout is the real defense
+	// totpRatePerMin bounds second-step guesses against one account from
+	// every address together, on this replica. The lockout counter (shared,
+	// in the database) is what stops a patient guesser; this slows a fast one.
+	totpRatePerMin = 10
 )
 
 // pendingLogin remembers a password-verified user awaiting their TOTP code.
@@ -93,7 +98,10 @@ func (s *Server) handleLocalStatus(w http.ResponseWriter, r *http.Request) {
 // endpoint is a 404 so it can never be used to add an admin later.
 func (s *Server) handleLocalSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.needsSetup(r) {
-		WriteError(w, r, ErrNotFoundf("setup is already complete"))
+		// Stay a 404 (the route must not look usable once an account
+		// exists) but say what happened instead of "... was not found."
+		WriteError(w, r, newError(http.StatusNotFound, CodeNotFound, "invalid_request_error",
+			"Setup is already complete. Reload the page and sign in."))
 		return
 	}
 	var in struct {
@@ -135,6 +143,14 @@ func (s *Server) handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r = withSignInMethod(r, "local")
+	// A short name ("ada") or Windows name ("CORP\ada") becomes the full name
+	// in the directory's default domain before anything else looks at it, so
+	// lockout, the local check, the directory search and the audit all see
+	// one identity. A Windows name for another domain runs the same checks
+	// as typed (no local account has a backslash), skips the directory and
+	// fails like a wrong password; only the log and audit say why.
+	var qerr error
+	in.Email, qerr = s.qualifyLogin(r, in.Email)
 	if !s.consentGiven(r) {
 		WriteError(w, r, newError(http.StatusForbidden, "banner_required", "auth_error", "Read and acknowledge the notice before signing in."))
 		return
@@ -163,6 +179,11 @@ func (s *Server) handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		// Not a local account (or wrong password): try the directory if one
 		// is configured. A miss there counts one failure for the attempt.
+		if qerr != nil {
+			s.Logger.InfoContext(r.Context(), "sign-in refused: Windows domain is not this directory's", "login", strings.ToLower(in.Email))
+			s.signInFailed(w, withSignInMethod(r, "directory"), in.Email, "unknown_windows_domain")
+			return
+		}
 		if s.tryDirectoryLogin(w, withSignInMethod(r, "directory"), in.Email, in.Password, in.RedirectTo) {
 			return
 		}
@@ -183,6 +204,10 @@ func (s *Server) handleLocalTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.ReplaceAll(strings.TrimSpace(in.Code), " ", "")
+	if ok, _ := s.RateLimits.Allow("login-code:"+s.clientIP(r), loginRatePerMin, time.Now()); !ok {
+		WriteError(w, r, newError(http.StatusTooManyRequests, "rate_limited", "auth_error", "Too many sign-in attempts from this address. Wait a minute and try again."))
+		return
+	}
 	userID, ok, terr := s.Store.TakePendingLogin(r.Context(), in.Pending, false)
 	if terr != nil {
 		WriteError(w, r, ErrInternal())
@@ -190,6 +215,21 @@ func (s *Server) handleLocalTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		WriteError(w, r, newError(http.StatusUnauthorized, "pending_expired", "auth_error", "Sign in again to get a new code prompt."))
+		return
+	}
+	// The code step answers to the same lock as the password step: wrong
+	// codes count toward it, and a locked account gets no further guesses
+	// from a prompt that was issued before the lock.
+	pendingUser, perr := s.Store.UserByID(r.Context(), userID)
+	if perr != nil {
+		WriteError(w, r, newError(http.StatusUnauthorized, "pending_expired", "auth_error", "Sign in again to get a new code prompt."))
+		return
+	}
+	if s.refuseIfLocked(w, withSignInMethod(r, "local"), pendingUser.Email) {
+		return
+	}
+	if ok, _ := s.RateLimits.Allow("totp:"+userID, totpRatePerMin, time.Now()); !ok {
+		WriteError(w, r, newError(http.StatusTooManyRequests, "rate_limited", "auth_error", "Too many codes tried for this account. Wait a minute and try again."))
 		return
 	}
 	valid := false
@@ -230,6 +270,8 @@ func (s *Server) handleLocalTOTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// Both steps passed: only now does the failure count start over.
+	_ = s.Store.ClearSignInFailures(r.Context(), u.Email)
 	s.finishLocalLogin(w, withSignInMethod(r, "local"), u, in.RedirectTo)
 }
 
@@ -283,11 +325,26 @@ func (r *redirectRecorder) WriteHeader(code int) {
 
 func (s *Server) mountLocalAccountRoutes(pr chi.Router) {
 	pr.Get("/me/local", s.handleMeLocal)
-	pr.Put("/me/local/password", s.handleMeSetPassword)
-	pr.Post("/me/local/totp/start", s.handleMeTOTPStart)
-	pr.Post("/me/local/totp/confirm", s.handleMeTOTPConfirm)
-	pr.Post("/me/local/totp/disable", s.handleMeTOTPDisable)
-	pr.Get("/me/local/totp/qr.png", s.handleMeTOTPQR)
+	pr.Put("/me/local/password", s.browserSessionOnly(s.handleMeSetPassword))
+	pr.Post("/me/local/totp/start", s.browserSessionOnly(s.handleMeTOTPStart))
+	pr.Post("/me/local/totp/confirm", s.browserSessionOnly(s.handleMeTOTPConfirm))
+	pr.Post("/me/local/totp/disable", s.browserSessionOnly(s.handleMeTOTPDisable))
+	pr.Get("/me/local/totp/qr.png", s.browserSessionOnly(s.handleMeTOTPQR))
+}
+
+// browserSessionOnly refuses a caller that authenticated with an API token.
+// A token is a credential for calling models; it must not be able to change
+// how its owner signs in (password, second factor), or a leaked token becomes
+// a takeover of the account behind it.
+func (s *Server) browserSessionOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if SessionFrom(r.Context()) == nil {
+			// The refusal is audited as access_denied by the API middleware.
+			WriteError(w, r, ErrForbidden("Sign-in settings can only be changed from a signed-in browser session, not with an API token."))
+			return
+		}
+		next(w, r)
+	}
 }
 
 // handleMeTOTPQR renders the staged (unconfirmed) secret as a QR PNG. The
@@ -363,14 +420,21 @@ func (s *Server) handleMeSetPassword(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	if cred != nil && !cred.MustChange {
+	if cred == nil {
+		// An account that signs in through an identity provider gets its
+		// first password from an administrator (People, Reset password),
+		// never from itself: adding a second way in is an administrative act.
+		WriteError(w, r, ErrForbidden("This account has no password. An administrator can add one from People."))
+		return
+	}
+	if !cred.MustChange {
 		if _, _, cerr := s.Store.CheckPassword(r.Context(), u.Email, in.Current); cerr != nil && !errors.Is(cerr, store.ErrTOTPRequired) {
 			WriteError(w, r, newError(http.StatusForbidden, "bad_credentials", "auth_error", "Current password is incorrect."))
 			return
 		}
 	}
 	current := in.Current
-	if cred != nil && cred.MustChange {
+	if cred.MustChange {
 		current = ""
 	}
 	if err := s.Store.ChangeOwnPassword(r.Context(), u.ID, current, in.New); err != nil {
@@ -387,11 +451,30 @@ func (s *Server) handleMeSetPassword(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"changed": true})
 }
 
+// handleMeTOTPStart stages a new authenticator secret. Staging replaces the
+// stored secret, so on an account whose second factor is already on it is the
+// same act as turning it off and is held to the same bar: the password, and an
+// audit record. Without that, anyone holding a session could drop the second
+// factor silently by "starting" enrollment again.
 func (s *Server) handleMeTOTPStart(w http.ResponseWriter, r *http.Request) {
 	u := UserFrom(r.Context())
-	if _, err := s.Store.LocalCredential(r.Context(), u.ID); err != nil {
+	cred, err := s.Store.LocalCredential(r.Context(), u.ID)
+	if err != nil {
 		WriteError(w, r, ErrInvalidRequest("set a password before enabling two-factor authentication"))
 		return
+	}
+	if cred.TOTPEnabled {
+		var in struct {
+			Password string `json:"password"`
+		}
+		// The body is optional for a first enrollment, so a missing or
+		// empty one is not an error here; it simply carries no password.
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in)
+		if _, _, cerr := s.Store.CheckPassword(r.Context(), u.Email, in.Password); cerr != nil && !errors.Is(cerr, store.ErrTOTPRequired) {
+			WriteError(w, r, newError(http.StatusForbidden, "bad_credentials", "auth_error", "Two-factor authentication is already on. Enter your password to set it up again."))
+			return
+		}
+		s.audit(r, "user_totp_disabled", "user", u.ID, nil, map[string]any{"reason": "set up again"})
 	}
 	key, alg, err := generateTOTPKey(u.Email)
 	if err != nil {

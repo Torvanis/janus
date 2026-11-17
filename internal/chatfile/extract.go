@@ -40,15 +40,18 @@ func processPDF(ctx context.Context, data []byte) (res Result, err error) {
 		}
 		return Result{}, reject("That PDF could not be read.")
 	}
-	pages := min(r.NumPage(), maxPDFPages)
+	// The page tree is walked here, not by the parser: its own lookup
+	// follows /Kids and /Parent with no bound, so a file whose page tree
+	// refers to itself kept a CPU core busy for good (nothing can stop a
+	// goroutine that never returns).
+	leaves, ok := pdfPages(ctx, r)
+	if !ok {
+		return Result{}, reject("That PDF could not be read.")
+	}
 	var b strings.Builder
-	for i := 1; i <= pages; i++ {
+	for _, p := range leaves {
 		if err := ctx.Err(); err != nil {
 			return Result{}, reject("That PDF took too long to read.")
-		}
-		p := r.Page(i)
-		if p.V.IsNull() {
-			continue
 		}
 		text, err := p.GetPlainText(nil)
 		if err != nil {
@@ -67,6 +70,53 @@ func processPDF(ctx context.Context, data []byte) (res Result, err error) {
 		return Result{}, reject("That PDF has no text layer (it may be scanned). Attach it as images instead.")
 	}
 	return document(mimePDF, text)
+}
+
+// Bounds on a PDF page tree. Real trees are a few levels deep; the node
+// budget covers maxPDFPages leaves with room for every intermediate node.
+const (
+	maxPDFTreeDepth = 32
+	maxPDFTreeNodes = 20 * maxPDFPages
+)
+
+// pdfPages lists the pages of a document in order (at most maxPDFPages),
+// refusing a page tree that is deeper or larger than any real one, which is
+// what a tree that refers to itself looks like. Each page's /Parent chain is
+// checked the same way, because the parser follows it to find inherited
+// fonts.
+func pdfPages(ctx context.Context, r *pdf.Reader) ([]pdf.Page, bool) {
+	var leaves []pdf.Page
+	nodes := 0
+	var walk func(node pdf.Value, depth int) bool
+	walk = func(node pdf.Value, depth int) bool {
+		nodes++
+		if depth > maxPDFTreeDepth || nodes > maxPDFTreeNodes || ctx.Err() != nil {
+			return false
+		}
+		switch node.Key("Type").Name() {
+		case "Page":
+			up := node
+			for i := 0; !up.IsNull(); i++ {
+				if i > maxPDFTreeDepth {
+					return false
+				}
+				up = up.Key("Parent")
+			}
+			leaves = append(leaves, pdf.Page{V: node})
+		case "Pages":
+			kids := node.Key("Kids")
+			for i := 0; i < kids.Len() && len(leaves) < maxPDFPages; i++ {
+				if !walk(kids.Index(i), depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !walk(r.Trailer().Key("Root").Key("Pages"), 0) {
+		return nil, false
+	}
+	return leaves, true
 }
 
 // pdfLooksEncrypted reports whether the file declares a standard security

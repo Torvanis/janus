@@ -76,7 +76,14 @@ it('stops following the reply when the reader scrolls up, and resumes at the bot
     }
     return { conversations: [], results: [] } as never;
   });
-  const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+  const me = {
+    id: 'u1',
+    active_team_id: '',
+    teams: [],
+    feature_flags: {},
+    chat_enabled: true,
+    chat_available: true,
+  } as unknown as Me;
   const { container } = render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <SessionContext.Provider value={{ me, config: null, loading: false, error: null, refresh: () => {} }}>

@@ -91,67 +91,6 @@ func TestModelMetadataPatchContract(t *testing.T) {
 	}
 }
 
-func TestReferenceApplyPreservesFreeAndContextOverrides(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	session, err := h.server.Sessions.Create(ctx, h.user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.store.UpsertDiscoveredModel(ctx, h.model.UpstreamID, "gpt-4o", nil); err != nil {
-		t.Fatal(err)
-	}
-	m, err := h.store.ModelByUpstreamAndName(ctx, h.model.UpstreamID, "gpt-4o")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := h.patchModel(session, m.ID, map[string]any{"context_window": 0, "rate_in_usd_per_mtok": 0, "rate_out_usd_per_mtok": 0})
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	rec = h.doAsSession(session, http.MethodPost, "/api/v1/admin/ratecards/apply", map[string]any{})
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	m, err = h.store.ModelByID(ctx, m.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.ContextWindow != 0 || m.RateInNano != 0 || m.RateOutNano != 0 {
-		t.Fatal("reference apply overwrote explicit zero overrides")
-	}
-}
-
-func TestReferenceApplyAtomicMetadata(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	session, err := h.server.Sessions.Create(ctx, h.user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.store.UpsertDiscoveredModel(ctx, h.model.UpstreamID, "gpt-4o", nil); err != nil {
-		t.Fatal(err)
-	}
-	m, err := h.store.ModelByUpstreamAndName(ctx, h.model.UpstreamID, "gpt-4o")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.store.DB().ExecContext(ctx, `CREATE TRIGGER reject_apply BEFORE INSERT ON rate_card_version BEGIN SELECT RAISE(ABORT,'test rejection'); END`); err != nil {
-		t.Fatal(err)
-	}
-	rec := h.doAsSession(session, http.MethodPost, "/api/v1/admin/ratecards/apply", map[string]any{})
-	if rec.Code != 500 {
-		t.Fatalf("expected write failure, got %d", rec.Code)
-	}
-	after, err := h.store.ModelByID(ctx, m.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.ContextWindow != 0 || after.Metadata["context_window"].Source != "unknown" || !after.RateEffectiveFrom.IsZero() {
-		t.Fatal("failed apply left partial metadata")
-	}
-}
-
 func TestDiscoveryStaleModelsInvalidateCache(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

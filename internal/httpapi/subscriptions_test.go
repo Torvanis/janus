@@ -41,6 +41,12 @@ type fakeXAI struct {
 	streamType string
 	// emptyStream streams a reply with no text at all.
 	emptyStream bool
+	// models replaces the plan's model list (default grok-test,
+	// grok-test-fast).
+	models []string
+	// answer, when set, writes the text of a non-streamed reply from the
+	// request body (a capability measurement's questions).
+	answer func(body string) string
 }
 
 func newFakeXAI(t *testing.T) *fakeXAI {
@@ -118,6 +124,14 @@ func (f *fakeXAI) serve(w http.ResponseWriter, r *http.Request) {
 			writeJSON(st, map[string]any{"error": "invalid_token"})
 			return
 		}
+		if f.models != nil {
+			data := []map[string]any{}
+			for _, m := range f.models {
+				data = append(data, map[string]any{"id": m})
+			}
+			writeJSON(200, map[string]any{"data": data})
+			return
+		}
 		writeJSON(200, map[string]any{"data": []map[string]any{{"id": "grok-test"}, {"id": "grok-test-fast"}}})
 	case "/v1/chat/completions":
 		f.inferenceAuth = append(f.inferenceAuth, bearer)
@@ -141,6 +155,11 @@ func (f *fakeXAI) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			_, _ = io.WriteString(w, `data: {"id":"x-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":5,"cost_in_usd_ticks":123456789}}`+"\n\n")
 			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		if f.answer != nil {
+			writeJSON(200, map[string]any{"id": "x-2", "choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": f.answer(string(body))}, "finish_reason": "stop"}},
+				"usage": map[string]any{"prompt_tokens": 9, "completion_tokens": 1}})
 			return
 		}
 		// xAI reports a list-price cost; for a personal plan it must not

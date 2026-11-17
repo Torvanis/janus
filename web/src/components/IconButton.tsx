@@ -7,7 +7,9 @@
  * (aria-label) and appears as a tooltip on hover and keyboard focus, so
  * nothing is lost for screen readers or tests that query by role + name.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { t } from '../lib/i18n';
 
 type IconName =
   | 'edit'
@@ -183,7 +185,90 @@ export function CopyIconButton({ value, label, copiedLabel }: { value: string; l
   );
 }
 
-/** Right-aligned, single-line group of row actions. */
+/**
+ * Right-aligned, single-line group of row actions, pinned to the right edge of
+ * the table's scroll area. On phones (below 768px) two or more actions fold
+ * into one "More actions" button whose menu lists them with their labels, so
+ * the pinned column is one button wide instead of covering a third of the row.
+ */
 export function RowActions({ children }: { children: ReactNode }): ReactNode {
-  return <div className="row-actions">{children}</div>;
+  const count = Children.toArray(children).filter(Boolean).length;
+  const [menu, setMenu] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const close = useCallback((refocus: boolean) => {
+    setMenu(null);
+    if (refocus) toggle.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!menu) return;
+    pop.current?.querySelector<HTMLElement>('button:not(:disabled), a[href]')?.focus();
+    const onDown = (e: PointerEvent) => {
+      if (!pop.current?.contains(e.target as Node) && !toggle.current?.contains(e.target as Node)) close(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close(true);
+    };
+    // Close when the row moves under the menu (page or table scroll), not on
+    // a stray scroll event that leaves the button where it was.
+    const at = toggle.current?.getBoundingClientRect();
+    const onMove = () => {
+      const now = toggle.current?.getBoundingClientRect();
+      if (!at || !now || Math.abs(now.top - at.top) > 2 || Math.abs(now.left - at.left) > 2) close(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [menu, close]);
+  if (count < 2) return <div className="row-actions">{children}</div>;
+  return (
+    <div className="row-actions">
+      <span className="row-actions-inline">{children}</span>
+      <button
+        ref={toggle}
+        type="button"
+        className="icon-btn row-actions-more"
+        aria-label={t('tables.moreActions')}
+        data-tooltip={t('tables.moreActions')}
+        aria-haspopup="true"
+        aria-expanded={menu !== null}
+        onClick={() => {
+          if (menu) return close(false);
+          const r = toggle.current!.getBoundingClientRect();
+          const right = Math.max(4, window.innerWidth - r.right);
+          // Open upward when the row sits in the bottom third of the window.
+          setMenu(
+            r.bottom > window.innerHeight * 0.66
+              ? { bottom: window.innerHeight - r.top + 4, right }
+              : { top: r.bottom + 4, right },
+          );
+        }}
+      >
+        <Icon name="more" />
+      </button>
+      {menu
+        ? createPortal(
+            <div
+              ref={pop}
+              className="row-actions-menu"
+              role="group"
+              aria-label={t('tables.actions')}
+              style={menu}
+              // An action opens its own dialog or runs; either way the menu is done.
+              onClick={() => close(false)}
+            >
+              {children}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
 }

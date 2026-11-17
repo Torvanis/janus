@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/torvanis/janus/internal/adapter"
+	"github.com/torvanis/janus/internal/capability"
 	"github.com/torvanis/janus/internal/store"
 )
 
@@ -77,6 +79,14 @@ func TestChildSafetyChatPickersSkipBlockedModels(t *testing.T) {
 	addMediaModel(t, h, "whisper-a", []string{"stt"})
 	addMediaModel(t, h, "whisper-b", []string{"stt"})
 	ctx := context.Background()
+	// Describers are the models whose record says they watch video.
+	for _, name := range []string{"qwen3-vl-a", "qwen3-vl-b"} {
+		w, err := h.store.ModelByUpstreamAndName(ctx, h.model.UpstreamID, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.record(t, w.ID, capability.SourceProvider, map[string]any{adapter.CapInVideo: true})
+	}
 	before := h.server.chatDescribeModel(ctx, h.user, "test-model")
 	trBefore := h.server.chatTranscribeModel(ctx, h.user)
 	if before == "" || trBefore == "" {

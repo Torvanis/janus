@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=${VERSION:-2026.11.1}
-BUILD_DATE=${BUILD_DATE:-2026-11-07}
+VERSION=${VERSION:-2026.11.2}
+BUILD_DATE=${BUILD_DATE:-2026-11-17}
 GO=${GO:-go}
 OUTPUT=${OUTPUT:-bin/janus}
 # EDITION=fips builds the Janus FIPS edition: the Go Cryptographic Module
@@ -24,4 +24,4 @@ for symbol in DefaultBuildVersion DefaultBuildDate DefaultBuildSHA; do
   grep -Rq "${symbol}" internal/config || { echo "Missing config build symbol: $symbol" >&2; exit 1; }
 done
 mkdir -p "$(dirname "$OUTPUT")"
-GOTOOLCHAIN=${GOTOOLCHAIN:-go1.26.10} CGO_ENABLED=0 env $FIPSENV "$GO" build $TAGS -trimpath -buildvcs=false   -ldflags "-s -w -buildid= -X github.com/torvanis/janus/internal/config.DefaultBuildVersion=$VERSION -X github.com/torvanis/janus/internal/config.DefaultBuildDate=$BUILD_DATE -X github.com/torvanis/janus/internal/config.DefaultBuildSHA=unknown"   -o "$OUTPUT" ./cmd/janus
+GOTOOLCHAIN=${GOTOOLCHAIN:-go1.26.11} CGO_ENABLED=0 env $FIPSENV "$GO" build $TAGS -trimpath -buildvcs=false   -ldflags "-s -w -buildid= -X github.com/torvanis/janus/internal/config.DefaultBuildVersion=$VERSION -X github.com/torvanis/janus/internal/config.DefaultBuildDate=$BUILD_DATE -X github.com/torvanis/janus/internal/config.DefaultBuildSHA=unknown"   -o "$OUTPUT" ./cmd/janus

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Badge, ConfirmDialog, Field, useToast } from '../../components/ui';
 import { t } from '../../lib/i18n';
+import { windowsDomainFor } from '../LocalSignIn';
 
 /**
  * Admin → Provisioning → Directory (LDAP / Active Directory). Business: ldap.
@@ -24,6 +25,10 @@ export interface DirectoryView {
   group_filter: string;
   group_name_attr: string;
   admin_groups: string[];
+  /** Appended to a sign-in name typed without a domain; '' = names used as typed. */
+  default_domain?: string;
+  /** NetBIOS name for CORP\name sign-ins; '' = derived from default_domain. */
+  windows_domain?: string;
   enabled: boolean;
   updated_at: string;
 }
@@ -41,6 +46,8 @@ type Draft = {
   groups_attr: string;
   group_filter: string;
   admin_groups: string;
+  default_domain: string;
+  windows_domain: string;
   enabled: boolean;
 };
 
@@ -58,6 +65,8 @@ const empty: Draft = {
   groups_attr: 'memberOf',
   group_filter: '',
   admin_groups: '',
+  default_domain: '',
+  windows_domain: '',
   enabled: true,
 };
 
@@ -75,6 +84,8 @@ function toDraft(d: DirectoryView): Draft {
     groups_attr: d.groups_attr,
     group_filter: d.group_filter,
     admin_groups: d.admin_groups.join(', '),
+    default_domain: d.default_domain ?? '',
+    windows_domain: d.windows_domain ?? '',
     enabled: d.enabled,
   };
 }
@@ -96,6 +107,8 @@ function payload(d: Draft) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    default_domain: d.default_domain.trim(),
+    windows_domain: d.windows_domain.trim(),
     enabled: d.enabled,
   };
 }
@@ -103,6 +116,8 @@ function payload(d: Draft) {
 type TestResult = {
   ok: boolean;
   error?: string;
+  /** The name searched for, after the default domain was applied. */
+  login?: string;
   user?: { dn: string; email: string; name: string; groups: string[]; would_be_admin: boolean };
 };
 
@@ -260,6 +275,32 @@ export function DirectoryCard(): ReactNode {
               onChange={set('user_filter')}
             />
           </Field>
+          <Field label={t('adminDir.defaultDomain')} hint={t('adminDir.defaultDomainHint')}>
+            <input
+              className="input"
+              aria-label={t('adminDir.defaultDomain')}
+              value={draft.default_domain}
+              onChange={set('default_domain')}
+              placeholder="corp.example.com"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </Field>
+          <Field
+            label={t('adminDir.windowsDomain')}
+            hint={draft.default_domain.trim() ? t('adminDir.windowsDomainHint') : t('adminDir.windowsDomainNeedsDefault')}
+          >
+            <input
+              className="input"
+              aria-label={t('adminDir.windowsDomain')}
+              value={draft.windows_domain}
+              onChange={set('windows_domain')}
+              placeholder={windowsDomainFor(draft.default_domain) || 'CORP'}
+              maxLength={15}
+              autoCapitalize="characters"
+              spellCheck={false}
+            />
+          </Field>
           <div className="grid grid-halves">
             <Field label={t('adminDir.emailAttr')}>
               <input
@@ -333,6 +374,9 @@ export function DirectoryCard(): ReactNode {
                 {result.ok ? (
                   result.user ? (
                     <div className="small stack" style={{ gap: 2 }}>
+                      {result.login && result.login !== testLogin.trim() ? (
+                        <span>{t('adminDir.testSearchedFor', { name: result.login })}</span>
+                      ) : null}
                       <span>
                         <strong>{result.user.email || '—'}</strong> · {result.user.name || '—'} ·{' '}
                         {result.user.would_be_admin ? t('adminDir.wouldBeAdmin') : t('adminDir.wouldBeUser')}

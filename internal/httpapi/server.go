@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/torvanis/janus/internal/balancer"
+	"github.com/torvanis/janus/internal/headerpolicy"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 	"github.com/torvanis/janus/internal/fipsmode"
 	"github.com/torvanis/janus/internal/license"
 	"github.com/torvanis/janus/internal/listenertls"
+	"github.com/torvanis/janus/internal/pricecatalog"
 	"github.com/torvanis/janus/internal/quota"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/telemetry"
@@ -51,10 +53,14 @@ type Server struct {
 	License     *license.Manager
 	LicenseSync *license.SyncEngine
 	// Updates is the opt-in version checker; nil when disabled at build.
-	Updates   *updates.Checker
-	Logger    *slog.Logger
-	WebAssets fs.FS
-	StartedAt time.Time
+	Updates *updates.Checker
+	// PriceCatalog is the price catalog in use and its opt-in refresh;
+	// built lazily from Config when nil (price_catalog.go).
+	PriceCatalog     *pricecatalog.Manager
+	priceCatalogOnce sync.Once
+	Logger           *slog.Logger
+	WebAssets        fs.FS
+	StartedAt        time.Time
 	// Troubleshoot persists request/response captures while an
 	// administrator has a troubleshooting session enabled (see
 	// troubleshoot.go). Optional: when nil one is built lazily from Store,
@@ -126,7 +132,9 @@ type Server struct {
 	// pools is this replica's load-balancer state (probes, in-flight
 	// counts, breakers); built on first use.
 	poolOnce sync.Once
-	pools    *balancer.Registry
+	// discoveryOnce guards WireDiscovery.
+	discoveryOnce sync.Once
+	pools         *balancer.Registry
 }
 
 // upstreamClientState pairs a built client with the timeouts baked into its
@@ -157,6 +165,33 @@ type cachedServiceToken struct {
 // database reads on the proxy hot path.
 const tokenCacheTTL = 60 * time.Second
 
+// MetricsHandler serves Prometheus metrics and nothing else. It is mounted on
+// its own listener (JANUS_METRICS_ADDR), never on the port that faces users:
+// metrics name every upstream and model and carry spend and usage totals.
+func (s *Server) MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", s.Metrics.Handler())
+	return mux
+}
+
+// WireDiscovery makes model discovery carry each upstream's header policy:
+// discovery is a call to the upstream like any other. It must run before
+// the discovery service starts; Handler also calls it, so a server that is
+// only ever asked for its handler (tests) is wired too.
+func (s *Server) WireDiscovery() {
+	s.discoveryOnce.Do(func() {
+		if s.Discovery == nil {
+			return
+		}
+		shared := s.Discovery.Client()
+		s.Discovery.SetClientFor(func(up *store.Upstream) *http.Client {
+			return headerpolicy.Client(shared, up.BaseURL, s.upstreamPolicy(up.ID))
+		})
+		// New models take their catalog prices from the catalog in use.
+		s.Discovery.SetPriceCatalog(s.priceCatalog().Current)
+	})
+}
+
 // Handler builds (once) and returns the routed handler.
 func (s *Server) Handler() http.Handler {
 	if s.RateLimits == nil {
@@ -169,6 +204,7 @@ func (s *Server) Handler() http.Handler {
 			s.configCache.ttl = s.Config.ConfigCacheTTL
 		}
 		s.perfCache.ttl = modelPerfCacheTTL
+		s.WireDiscovery()
 		s.router = s.buildRouter()
 	}
 	return s.router
@@ -178,16 +214,24 @@ func (s *Server) buildRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Use(RequestContext())
 	r.Use(Recoverer())
+	cspMode := CSPReportOnly
+	if s.Config != nil && s.Config.ContentSecurityPolicy != "" {
+		cspMode = s.Config.ContentSecurityPolicy
+	}
+	r.Use(SecurityHeaders(s.Config != nil && s.Config.CookieSecure, cspMode, s.WebAssets))
 	r.Use(AccessLog(s.Logger))
 	r.Use(s.resolvePrincipal)
 
-	// Operational endpoints, deliberately unauthenticated for probes and scrapes.
+	// Operational endpoints, deliberately unauthenticated for probes. Metrics
+	// are not here: they are served by MetricsHandler on a listener of their
+	// own, so the port that faces users never exposes them.
 	// /healthz is liveness (no dependency checks); /readyz is readiness and
 	// consults the database and the identity provider — see handleReadyz for
 	// the dependency semantics and the documented outage/recovery timing.
+	r.Get(previewFramePath, s.handlePreviewFrame)
+	r.Post(cspReportPath, s.handleCSPReport)
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
-	r.Handle("/metrics", s.Metrics.Handler())
 	s.mountSCIMRoutes(r)
 
 	// Identity.
@@ -233,9 +277,11 @@ func (s *Server) buildRouter() http.Handler {
 			pr.Post("/tokens", s.gateCreate("token", s.handleCreateToken))
 			pr.Get("/tokens/{id}", s.handleTokenDetail)
 			pr.Put("/tokens/{id}/team", s.handleChangeTokenTeam)
+			pr.Post("/tokens/{id}/reissue", s.gateCreate("token", s.handleReissueToken))
 			pr.Delete("/tokens/{id}", s.handleRevokeToken)
 
 			pr.Get("/models", s.handleListModels)
+			pr.Get("/models/{id}/performance", s.handleModelPerformance)
 			pr.Get("/requests", s.handleListRequests)
 			pr.Get("/requests/facets", s.handleRequestFacets)
 			pr.Get("/requests.csv", s.handleExportRequests)

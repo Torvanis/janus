@@ -10,6 +10,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './styles/global.css';
 import { App } from './App';
 import { ToastProvider } from './components/ui';
+import { TooltipLayer } from './components/TooltipLayer';
+import { shouldRetryQuery } from './lib/queryRetry';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,13 +19,7 @@ const queryClient = new QueryClient({
       // Dashboards must feel live without hammering the gateway.
       staleTime: 5_000,
       refetchOnWindowFocus: true,
-      retry: (failureCount, error) => {
-        // Authentication and permission failures are terminal: retrying them
-        // only produces more 401s and a slower error message.
-        const status = (error as { status?: number }).status;
-        if (status === 401 || status === 403 || status === 404) return false;
-        return failureCount < 2;
-      },
+      retry: shouldRetryQuery,
     },
   },
 });
@@ -39,6 +35,7 @@ createRoot(container).render(
       <BrowserRouter>
         <ToastProvider>
           <App />
+          <TooltipLayer />
         </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>

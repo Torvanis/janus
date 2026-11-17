@@ -179,13 +179,14 @@ describe('TOKENS (30 DAYS) tile', () => {
     expect(within(tile).getByText('37.5% cache hit rate · 1,500 served from cache')).toBeTruthy();
   });
 
-  it('renders the canonical hit rate including cache-write tokens in the denominator', async () => {
-    // 50 / (950 + 100 + 0) = 4.7619…% → 4.8% — the same string the personal
-    // Dashboard renders for identical Totals (see Dashboard.test.tsx).
+  it('renders the canonical hit rate over input tokens, which include cache writes', async () => {
+    // 950 fresh + 50 read + 100 written = 1,100 input tokens; 50 / 1,100 =
+    // 4.545…% → 4.5% — the same string the personal Dashboard renders for
+    // identical Totals (see Dashboard.test.tsx).
     mocked.get.mockResolvedValue(
       dashboard({
         totals_30d: totals({
-          tokens_in: 950,
+          tokens_in: 1100,
           tokens_out: 2000,
           tokens_cached: 50,
           tokens_cache_write_5m: 100,
@@ -197,7 +198,7 @@ describe('TOKENS (30 DAYS) tile', () => {
     renderExplore();
 
     const tile = (await screen.findByText('Tokens (30 days)')).closest('article')!;
-    expect(within(tile).getByText('4.8% cache hit rate · 50 served from cache')).toBeTruthy();
+    expect(within(tile).getByText('4.5% cache hit rate · 50 served from cache')).toBeTruthy();
   });
 
   it('omits the cache metric when there was no cache activity at all', async () => {

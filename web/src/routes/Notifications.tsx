@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { Notification } from '../lib/types';
 import { formatDateTime, formatRelative } from '../lib/format';
-import { AsyncSection, Badge, useToast } from '../components/ui';
+import { AsyncSection, Badge, BreakAfterSlash, useToast } from '../components/ui';
 import { useUrlState } from '../lib/hooks';
 import { t } from '../lib/i18n';
 
@@ -81,13 +81,15 @@ export function NotificationsPage(): ReactNode {
                 }}
               >
                 <div className="row-between">
-                  <div>
+                  <div className="break-slash" style={{ minWidth: 0 }}>
                     <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
                       <Badge tone={toneFor(item.severity)}>{item.severity}</Badge>
-                      <h2 style={{ fontSize: 'var(--janus-text-md)' }}>{item.title}</h2>
+                      <h2 style={{ fontSize: 'var(--janus-text-md)', minWidth: 0 }}>
+                        <BreakAfterSlash text={item.title} />
+                      </h2>
                     </div>
                     <p className="secondary small" style={{ marginTop: 6, marginBottom: 0 }}>
-                      {item.body}
+                      <BreakAfterSlash text={item.body} />
                     </p>
                   </div>
                   <div className="row" style={{ gap: 'var(--janus-space-2)' }}>
@@ -109,7 +111,7 @@ export function NotificationsPage(): ReactNode {
       <Continuation
         offset={offset}
         limit={100}
-        count={notifications.data?.notifications.length ?? 0}
+        count={notifications.data?.notifications.length}
         hasMore={notifications.data?.has_more ?? false}
         busy={notifications.isFetching}
         onPage={(next) => setPage(String(next))}

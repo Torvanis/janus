@@ -17,9 +17,12 @@ import (
 // fakeEngine is a vLLM-like member: /health, /metrics with a settable
 // queue, chat that answers with its own name, and a kill switch.
 type fakeEngine struct {
-	name    string
-	srv     *httptest.Server
-	down    atomic.Bool // connection-level failure is simulated by 503s
+	name string
+	srv  *httptest.Server
+	down atomic.Bool // connection-level failure is simulated by 503s
+	// slowMs delays the reply to a chat request: a long non-streamed
+	// generation, which sends nothing until it is done.
+	slowMs  atomic.Int64
 	running atomic.Int64
 	waiting atomic.Int64
 	mu      sync.Mutex
@@ -50,6 +53,13 @@ func newFakeEngine(t *testing.T, name string) *fakeEngine {
 			f.mu.Lock()
 			f.chats++
 			f.mu.Unlock()
+			if ms := f.slowMs.Load(); ms > 0 {
+				select {
+				case <-time.After(time.Duration(ms) * time.Millisecond):
+				case <-r.Context().Done():
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"id":"x","choices":[{"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2}}`, f.name)
 		}

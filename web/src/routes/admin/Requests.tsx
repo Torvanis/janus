@@ -1,7 +1,8 @@
 import { useCollectionState, useRepairCollectionPage } from '../../lib/collection-state';
 import { LookupInput } from '../../components/LookupInput';
+import { useFitToViewport } from '../../components/useFitToViewport';
 import { userLookup } from '../../lib/lookups';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../../lib/api';
@@ -12,19 +13,11 @@ import {
   type RequestSecurity,
   type UsageEvent,
 } from '../../lib/types';
-import {
-  formatBytes,
-  formatDateTime,
-  formatDuration,
-  formatNumber,
-  formatUSD,
-  modalityLabel,
-  statusTone,
-  titleCase,
-} from '../../lib/format';
+import { formatBytes, formatDuration, formatNumber, formatUSD, modalityLabel, statusTone, titleCase } from '../../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../../components/ui';
 import { RequestHeadersSection } from './RequestHeaders';
 import { ChargedTeam } from '../../components/ChargedTeam';
+import { TimeCell } from '../../components/TableText';
 import { childSafetyLine, instructionsLine, reasonLabel, splitRouteReason } from '../../lib/routing';
 import { RouteDecisionLine } from './Routing';
 import { useLocalPreference, useUrlState, useUrlStateBatch } from '../../lib/hooks';
@@ -169,6 +162,9 @@ export function AdminRequestsPage(): ReactNode {
   // Usage insights label: a category, category/subcategory, * (any) or -
   // (not classified).
   const [classified] = useUrlState('classified', '');
+  // One request, from a link (Pricing accuracy, Security): its own row and
+  // the calls Janus made for it, whenever it ran.
+  const [requestId] = useUrlState('request_id', '');
   const [sort, setSort] = useCollectionState('sort', 'time');
   const [page, setPage] = useUrlState('page', '0');
   // Filter/range changes must atomically reset the page offset, otherwise an
@@ -198,10 +194,13 @@ export function AdminRequestsPage(): ReactNode {
       tokens_in: null,
       tokens_out: null,
       classified: null,
+      request_id: null,
       page: null,
     });
   const [selected, setSelected] = useState<UsageEvent | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useFitToViewport(pickerRef, pickerOpen);
 
   // Visible columns persist across visits (localStorage), defaulting to the
   // sensible core set. Stored as a comma-joined list of column keys.
@@ -241,6 +240,7 @@ export function AdminRequestsPage(): ReactNode {
     accounting,
     include_internal: includeInternal,
     classified,
+    request_id: requestId,
     sort,
     ...tokenSizeParams('tokens_in', tokensIn),
     ...tokenSizeParams('tokens_out', tokensOut),
@@ -261,6 +261,7 @@ export function AdminRequestsPage(): ReactNode {
       tokensIn,
       tokensOut,
       classified,
+      requestId,
       sort,
       offset,
     ],
@@ -295,6 +296,7 @@ export function AdminRequestsPage(): ReactNode {
       tokensIn,
       tokensOut,
       classified,
+      requestId,
     ],
     queryFn: () => api.get<{ facets: RequestFacet[] }>(`/api/v1/requests/facets${qs(facetParams)}`),
     staleTime: 30_000,
@@ -361,7 +363,7 @@ export function AdminRequestsPage(): ReactNode {
 
   const exportUrl = `/api/v1/requests.csv${qs(filterParams)}`;
   const hasFilters = Boolean(
-    userFilter || principal || modality || status || model || accounting || tokensIn || tokensOut || classified,
+    userFilter || principal || modality || status || model || accounting || tokensIn || tokensOut || classified || requestId,
   );
   const shownColumns = COLUMNS.filter((column) => visibleColumns.has(column.key));
 
@@ -386,6 +388,7 @@ export function AdminRequestsPage(): ReactNode {
             </button>
             {pickerOpen ? (
               <div
+                ref={pickerRef}
                 className="menu"
                 role="group"
                 aria-label={t('adminRequests.columnPicker')}
@@ -470,6 +473,9 @@ export function AdminRequestsPage(): ReactNode {
             { value: 'upstream_reported_cost', label: t('requests.costReportedByUpstream') },
             { value: 'byte_count_fallback', label: t('requests.estimatedFromBytes') },
             { value: 'unmetered_modality', label: t('requests.unmeteredModality') },
+            { value: 'request_measured', label: t('requests.measuredPriced') },
+            { value: 'measured_unpriced', label: t('requests.measuredUnpriced') },
+            { value: 'billed_on_result', label: t('requests.billedOnResult') },
             { value: 'not_billable', label: t('requests.notBillable') },
           ]}
         />
@@ -493,6 +499,13 @@ export function AdminRequestsPage(): ReactNode {
           </button>
         ) : null}
       </div>
+      {requestId ? (
+        <div className="banner banner-info" role="status">
+          <span>
+            Showing one request: <span className="mono">{requestId}</span>
+          </span>
+        </div>
+      ) : null}
 
       <section className="card card-flush">
         <AsyncSection
@@ -628,7 +641,9 @@ export function AdminRequestsPage(): ReactNode {
                 {selected.user_id ? (
                   <>
                     {' '}
-                    <Link to={`/admin/users/${selected.user_id}`}>{t('adminRequests.viewInPeople')}</Link>
+                    <Link to={`/admin/users/${selected.user_id}`} style={{ whiteSpace: 'nowrap' }}>
+                      {t('adminRequests.viewInPeople')}
+                    </Link>
                   </>
                 ) : null}
               </DetailRow>
@@ -932,7 +947,7 @@ function EventCell({
         </td>
       );
     case 'time':
-      return <td className="small muted">{formatDateTime(event.created_at)}</td>;
+      return <TimeCell value={event.created_at} />;
     case 'user':
       return (
         <td className="truncate" title={event.user_email || event.service_token_name || undefined}>
@@ -1007,6 +1022,10 @@ function EventCell({
           {event.token_accounting_method === 'unmetered_modality' ? (
             <span title={t('requests.unmeteredModalityHint')} style={{ marginLeft: 'var(--janus-space-2)' }}>
               <Badge tone="danger">{t('requests.notMeteredShort')}</Badge>
+            </span>
+          ) : event.token_accounting_method === 'measured_unpriced' ? (
+            <span title={t('requests.measuredUnpricedHint')} style={{ marginLeft: 'var(--janus-space-2)' }}>
+              <Badge tone="warning">{t('requests.noPriceShort')}</Badge>
             </span>
           ) : event.token_accounting_method === 'byte_count_fallback' ? (
             <span title={t('requests.estimatedFromBytes')} style={{ marginLeft: 'var(--janus-space-2)' }}>

@@ -359,6 +359,7 @@ describe('drill-down drawer', () => {
               id: 'evt-cost',
               user_name: 'Cost Case',
               token_accounting_method: 'upstream_reported_cost',
+              cost_quoted_by: 'OpenRouter',
               modality: 'image',
             },
             {
@@ -382,7 +383,7 @@ describe('drill-down drawer', () => {
 
     await user.click(await screen.findByRole('cell', { name: 'Cost Case' }));
     let drawer = await screen.findByRole('dialog');
-    expect(within(drawer).getByText('Cost reported by upstream')).toBeTruthy();
+    expect(within(drawer).getByText('Cost quoted by OpenRouter')).toBeTruthy();
     await user.keyboard('{Escape}');
 
     await user.click(await screen.findByRole('cell', { name: 'Gap Case' }));

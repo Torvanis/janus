@@ -247,3 +247,20 @@ func TestEndpointsAndDialects(t *testing.T) {
 		t.Fatal("wire model")
 	}
 }
+
+// OpenRouter quotes a decision call's cost (usage.cost, USD). It is kept
+// exactly in nano-USD for metering, and repeated unchanged to the caller.
+// Usage block captured live from OpenRouter Jev on 2026-11-15.
+func TestSystemOneCostQuoteIsExact(t *testing.T) {
+	raw := `{"model":"jev","answers":{},"usage":{"input_tokens":343,"output_tokens":48,"cost":0.000014406,"is_byok":false,"cost_details":{"upstream_inference_cost":0.000014406}}}`
+	r, err := ParseSystemOneResponse([]byte(raw), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Usage.CostReported || r.Usage.CostNano != 14_406 || r.Usage.CostUSD != 0.000014406 {
+		t.Fatalf("usage = %+v", r.Usage)
+	}
+	if r, _ := ParseSystemOneResponse([]byte(`{"model":"jev","answers":{},"usage":{"input_tokens":3,"cost":null}}`), nil); r.Usage.CostReported {
+		t.Fatalf("a null cost is no quote: %+v", r.Usage)
+	}
+}

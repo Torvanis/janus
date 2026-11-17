@@ -16,21 +16,27 @@ const SettingDirectory = "auth.directory"
 // Directory is the persisted LDAP configuration. BindPasswordEnc is AES-GCM
 // under the gateway key; the API exposes only HasBindPassword.
 type Directory struct {
-	URL             string    `json:"url"`
-	StartTLS        bool      `json:"start_tls"`
-	SkipVerify      bool      `json:"skip_verify"`
-	BindDN          string    `json:"bind_dn"`
-	BindPasswordEnc string    `json:"bind_password_enc,omitempty"`
-	BaseDN          string    `json:"base_dn"`
-	UserFilter      string    `json:"user_filter"`
-	EmailAttr       string    `json:"email_attr"`
-	NameAttr        string    `json:"name_attr"`
-	GroupsAttr      string    `json:"groups_attr"`
-	GroupFilter     string    `json:"group_filter"`
-	GroupNameAttr   string    `json:"group_name_attr"`
-	AdminGroups     []string  `json:"admin_groups"`
-	Enabled         bool      `json:"enabled"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	URL             string   `json:"url"`
+	StartTLS        bool     `json:"start_tls"`
+	SkipVerify      bool     `json:"skip_verify"`
+	BindDN          string   `json:"bind_dn"`
+	BindPasswordEnc string   `json:"bind_password_enc,omitempty"`
+	BaseDN          string   `json:"base_dn"`
+	UserFilter      string   `json:"user_filter"`
+	EmailAttr       string   `json:"email_attr"`
+	NameAttr        string   `json:"name_attr"`
+	GroupsAttr      string   `json:"groups_attr"`
+	GroupFilter     string   `json:"group_filter"`
+	GroupNameAttr   string   `json:"group_name_attr"`
+	AdminGroups     []string `json:"admin_groups"`
+	// DefaultDomain is appended to a sign-in name typed without a domain
+	// ("ada" → "ada@corp.example.com"). Empty = names are used as typed.
+	DefaultDomain string `json:"default_domain,omitempty"`
+	// WindowsDomain is the NetBIOS name accepted in CORP\ada sign-ins
+	// (stored upper-case). Empty = derived from DefaultDomain.
+	WindowsDomain string    `json:"windows_domain,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ErrNoDirectory means nothing is configured yet.

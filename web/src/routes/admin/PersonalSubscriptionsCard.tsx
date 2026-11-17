@@ -131,7 +131,7 @@ export function PersonalSubscriptionsCard(): ReactNode {
                     d.connections.length === 0 ? (
                       <p className="small secondary">{t('adminSubscriptions.noConnections')}</p>
                     ) : (
-                      <div className="table-scroll" style={{ marginTop: 'var(--janus-space-2)' }}>
+                      <div className="table-wrap" style={{ marginTop: 'var(--janus-space-2)' }}>
                         <table className="data">
                           <thead>
                             <tr>

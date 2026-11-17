@@ -4,8 +4,10 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/url"
@@ -44,10 +46,17 @@ const STIGMinAuditRetentionDays = 913
 // Config is the fully validated runtime configuration for the gateway.
 type Config struct {
 	// Server
-	ListenAddr  string
-	PublicURL   string
-	TLSCertPath string
-	TLSKeyPath  string
+	ListenAddr string
+	// MetricsAddr is where Prometheus metrics are served, on a listener of
+	// their own so the public port never exposes them. "off" disables it.
+	MetricsAddr string
+	// ContentSecurityPolicy is how the console's resource policy is sent:
+	// "enforce", "report-only" (the browser reports what it would refuse
+	// and refuses nothing) or "off". JANUS_CONTENT_SECURITY_POLICY.
+	ContentSecurityPolicy string
+	PublicURL             string
+	TLSCertPath           string
+	TLSKeyPath            string
 	// TLSSelfSigned (JANUS_TLS_SELF_SIGNED) serves TLS with a self-signed
 	// certificate Janus generates and keeps (encrypted) in the database:
 	// a stopgap until an issued certificate is mounted. Its names come from
@@ -81,6 +90,22 @@ type Config struct {
 	UpdateCheck bool
 	// Offline asserts an air-gapped deployment: no update check, ever.
 	Offline bool
+	// Price catalog refresh (internal/pricecatalog). PriceCatalogRefresh is
+	// JANUS_PRICE_CATALOG_REFRESH (daily|off): nil when unset, so the
+	// Admin setting decides; when set it wins and the UI shows it locked.
+	PriceCatalogRefresh *bool
+	// PriceCatalogURL is JANUS_PRICE_CATALOG_URL; when set it wins over the
+	// Admin setting. Under JANUS_OFFLINE the refresh runs only when this is
+	// set (a catalog the site hosts itself).
+	PriceCatalogURL string
+	// PriceCatalogSignatureOff is JANUS_PRICE_CATALOG_REQUIRE_SIGNATURE=false
+	// (the signature is required by default, and the zero Config requires
+	// it). Environment only: it lets an offline site serve a copy it edited
+	// or did not sign.
+	PriceCatalogSignatureOff bool
+	// PriceCatalogKeys is JANUS_PRICE_CATALOG_KEYS: extra trusted Ed25519
+	// public keys (base64, comma-separated), e.g. an internal provider's.
+	PriceCatalogKeys []string
 	// STIGProfile is JANUS_STIG_PROFILE: the STIG configuration profile
 	// (internal/stigprofile). Load applies its defaults; stigprofile.Check
 	// refuses the settings it does not allow.
@@ -137,9 +162,6 @@ type Config struct {
 	// surface is hidden in the UI. Token, request, and latency accounting is
 	// unaffected. Default false: behavior is identical to a billed deployment.
 	LocalOnly bool
-	// ChatPreview turns on the Janus Chat preview (JANUS_CHAT_PREVIEW). Off by
-	// default while the feature is built out.
-	ChatPreview bool
 	// ChatAutoTitle (JANUS_CHAT_AUTO_TITLE, default true) names a chat with a
 	// short model-written title after its first reply; the call is metered
 	// like the chat and shows in the request log as janus-chat-title.
@@ -313,31 +335,36 @@ func (t UpstreamTimeouts) Validate() error {
 // output: every secret is replaced with a presence indicator.
 func (c *Config) Redacted() map[string]any {
 	return map[string]any{
-		"listen_addr":            c.ListenAddr,
-		"public_url":             c.PublicURL,
-		"environment":            c.Environment,
-		"log_level":              c.LogLevel,
-		"database":               scheme(c.DatabaseURL),
-		"oidc_provider_url":      c.OIDCProviderURL,
-		"oidc_client_id":         c.OIDCClientID,
-		"oidc_secret_configured": c.OIDCClientSecret != "",
-		"dev_auth_enabled":       c.DevAuth(),
-		"local_only":             c.LocalOnly,
-		"performance_mode":       c.PerformanceMode,
-		"db_max_conns":           c.DBMaxConns,
-		"smtp_configured":        c.SMTPHost != "",
-		"tls_configured":         c.TLSCertPath != "" || c.TLSSelfSigned,
-		"tls_self_signed":        c.TLSSelfSigned,
-		"tls_require":            c.TLSRequire,
-		"ca_bundle_configured":   c.CABundlePath != "",
-		"ca_dir":                 c.CADir,
-		"trust_dod_roots":        c.TrustDoDRoots,
-		"usage_retention_days":   c.UsageRetentionDays,
-		"audit_retention_days":   c.AuditRetentionDays,
-		"otlp_endpoint":          c.OTELEndpoint,
-		"stig_profile":           c.STIGProfile,
-		"tls_revocation":         c.TLSRevocation,
-		"offline":                c.Offline,
+		"listen_addr":             c.ListenAddr,
+		"metrics_addr":            c.MetricsAddr,
+		"content_security_policy": c.ContentSecurityPolicy,
+		"public_url":              c.PublicURL,
+		"environment":             c.Environment,
+		"log_level":               c.LogLevel,
+		"database":                scheme(c.DatabaseURL),
+		"oidc_provider_url":       c.OIDCProviderURL,
+		"oidc_client_id":          c.OIDCClientID,
+		"oidc_secret_configured":  c.OIDCClientSecret != "",
+		"dev_auth_enabled":        c.DevAuth(),
+		"local_only":              c.LocalOnly,
+		"performance_mode":        c.PerformanceMode,
+		"db_max_conns":            c.DBMaxConns,
+		"smtp_configured":         c.SMTPHost != "",
+		"tls_configured":          c.TLSCertPath != "" || c.TLSSelfSigned,
+		"tls_self_signed":         c.TLSSelfSigned,
+		"tls_require":             c.TLSRequire,
+		"ca_bundle_configured":    c.CABundlePath != "",
+		"ca_dir":                  c.CADir,
+		"trust_dod_roots":         c.TrustDoDRoots,
+		"usage_retention_days":    c.UsageRetentionDays,
+		"audit_retention_days":    c.AuditRetentionDays,
+		"otlp_endpoint":           c.OTELEndpoint,
+		"stig_profile":            c.STIGProfile,
+		"tls_revocation":          c.TLSRevocation,
+		"offline":                 c.Offline,
+		"price_catalog_url":       c.PriceCatalogURL,
+		"price_catalog_signature": !c.PriceCatalogSignatureOff,
+		"price_catalog_keys":      len(c.PriceCatalogKeys),
 		// Presence only, never the values: emails and group names identify
 		// people and internal org structure (mirrors the secret handling
 		// above).
@@ -362,49 +389,50 @@ func scheme(url string) string {
 // validation fails fast with a human-readable message).
 func Load() (*Config, error) {
 	c := &Config{
-		ListenAddr:           envOr("JANUS_LISTEN_ADDR", ":8080"),
-		PublicURL:            strings.TrimRight(envOr("JANUS_PUBLIC_URL", "http://localhost:8080"), "/"),
-		TLSCertPath:          os.Getenv("JANUS_TLS_CERT_PATH"),
-		TLSKeyPath:           os.Getenv("JANUS_TLS_KEY_PATH"),
-		LogLevel:             envOr("JANUS_LOG_LEVEL", "info"),
-		Environment:          envOr("JANUS_ENV", "production"),
-		BuildVersion:         envOr("JANUS_BUILD_VERSION", DefaultBuildVersion),
-		BuildSHA:             envOr("JANUS_BUILD_SHA", DefaultBuildSHA),
-		BuildDate:            envOr("JANUS_BUILD_DATE", DefaultBuildDate),
-		LicenseFile:          envOr("JANUS_LICENSE_FILE", ""),
-		UpdateCheck:          envBool("JANUS_UPDATE_CHECK", false),
-		Offline:              envBool("JANUS_OFFLINE", false),
-		DatabaseURL:          envOr("JANUS_DATABASE_URL", DefaultDatabaseURL),
-		OIDCProviderURL:      strings.TrimRight(os.Getenv("JANUS_OIDC_PROVIDER_URL"), "/"),
-		OIDCClientID:         os.Getenv("JANUS_OIDC_CLIENT_ID"),
-		OIDCClientSecret:     os.Getenv("JANUS_OIDC_CLIENT_SECRET"),
-		OIDCEmailClaim:       envOr("JANUS_OIDC_EMAIL_CLAIM", "email"),
-		OIDCNameClaim:        envOr("JANUS_OIDC_NAME_CLAIM", "name"),
-		OIDCGroupsClaim:      envOr("JANUS_OIDC_GROUPS_CLAIM", "groups"),
-		DevAuthEnabled:       envBool("JANUS_DEV_AUTH", false),
-		LocalOnly:            envBool("JANUS_LOCAL_ONLY", false),
-		ChatPreview:          envBool("JANUS_CHAT_PREVIEW", false),
-		ChatAutoTitle:        envBool("JANUS_CHAT_AUTO_TITLE", true),
-		PerformanceMode:      envBool("JANUS_PERFORMANCE_MODE", false),
-		SMTPHost:             os.Getenv("JANUS_SMTP_HOST"),
-		SMTPUser:             os.Getenv("JANUS_SMTP_USER"),
-		SMTPPass:             os.Getenv("JANUS_SMTP_PASSWORD"),
-		SMTPFrom:             envOr("JANUS_SMTP_FROM", "janus@localhost"),
-		CABundlePath:         os.Getenv("JANUS_CA_BUNDLE"),
-		PurgeJobTimeUTC:      envOr("JANUS_PURGE_JOB_TIME_UTC", "02:00"),
-		TroubleshootDir:      strings.TrimSpace(os.Getenv("JANUS_TROUBLESHOOT_DIR")),
-		StorageMode:          strings.ToLower(strings.TrimSpace(os.Getenv("JANUS_STORAGE_MODE"))),
-		S3Endpoint:           strings.TrimSpace(os.Getenv("JANUS_S3_ENDPOINT")),
-		S3Bucket:             strings.TrimSpace(os.Getenv("JANUS_S3_BUCKET")),
-		S3Region:             envOr("JANUS_S3_REGION", "us-east-1"),
-		S3PathStyle:          envBool("JANUS_S3_PATH_STYLE", false),
-		S3Prefix:             strings.TrimSpace(os.Getenv("JANUS_S3_PREFIX")),
-		S3AccessKeyID:        strings.TrimSpace(os.Getenv("JANUS_S3_ACCESS_KEY_ID")),
-		S3SecretAccessKey:    os.Getenv("JANUS_S3_SECRET_ACCESS_KEY"),
-		S3CAFile:             strings.TrimSpace(os.Getenv("JANUS_S3_CA_FILE")),
-		OIDCScopes:           splitList(envOr("JANUS_OIDC_SCOPES", "openid,profile,email,groups")),
-		BootstrapAdminEmails: lowerAll(splitList(os.Getenv("JANUS_BOOTSTRAP_ADMIN_EMAILS"))),
-		AdminGroups:          normalizeSet(splitList(os.Getenv("JANUS_ADMIN_GROUPS"))),
+		ListenAddr:            envOr("JANUS_LISTEN_ADDR", ":8080"),
+		MetricsAddr:           envOr("JANUS_METRICS_ADDR", ":9464"),
+		ContentSecurityPolicy: strings.ToLower(strings.TrimSpace(envOr("JANUS_CONTENT_SECURITY_POLICY", "report-only"))),
+		PublicURL:             strings.TrimRight(envOr("JANUS_PUBLIC_URL", "http://localhost:8080"), "/"),
+		TLSCertPath:           os.Getenv("JANUS_TLS_CERT_PATH"),
+		TLSKeyPath:            os.Getenv("JANUS_TLS_KEY_PATH"),
+		LogLevel:              envOr("JANUS_LOG_LEVEL", "info"),
+		Environment:           envOr("JANUS_ENV", "production"),
+		BuildVersion:          envOr("JANUS_BUILD_VERSION", DefaultBuildVersion),
+		BuildSHA:              envOr("JANUS_BUILD_SHA", DefaultBuildSHA),
+		BuildDate:             envOr("JANUS_BUILD_DATE", DefaultBuildDate),
+		LicenseFile:           envOr("JANUS_LICENSE_FILE", ""),
+		UpdateCheck:           envBool("JANUS_UPDATE_CHECK", false),
+		Offline:               envBool("JANUS_OFFLINE", false),
+		DatabaseURL:           envOr("JANUS_DATABASE_URL", DefaultDatabaseURL),
+		OIDCProviderURL:       strings.TrimRight(os.Getenv("JANUS_OIDC_PROVIDER_URL"), "/"),
+		OIDCClientID:          os.Getenv("JANUS_OIDC_CLIENT_ID"),
+		OIDCClientSecret:      os.Getenv("JANUS_OIDC_CLIENT_SECRET"),
+		OIDCEmailClaim:        envOr("JANUS_OIDC_EMAIL_CLAIM", "email"),
+		OIDCNameClaim:         envOr("JANUS_OIDC_NAME_CLAIM", "name"),
+		OIDCGroupsClaim:       envOr("JANUS_OIDC_GROUPS_CLAIM", "groups"),
+		DevAuthEnabled:        envBool("JANUS_DEV_AUTH", false),
+		LocalOnly:             envBool("JANUS_LOCAL_ONLY", false),
+		ChatAutoTitle:         envBool("JANUS_CHAT_AUTO_TITLE", true),
+		PerformanceMode:       envBool("JANUS_PERFORMANCE_MODE", false),
+		SMTPHost:              os.Getenv("JANUS_SMTP_HOST"),
+		SMTPUser:              os.Getenv("JANUS_SMTP_USER"),
+		SMTPPass:              os.Getenv("JANUS_SMTP_PASSWORD"),
+		SMTPFrom:              envOr("JANUS_SMTP_FROM", "janus@localhost"),
+		CABundlePath:          os.Getenv("JANUS_CA_BUNDLE"),
+		PurgeJobTimeUTC:       envOr("JANUS_PURGE_JOB_TIME_UTC", "02:00"),
+		TroubleshootDir:       strings.TrimSpace(os.Getenv("JANUS_TROUBLESHOOT_DIR")),
+		StorageMode:           strings.ToLower(strings.TrimSpace(os.Getenv("JANUS_STORAGE_MODE"))),
+		S3Endpoint:            strings.TrimSpace(os.Getenv("JANUS_S3_ENDPOINT")),
+		S3Bucket:              strings.TrimSpace(os.Getenv("JANUS_S3_BUCKET")),
+		S3Region:              envOr("JANUS_S3_REGION", "us-east-1"),
+		S3PathStyle:           envBool("JANUS_S3_PATH_STYLE", false),
+		S3Prefix:              strings.TrimSpace(os.Getenv("JANUS_S3_PREFIX")),
+		S3AccessKeyID:         strings.TrimSpace(os.Getenv("JANUS_S3_ACCESS_KEY_ID")),
+		S3SecretAccessKey:     os.Getenv("JANUS_S3_SECRET_ACCESS_KEY"),
+		S3CAFile:              strings.TrimSpace(os.Getenv("JANUS_S3_CA_FILE")),
+		OIDCScopes:            splitList(envOr("JANUS_OIDC_SCOPES", "openid,profile,email,groups")),
+		BootstrapAdminEmails:  lowerAll(splitList(os.Getenv("JANUS_BOOTSTRAP_ADMIN_EMAILS"))),
+		AdminGroups:           normalizeSet(splitList(os.Getenv("JANUS_ADMIN_GROUPS"))),
 	}
 	// the standard OpenTelemetry variable wins; the JANUS_-prefixed
 	// alias exists for deployments that namespace every variable.
@@ -433,6 +461,11 @@ func Load() (*Config, error) {
 	default:
 		return nil, fmt.Errorf("JANUS_TLS_REVOCATION must be off, soft or hard (got %q)", rawRevocation)
 	}
+	switch c.ContentSecurityPolicy {
+	case "enforce", "report-only", "off":
+	default:
+		return nil, fmt.Errorf("JANUS_CONTENT_SECURITY_POLICY must be enforce, report-only or off (got %q)", c.ContentSecurityPolicy)
+	}
 	c.OCSPResponder = strings.TrimSpace(os.Getenv("JANUS_OCSP_RESPONDER"))
 	if c.OCSPResponder != "" {
 		if u, err := url.Parse(c.OCSPResponder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -457,6 +490,9 @@ func Load() (*Config, error) {
 	} else if c.STIGProfile {
 		off := false
 		c.LicenseSync = &off
+	}
+	if err := c.loadPriceCatalog(); err != nil {
+		return nil, err
 	}
 	c.LicenseSyncToken, c.LicenseSyncTokenSet = os.LookupEnv("JANUS_LICENSE_SYNC_TOKEN")
 	c.LicenseSyncToken = strings.TrimSpace(c.LicenseSyncToken)
@@ -886,4 +922,62 @@ func (c *Config) loadStorage() error {
 		c.S3CABundle = string(pemBytes)
 	}
 	return nil
+}
+
+// loadPriceCatalog reads the JANUS_PRICE_CATALOG_* variables.
+func (c *Config) loadPriceCatalog() error {
+	if raw, ok := os.LookupEnv("JANUS_PRICE_CATALOG_REFRESH"); ok && strings.TrimSpace(raw) != "" {
+		var on bool
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "daily", "on", "true", "1", "yes":
+			on = true
+		case "off", "false", "0", "no", "never":
+		default:
+			return fmt.Errorf("JANUS_PRICE_CATALOG_REFRESH must be daily or off (got %q)", raw)
+		}
+		c.PriceCatalogRefresh = &on
+	}
+	c.PriceCatalogURL = strings.TrimSpace(os.Getenv("JANUS_PRICE_CATALOG_URL"))
+	if c.PriceCatalogURL != "" {
+		if u, err := url.Parse(c.PriceCatalogURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return fmt.Errorf("JANUS_PRICE_CATALOG_URL must be an http:// or https:// URL without credentials")
+		}
+	}
+	c.PriceCatalogSignatureOff = !envBool("JANUS_PRICE_CATALOG_REQUIRE_SIGNATURE", true)
+	for _, k := range splitList(os.Getenv("JANUS_PRICE_CATALOG_KEYS")) {
+		raw, err := base64.StdEncoding.DecodeString(k)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return fmt.Errorf("JANUS_PRICE_CATALOG_KEYS must list base64 Ed25519 public keys (32 bytes each)")
+		}
+		c.PriceCatalogKeys = append(c.PriceCatalogKeys, k)
+	}
+	return nil
+}
+
+// RemovedVariable is an environment variable an earlier release read and
+// this one ignores, with the line logged once at startup when it is set.
+type RemovedVariable struct {
+	Name    string
+	Message string
+}
+
+// removedVariables lists environment variables that no longer do anything.
+var removedVariables = []RemovedVariable{
+	{
+		Name: "JANUS_CHAT_PREVIEW",
+		Message: "JANUS_CHAT_PREVIEW is ignored: Janus Chat is no longer a preview and is turned on or off in " +
+			"Administration → Chat. Remove the variable from the deployment.",
+	},
+}
+
+// RemovedVariablesSet returns the removed variables that are set in the
+// environment (to any value), so startup can warn about each one once.
+func RemovedVariablesSet() []RemovedVariable {
+	var out []RemovedVariable
+	for _, v := range removedVariables {
+		if _, ok := os.LookupEnv(v.Name); ok {
+			out = append(out, v)
+		}
+	}
+	return out
 }

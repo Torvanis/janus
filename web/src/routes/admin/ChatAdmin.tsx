@@ -27,11 +27,6 @@ export interface ChatModelSetting {
   category?: string;
   order?: number;
   recommended?: boolean;
-  /** Whether Chat sends this model attached images ('' = automatic). */
-  images?: '' | 'yes' | 'no';
-  /** …sound and video files. */
-  audio?: '' | 'yes' | 'no';
-  video?: '' | 'yes' | 'no';
 }
 
 export interface WebPagePolicy {
@@ -83,7 +78,6 @@ export interface ChatAdminDoc {
   models: Record<string, ChatModelSetting>;
   updated_at?: string;
   access_licensed: boolean;
-  preview_on: boolean;
 }
 
 export interface ChatSearchSettings {
@@ -144,12 +138,6 @@ export function ChatAdminPage(): ReactNode {
       <AsyncSection query={doc}>
         {(d) => (
           <>
-            {!d.preview_on ? (
-              <div className="banner banner-warning" role="status" style={{ marginBottom: 'var(--janus-space-4)' }}>
-                Janus Chat is switched off for this gateway by its startup configuration (JANUS_CHAT_PREVIEW). These settings
-                apply once it is on.
-              </div>
-            ) : null}
             {tab === 'general' ? <GeneralTab doc={d} /> : null}
             {tab === 'models' ? <ModelsTab doc={d} /> : null}
             {tab === 'tools' ? <ToolsTab doc={d} /> : null}
@@ -475,7 +463,7 @@ function ModelsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
         onChange={(e) => setFilter(e.target.value)}
         style={{ maxWidth: 320 }}
       />
-      <div className="table-scroll">
+      <div className="table-wrap">
         <table className="data data-compact" aria-label="Chat models">
           <thead>
             <tr>
@@ -485,21 +473,18 @@ function ModelsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
               <th scope="col">Category</th>
               <th scope="col">Order</th>
               <th scope="col">Recommended</th>
-              <th scope="col">Sees images</th>
-              <th scope="col">Hears sound</th>
-              <th scope="col">Sees video</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="muted">
+                <td colSpan={6} className="muted">
                   Loading…
                 </td>
               </tr>
             ) : shown.length === 0 ? (
               <tr>
-                <td colSpan={9} className="muted">
+                <td colSpan={6} className="muted">
                   No granted models{filter ? ' match' : ' yet'}.
                 </td>
               </tr>
@@ -578,48 +563,6 @@ function ModelsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
                         onChange={(e) => update(r.name, { recommended: e.target.checked || undefined })}
                       />
                     </td>
-                    <td>
-                      <select
-                        className="select"
-                        style={{ height: 32, minWidth: 110 }}
-                        aria-label={`Images for ${r.name}`}
-                        value={set.images ?? ''}
-                        disabled={set.hidden || !r.chat}
-                        onChange={(e) => update(r.name, { images: (e.target.value as 'yes' | 'no') || undefined })}
-                      >
-                        <option value="">Automatic</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        className="select"
-                        style={{ height: 32, minWidth: 110 }}
-                        aria-label={`Sound for ${r.name}`}
-                        value={set.audio ?? ''}
-                        disabled={set.hidden || !r.chat}
-                        onChange={(e) => update(r.name, { audio: (e.target.value as 'yes' | 'no') || undefined })}
-                      >
-                        <option value="">Automatic</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        className="select"
-                        style={{ height: 32, minWidth: 110 }}
-                        aria-label={`Video for ${r.name}`}
-                        value={set.video ?? ''}
-                        disabled={set.hidden || !r.chat}
-                        onChange={(e) => update(r.name, { video: (e.target.value as 'yes' | 'no') || undefined })}
-                      >
-                        <option value="">Automatic</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </td>
                   </tr>
                 );
               })
@@ -629,8 +572,9 @@ function ModelsTab({ doc }: { doc: ChatAdminDoc }): ReactNode {
       </div>
       <p className="small muted" style={{ margin: 0 }}>
         Categories become the groups in the Chat picker; lower order comes first. Hidden models stay usable through the API — this
-        only curates Chat. <strong>Sees images</strong>: Automatic guesses from the model&apos;s name — set Yes for a self-hosted
-        vision model (for example one served by vLLM under your own name) so attached images reach it.
+        only curates Chat. Whether a model sees images, hears sound or watches video is part of the model&apos;s capabilities:
+        open <Link to="/admin/models">Models</Link>, Edit the model, and use Change on its Capabilities (Measure now checks
+        images, sound and video). Until it is known, Chat gives the model a description or a transcript instead.
       </p>
       <SaveBar doc={doc} busy={save.isPending} dirty={dirty} onReset={() => setDraft(doc.models)} />
     </form>

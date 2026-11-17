@@ -38,6 +38,10 @@ const ACTIONS = [
   'upstream_updated',
   'upstream_deleted',
   'model_updated',
+  'model_prices_reset_to_catalog',
+  'model_capabilities_updated',
+  'model_capabilities_probed',
+  'capability_probe_setting_changed',
   'grant_created',
   'grant_deleted',
   'quota_created',
@@ -53,6 +57,10 @@ const ACTIONS = [
   'team_created',
   'team_updated',
   'team_deleted',
+  'token_created',
+  'troubleshooting_capture_downloaded',
+  'troubleshooting_exported',
+  'troubleshooting_classifier_runs_viewed',
   'token_revoked',
   'feature_flag_changed',
 ];
@@ -139,7 +147,7 @@ export function AuditPage(): ReactNode {
 
       <div className="row wrap">
         <form
-          className="row"
+          className="row wrap"
           role="search"
           style={{ gap: 'var(--janus-space-2)' }}
           onSubmit={(e) => {
@@ -155,6 +163,7 @@ export function AuditPage(): ReactNode {
               type="search"
               placeholder="Name, action, resource, detail"
               aria-label="Search the audit log"
+              style={{ minWidth: 'min(100%, 15.5rem)' }}
               value={qDraft}
               onChange={(e) => setQDraft(e.target.value)}
               onBlur={() => setQ(qDraft.trim())}

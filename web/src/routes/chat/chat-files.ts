@@ -130,14 +130,68 @@ const STORAGE_SHIM =
   "['localStorage','sessionStorage'].forEach(function(n){try{window[n].length}catch(e){" +
   'try{Object.defineProperty(window,n,{value:S(),configurable:true})}catch(_){}}})})();</script>';
 
-/** The document as the preview runs it: storage shim first, before any script. */
+// A preview runs a page the model wrote, and the model writes what it was
+// led to write: a web page it read, an uploaded document or a shared chat
+// can tell it to build a page that sends the conversation somewhere when it
+// is opened. The sandbox keeps the page away from Janus; it does not keep it
+// off the network. This policy does: no request of any kind leaves the
+// preview. Scripts, styles, images, fonts and media written into the page
+// itself (inline, data: and blob:) still work.
+//
+// One thing a page's own policy cannot stop is the page navigating its
+// frame to another address. The console's own policy does that (frame-src
+// 'self', internal/httpapi/security_headers.go). The preview page is also
+// served with this policy as a header; writing it into the document as well
+// costs nothing and holds if the document is ever shown another way.
+export const PREVIEW_POLICY =
+  "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: data:; style-src 'unsafe-inline'; " +
+  'img-src data: blob:; media-src data: blob:; font-src data:; worker-src blob:; connect-src data: blob:; ' +
+  "form-action 'none'; base-uri 'none'; webrtc 'block'";
+
+/**
+ * The page a preview is loaded from (internal/httpapi/security_headers.go).
+ * It carries the policy above as a response header and a sandbox with no
+ * origin, asks the chat page for the document (PREVIEW_READY), and writes
+ * what it is sent (PREVIEW_DOCUMENT). A page of its own, not a srcdoc frame,
+ * because a srcdoc frame takes on the console's policy, which allows no
+ * inline script.
+ */
+export const PREVIEW_FRAME = '/chat/preview-frame';
+export const PREVIEW_READY = 'janusPreviewReady';
+export const PREVIEW_DOCUMENT = 'janusPreviewDocument';
+
+/** The message a preview posts to the page that holds it when a request was blocked. */
+export const PREVIEW_BLOCKED = 'janusPreviewBlocked';
+
+// Tells the chat page what was blocked, so the person is told (see FileCard).
+const BLOCKED_REPORT =
+  "<script>document.addEventListener('securitypolicyviolation',function(e){try{parent.postMessage({" +
+  PREVIEW_BLOCKED +
+  ":String(e.blockedURI||'')},'*')}catch(_){}});</script>";
+
+/**
+ * The document the preview page is sent. The policy, then the report and the
+ * storage stand-in, go before everything the model wrote: a policy applies
+ * only to what follows it, so nothing may come first. (Looking for the
+ * page's own <head> to put them in would let a script written above it run
+ * without the policy.)
+ */
 export function previewDocument(text: string, kind: DocKind): string {
-  if (kind !== 'html') return text;
-  const head = /<head(\s[^>]*)?>/i.exec(text);
-  if (head) return text.slice(0, head.index + head[0].length) + STORAGE_SHIM + text.slice(head.index + head[0].length);
-  const html = /<html(\s[^>]*)?>/i.exec(text);
-  if (html) return text.slice(0, html.index + html[0].length) + STORAGE_SHIM + text.slice(html.index + html[0].length);
-  return STORAGE_SHIM + text;
+  const guard = `<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="${PREVIEW_POLICY}">${BLOCKED_REPORT}`;
+  return kind === 'html' ? guard + STORAGE_SHIM + text : guard + text;
+}
+
+/**
+ * The host a blocked request was for, or '' when it was not a network
+ * request (the policy also reports things like a blocked inline handler).
+ */
+export function blockedHost(uri: unknown): string {
+  if (typeof uri !== 'string' || !/^(https?|wss?|ftp):/i.test(uri)) return '';
+  try {
+    return new URL(uri).host.slice(0, 255);
+  } catch {
+    return '';
+  }
 }
 
 export function mimeFor(name: string): string {

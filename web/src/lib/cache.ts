@@ -4,9 +4,12 @@
  * Dashboard, org Explore) renders through cacheMeta() so the number and its
  * presence rules are identical everywhere.
  *
- * Definition: hitRate = tokens_cached / (tokens_in + tokens_cache_write_5m +
- * tokens_cache_write_1h), clamped to [0, 1]. When the denominator is zero the
- * rate is undefined and rendered as an em-dash — never NaN, Infinity, or 0%.
+ * Definition: hitRate = tokens_cached / tokens_in, clamped to [0, 1]. Input
+ * tokens include cached tokens and cache writes, as providers bill them, for
+ * every provider, so tokens_in is the whole prompt and nothing is added to
+ * it. The clamp only guards against a provider that reported more cached
+ * tokens than prompt tokens. When tokens_in is zero the rate is undefined and
+ * rendered as an em-dash — never NaN, Infinity, or 0%.
  */
 import type { Totals } from './types';
 import { formatNumber } from './format';
@@ -16,13 +19,13 @@ import { t } from './i18n';
 export type CacheTotals = Pick<Totals, 'tokens_in' | 'tokens_cached' | 'tokens_cache_write_5m' | 'tokens_cache_write_1h'>;
 
 /**
- * The canonical cache hit rate in [0, 1], or undefined when the denominator
- * (all input-side tokens: fresh input plus cache writes) is zero.
+ * The canonical cache hit rate in [0, 1], or undefined when there were no
+ * input tokens (the whole prompt, cached tokens included).
  */
 export function cacheHitRate(totals: CacheTotals): number | undefined {
-  const denominator = totals.tokens_in + totals.tokens_cache_write_5m + totals.tokens_cache_write_1h;
-  if (!Number.isFinite(denominator) || denominator <= 0) return undefined;
-  return Math.min(1, Math.max(0, totals.tokens_cached / denominator));
+  const prompt = totals.tokens_in;
+  if (!Number.isFinite(prompt) || prompt <= 0) return undefined;
+  return Math.min(1, Math.max(0, totals.tokens_cached / prompt));
 }
 
 /** True when the window saw any cache activity — reads or writes. */

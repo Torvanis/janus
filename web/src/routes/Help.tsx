@@ -100,7 +100,7 @@ export function HelpPage(): ReactNode {
                       {data.fields.map((field) => (
                         <div key={field.label} className="row-between">
                           <dt className="small muted">{field.label}</dt>
-                          <dd className="mono small" style={{ margin: 0 }}>
+                          <dd className="mono small break-slash" style={{ margin: 0, minWidth: 0 }} title={field.value}>
                             {field.value}
                           </dd>
                         </div>
@@ -116,7 +116,7 @@ export function HelpPage(): ReactNode {
                       <span className="small muted">{t('help.endpointLabel', { name: me?.endpoint ?? '' })}</span>
                     </div>
                     <div
-                      className="segmented segmented-wrap"
+                      className="segmented"
                       role="tablist"
                       aria-label={t('help.snippetLanguage')}
                       style={{ marginBottom: 'var(--janus-space-3)' }}

@@ -52,34 +52,38 @@ func (a *Ollama) Discover(ctx context.Context, up Upstream, client *http.Client)
 			name = m.Model
 		}
 		if name != "" {
+			window, caps := a.show(ctx, up, client, name)
 			out = append(out, DiscoveredModel{
 				Name:          name,
 				Modalities:    guessModalities(name),
-				ContextWindow: a.contextWindow(ctx, up, client, name),
+				ContextWindow: window,
+				Capabilities:  caps,
 			})
 		}
 	}
 	return out, nil
 }
 
-// contextWindow asks /api/show for one model's context length. Ollama's tag
-// list does not carry it, so this is a second round trip per model — bounded
-// by a short timeout and best-effort: any failure returns 0 ("unknown"), which
-// leaves the field blank rather than failing the whole discovery run.
+// show asks /api/show for one model's context length and capabilities.
+// Ollama's tag list carries neither, so this is a second round trip per
+// model, bounded by a short timeout and best-effort: any failure returns
+// "unknown" rather than failing the whole discovery run.
 //
-// The key is architecture-prefixed (e.g. "qwen35.context_length"), and the
-// architecture is not knowable up front, so the first *.context_length entry
-// wins.
-func (a *Ollama) contextWindow(ctx context.Context, up Upstream, client *http.Client, model string) int64 {
+// The context key is architecture-prefixed (e.g. "qwen35.context_length"),
+// and the architecture is not knowable up front, so the first
+// *.context_length entry wins. "capabilities" is a list such as
+// ["completion", "vision", "tools", "thinking"]; servers too old to send it
+// leave the capabilities unknown.
+func (a *Ollama) show(ctx context.Context, up Upstream, client *http.Client, model string) (int64, Capabilities) {
 	showCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	payload, err := json.Marshal(map[string]string{"model": model})
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	req, err := http.NewRequestWithContext(showCtx, http.MethodPost, joinURL(up.BaseURL, "/api/show"), bytes.NewReader(payload))
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if up.APIKey != "" {
@@ -87,24 +91,52 @@ func (a *Ollama) contextWindow(ctx context.Context, up Upstream, client *http.Cl
 	}
 	body, err := doDiscovery(client, req)
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	var shown struct {
-		ModelInfo map[string]json.RawMessage `json:"model_info"`
+		ModelInfo    map[string]json.RawMessage `json:"model_info"`
+		Capabilities []string                   `json:"capabilities"`
 	}
 	if err := json.Unmarshal(body, &shown); err != nil {
-		return 0
+		return 0, nil
 	}
+	var window int64
 	for key, raw := range shown.ModelInfo {
 		if !strings.HasSuffix(key, ".context_length") {
 			continue
 		}
 		var n int64
 		if err := json.Unmarshal(raw, &n); err == nil && n > 0 {
-			return n
+			window = n
+			break
 		}
 	}
-	return 0
+	return window, ollamaCapabilities(shown.Capabilities)
+}
+
+func ollamaCapabilities(list []string) Capabilities {
+	if len(list) == 0 {
+		return nil
+	}
+	has := func(name string) bool {
+		for _, v := range list {
+			if strings.EqualFold(v, name) {
+				return true
+			}
+		}
+		return false
+	}
+	c := Capabilities{CapInText: true, CapInImage: has("vision"), CapTools: has("tools"), CapThinking: has("thinking")}
+	if has("embedding") {
+		c[CapOutEmbedding] = true
+	}
+	if has("completion") {
+		c[CapOutText] = true
+	}
+	// How its reasoning is turned off is not recorded here: /api/show does
+	// not say, and think: false only works on Ollama's native API, not on the
+	// OpenAI-compatible one Janus calls. The probe finds the switch that works.
+	return c
 }
 
 // Prepare forwards through the OpenAI-compatible shim.

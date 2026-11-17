@@ -1,10 +1,11 @@
 /**
- * Model catalog — health surface.
+ * Model catalog.
  *
- * Every card on /models carries the owning upstream's probe verdict and the
- * model's 10-minute error rate, and a model whose upstream is down is styled
+ * A card carries what a user chooses on (name, provider, what it does, price,
+ * context, speed) plus a health dot; a model whose upstream is down is styled
  * as such (data-health="down" drives the tinted background) with an explicit
- * alert line. The same badge appears in the table view and the drawer.
+ * alert line. Live figures (error rate, probe latency, access) are in the
+ * detail pop-up and the table view.
  */
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -217,30 +218,40 @@ describe('Models page — cards', () => {
     });
     renderAt();
     const card = await screen.findByRole('button', { name: /claude-fable-5/ });
-    expect(within(card).getByText('-not set-')).toBeTruthy();
-    expect(within(card).getByText(/\$0.*Mtok/)).toBeTruthy();
+    // One "in / out" value on the card: the unknown side keeps the literal.
+    expect(within(card).getByTitle(/^Input: -not set- · Output: \$0\.00 \/ Mtok$/).textContent).toBe('-not set- / $0');
+    expect(within(card).getByText('per 1M tokens')).toBeTruthy();
     fireEvent.click(card);
     const drawer = screen.getByRole('dialog');
     expect(within(drawer).getAllByText('-not set-')).toHaveLength(2);
     expect(within(drawer).getByText(/\$0.*Mtok/)).toBeTruthy();
   });
 
-  it('badges each card with its health and latency and shows the 10-minute error rate', async () => {
+  it('marks each card with a health dot and names trouble in words', async () => {
     renderAt();
     const healthyCard = (await screen.findByRole('button', { name: /claude-fable-5/ })) as HTMLElement;
     expect(healthyCard.dataset.health).toBe('healthy');
-    // Badge carries the probe latency like the admin Upstreams page; the
-    // latency stat repeats it in the grid.
-    expect(within(healthyCard).getByText(/Healthy · 42 ms/)).toBeTruthy();
-    expect(within(healthyCard).getByText('42 ms')).toBeTruthy();
-    expect(within(healthyCard).getByText('Errors (10 min)')).toBeTruthy();
-    // No traffic: the rate is a placeholder, never a misleading "0%".
-    expect(within(healthyCard).getByTitle('No requests in the last 10 minutes').textContent).toBe('—');
+    // A healthy model is a green dot whose name carries the probe latency;
+    // no badge, no stat boxes.
+    expect(within(healthyCard).getByRole('img', { name: 'Healthy · 42 ms' })).toBeTruthy();
+    expect(within(healthyCard).queryByText(/Healthy/)).toBeNull();
+    expect(within(healthyCard).queryByText('Errors (10 min)')).toBeNull();
 
     const degradedCard = screen.getByRole('button', { name: /gpt-fable/ }) as HTMLElement;
     expect(degradedCard.dataset.health).toBe('degraded');
-    expect(within(degradedCard).getByText(/Degraded/)).toBeTruthy();
-    expect(within(degradedCard).getByTitle('10 of 40 requests failed in the last 10 minutes').textContent).toBe('25%');
+    expect(within(degradedCard).getByText('Degraded · 25%')).toBeTruthy();
+  });
+
+  it('keeps the live figures one click away in the detail pop-up', async () => {
+    renderAt();
+    fireEvent.click(await screen.findByRole('button', { name: /claude-fable-5/ }));
+    const dialog = await screen.findByRole('dialog');
+    // No traffic: the rate is a sentence, never a misleading "0%".
+    expect(within(dialog).getByText('No requests in the last 10 minutes')).toBeTruthy();
+    expect(within(dialog).getByText('42 ms')).toBeTruthy();
+    expect(within(dialog).getByText(/Upstream checked/)).toBeTruthy();
+    expect(within(dialog).getByText('anthropic')).toBeTruthy();
+    expect(within(dialog).getByText('a grant to you directly')).toBeTruthy();
   });
 
   it('styles a down model as down and says why', async () => {
@@ -252,23 +263,81 @@ describe('Models page — cards', () => {
     const alert = within(downCard).getByRole('status');
     expect(alert.textContent).toContain('This model is not responding right now');
     expect(alert.textContent).toContain('connection refused');
-    expect(within(downCard).getByText('Upstream unreachable')).toBeTruthy();
-    expect(within(downCard).getByTitle('3 of 3 requests failed in the last 10 minutes').textContent).toBe('100%');
     // The healthy card carries no alert.
     const healthyCard = screen.getByRole('button', { name: /claude-fable-5/ }) as HTMLElement;
     expect(within(healthyCard).queryByRole('status')).toBeNull();
+    fireEvent.click(downCard);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Upstream unreachable')).toBeTruthy();
+    expect(within(dialog).getByText('3 of 3 requests failed in the last 10 minutes')).toBeTruthy();
   });
 
-  it('keeps the metadata users already relied on', async () => {
+  it('leads with what a user chooses on: provider, what it does, price, context', async () => {
     renderAt();
     const card = (await screen.findByRole('button', { name: /claude-fable-5/ })) as HTMLElement;
+    expect(within(card).getByRole('heading', { name: 'claude-fable-5' })).toBeTruthy();
     expect(within(card).getByText('Anthropic')).toBeTruthy();
-    expect(within(card).getByText('anthropic')).toBeTruthy();
     expect(within(card).getByText('Chat')).toBeTruthy();
-    expect(within(card).getByText('200K tokens')).toBeTruthy();
-    expect(within(card).getByText(/Access via a grant to you directly/)).toBeTruthy();
-    expect(within(card).getByText('Input')).toBeTruthy();
-    expect(within(card).getByText('Output')).toBeTruthy();
+    expect(within(card).getByText('Price in / out')).toBeTruthy();
+    expect(within(card).getByText('$10 / $30')).toBeTruthy();
+    expect(within(card).getByTitle('200K tokens').textContent).toBe('200K');
+    // The adapter type is not a user choice: it lives in the pop-up.
+    expect(within(card).queryByText('anthropic')).toBeNull();
+  });
+
+  it('caps capability chips and names the rest in a tooltip', async () => {
+    const yes = { value: true, source: 'provider' as const, at: '2026-11-01T00:00:00Z' };
+    mocked.get.mockResolvedValue({
+      models: [
+        modelFixture({
+          capabilities: {
+            'input.image': yes,
+            'input.file': yes,
+            'request.tools': yes,
+            'request.structured_output': yes,
+            'thinking.supported': yes,
+          } as unknown as Model['capabilities'],
+        }),
+      ],
+      managed_models: [],
+    });
+    renderAt();
+    const card = (await screen.findByRole('button', { name: /claude-fable-5/ })) as HTMLElement;
+    expect(within(card).getByText('Sees images')).toBeTruthy();
+    expect(within(card).queryByText('JSON schema')).toBeNull();
+    expect(within(card).getByTitle('JSON schema, Thinking').textContent).toBe('+2');
+  });
+
+  it('sorts by price with unpriced models last, and by speed', async () => {
+    const cheap = modelFixture({
+      id: 'm-c',
+      name: 'cheap-one',
+      rate_in_nanousd: 1_000_000_000,
+      rate_effective_from: '2026-01-01T00:00:00Z',
+    });
+    const unpriced = modelFixture({ id: 'm-u', name: 'a-unpriced', rate_in_nanousd: 0, rate_out_nanousd: 0 });
+    const fast = modelFixture({
+      id: 'm-f',
+      name: 'zz-fast',
+      activity: {
+        jobs_per_day_7d: 1,
+        jobs_per_day_prev_7d: 1,
+        jobs_trend: 'flat',
+        jobs_change_percent: 0,
+        tokens_per_second_7d: 90,
+        speed_samples_7d: 5,
+      },
+    });
+    mocked.get.mockResolvedValue({ models: [healthy, cheap, unpriced, fast], managed_models: [] });
+    const names = () => screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    renderAt('/models?sort=cheap');
+    await screen.findByRole('button', { name: 'cheap-one' });
+    expect(names()).toEqual(['cheap-one', 'claude-fable-5', 'zz-fast', 'a-unpriced']);
+    cleanup();
+    renderAt('/models?sort=speed');
+    await screen.findByRole('button', { name: 'zz-fast' });
+    expect(names()[0]).toBe('zz-fast');
+    expect(screen.queryByRole('heading', { level: 2, name: /Managed models/ })).toBeNull();
   });
 });
 
@@ -301,38 +370,72 @@ describe('Models page — managed model cards', () => {
   it('keeps alias-only results and ordering when switching cards and table, including alias-only upstreams', async () => {
     mocked.get.mockResolvedValue({ models: [healthy], managed_models: [managed] });
     renderAt('/models?q=qwen-fast&upstream=Dragon');
-    expect(await screen.findByRole('article', { name: 'qwen-fast' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'qwen-fast' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Dragon' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Table' }));
     expect(await screen.findByRole('cell', { name: /qwen-fast/ })).toBeTruthy();
     expect(screen.getByRole('cell', { name: /Managed alias/ })).toBeTruthy();
     expect(screen.getByText('qwen-3.8-27b-dragon')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Cards' }));
-    expect(await screen.findByRole('article', { name: 'qwen-fast' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'qwen-fast' })).toBeTruthy();
   });
 
-  it('renders the alias with the same compact card silhouette as a regular model', async () => {
+  it('renders the alias with the same card silhouette, in its own section', async () => {
     mocked.get.mockResolvedValue({ models: [healthy], managed_models: [managed] });
     renderAt();
-    const card = (await screen.findByRole('article', { name: 'qwen-fast' })) as HTMLElement;
+    const card = (await screen.findByRole('button', { name: 'qwen-fast' })) as HTMLElement;
     expect(card.className).toContain('model-card');
     expect(card.dataset.managed).toBe('true');
     expect(card.dataset.health).toBeUndefined();
-    expect(within(card).getByText('Managed model')).toBeTruthy();
-    // The essentials live in the stat grid, not a definition list of prose.
-    expect(card.querySelector('.model-card-stats')).toBeTruthy();
-    expect(card.querySelector('.tile-meta')).toBeNull();
-    expect(within(card).getByText('Currently uses')).toBeTruthy();
-    expect(within(card).getByText('qwen-3.8-27b-dragon')).toBeTruthy();
-    expect(within(card).getByText('Dragon')).toBeTruthy();
-    expect(within(card).getByText('262,144 tokens')).toBeTruthy();
+    expect(card.querySelector('.model-card-facts')).toBeTruthy();
+    expect(within(card).getByText('Uses qwen-3.8-27b-dragon')).toBeTruthy();
+    expect(within(card).getByRole('img', { name: 'Serving' })).toBeTruthy();
+    expect(within(card).getByTitle('262,144 tokens').textContent).toBe('262K');
     expect(within(card).getByText('Chat')).toBeTruthy();
-    expect(within(card).getByText('Serving')).toBeTruthy();
-    expect(within(card).getByText(/Access via an all-users grant/)).toBeTruthy();
-    // The long explainer moved out of the body into a tooltip on the footnote.
-    expect(within(card).queryByText(/Your administrator keeps this name/)).toBeNull();
-    expect(within(card).getByTitle(/Your administrator keeps this name/)).toBeTruthy();
+    // The target is not in this user's catalog, so its price is not guessed.
+    expect(within(card).getByText('Target model’s rates')).toBeTruthy();
     expect(within(card).queryByRole('status')).toBeNull();
+    // Both kinds present: two labeled sections, managed first.
+    const sections = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(sections).toEqual(['Managed models 1', 'Models 1']);
+  });
+
+  it("prices an alias at its target's rates when the target is in the catalog", async () => {
+    const target = modelFixture({ id: 'm-9', name: 'qwen-3.8-27b-dragon', upstream_name: 'Dragon' });
+    mocked.get.mockResolvedValue({ models: [target], managed_models: [managed] });
+    renderAt();
+    const card = (await screen.findByRole('button', { name: 'qwen-fast' })) as HTMLElement;
+    expect(within(card).getByText('$10 / $30')).toBeTruthy();
+  });
+
+  it('says Free for an explicit $0 both ways, and Not priced when nothing is set', async () => {
+    const free = modelFixture({
+      id: 'm-free',
+      name: 'local-free',
+      rate_in_nanousd: 0,
+      rate_out_nanousd: 0,
+      rate_effective_from: '2026-01-01T00:00:00Z',
+    });
+    const unset = modelFixture({ id: 'm-unset', name: 'local-unset', rate_in_nanousd: 0, rate_out_nanousd: 0 });
+    mocked.get.mockResolvedValue({ models: [free, unset], managed_models: [] });
+    renderAt();
+    expect(within(await screen.findByRole('button', { name: 'local-free' })).getByText('Free')).toBeTruthy();
+    expect(within(screen.getByRole('button', { name: 'local-unset' })).getByText('Not priced')).toBeTruthy();
+  });
+
+  it('opens a detail pop-up for an alias with everything the old card carried', async () => {
+    mocked.get.mockResolvedValue({ models: [healthy], managed_models: [managed] });
+    renderAt();
+    fireEvent.click(await screen.findByRole('button', { name: 'qwen-fast' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Fast default for chat')).toBeTruthy();
+    expect(within(dialog).getByText(/Your administrator keeps this name/)).toBeTruthy();
+    expect(within(dialog).getByText('Currently uses')).toBeTruthy();
+    expect(within(dialog).getByText('Dragon')).toBeTruthy();
+    expect(within(dialog).getByText('262,144 tokens')).toBeTruthy();
+    expect(within(dialog).getByText('Serving')).toBeTruthy();
+    expect(within(dialog).getByText('an all-users grant')).toBeTruthy();
+    expect(dialog.textContent).toContain('"model": "qwen-fast"');
   });
 
   it('flags a broken alias the way a down model is flagged', async () => {
@@ -341,7 +444,7 @@ describe('Models page — managed model cards', () => {
       managed_models: [{ ...managed, servable: false, broken: true, broken_reason: 'target disabled' }],
     });
     renderAt();
-    const card = (await screen.findByRole('article', { name: 'qwen-fast' })) as HTMLElement;
+    const card = (await screen.findByRole('button', { name: 'qwen-fast' })) as HTMLElement;
     expect(card.dataset.health).toBe('down');
     const alert = within(card).getByRole('status');
     expect(alert.textContent).toContain('cannot serve requests right now');
@@ -427,7 +530,7 @@ describe('Models page — modality filter', () => {
     };
     mocked.get.mockResolvedValue({ models: [healthy], managed_models: [alias] });
     renderAt('/models?modality=image');
-    expect(await screen.findByRole('article', { name: 'pictures' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'pictures' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /claude-fable-5/ })).toBeNull();
     const select = screen.getByRole('combobox', { name: 'Modality' }) as HTMLSelectElement;
     expect([...select.options].map((option) => option.textContent)).toEqual(['All modalities', 'Chat', 'Image']);

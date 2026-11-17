@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/auth"
+	"github.com/torvanis/janus/internal/capability"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/usage"
 )
@@ -73,8 +75,8 @@ func chatConversationFor(t *testing.T, h *harness, sess *auth.Session, model str
 	return conv.ID
 }
 
-// addVisionModel registers an enabled, priced, granted model whose name the
-// vision heuristic recognizes.
+// addVisionModel registers an enabled, priced, granted model whose
+// provider says it takes images (input.image; the name decides nothing).
 func addVisionModel(t *testing.T, h *harness, name string) {
 	t.Helper()
 	ctx := context.Background()
@@ -95,6 +97,7 @@ func addVisionModel(t *testing.T, h *harness, name string) {
 	if _, err := h.store.CreateGrant(ctx, m.ID, store.ModelKindModel, store.GranteeAllUsers, ""); err != nil {
 		t.Fatal(err)
 	}
+	h.record(t, m.ID, capability.SourceProvider, map[string]any{adapter.CapInImage: true})
 }
 
 func lastUpstreamChat(t *testing.T, h *harness) []map[string]any {
@@ -401,70 +404,37 @@ func TestChatSweepPurgesUnsentUploads(t *testing.T) {
 	}
 }
 
-func TestChatModelAcceptsImages(t *testing.T) {
-	cases := []struct {
-		name       string
-		modalities []string
-		want       bool
-	}{
-		{"gpt-4o-mini", nil, true},
-		{"gpt-4.1", nil, true},
-		{"gpt-5-mini", nil, true},
-		{"openai/gpt-4o", nil, true},
-		{"claude-sonnet-4-5", nil, true},
-		{"gemini-2.5-flash", nil, true},
-		{"grok-2-vision-1212", nil, true},
-		{"grok-4", nil, true},
-		{"llava:13b", nil, true},
-		{"qwen2.5-vl-7b-instruct", nil, true},
-		{"Qwen3-VL-30B", nil, true},
-		{"pixtral-12b", nil, true},
-		{"llama-3.2-11b-vision-instruct", nil, true},
-		{"gemma3:27b", nil, true},
-		{"minicpm-v", nil, true},
-		{"o3", nil, true},
-		// Personal ChatGPT plan models (my/openai/…) see images; the
-		// live proof must show the color of an unnamed image.
-		{"my/openai/gpt-6.1-sol", nil, true},
-		{"gpt-6-astra", nil, true},
-		{"my-local-model", []string{"chat", "vision"}, true},
-		{"my-local-model", []string{"chat", "image"}, true},
-		{"test-model", []string{"chat"}, false},
-		{"llama-3.1-8b-instruct", nil, false},
-		{"qwen2.5-7b-instruct", nil, false},
-		{"mistral-small", nil, false},
-		{"gpt-4o-mini-tts", nil, false},
-		{"gemini-embedding-001", nil, false},
-		{"llama-3.2-3b-instruct", nil, false},
-		{"o3hermes", nil, false},
-		{"flux-image-gen", []string{"image"}, false},
-	}
-	for _, tc := range cases {
-		if got := chatModelAcceptsImages(tc.name, tc.modalities); got != tc.want {
-			t.Errorf("chatModelAcceptsImages(%q, %v) = %v, want %v", tc.name, tc.modalities, got, tc.want)
-		}
-	}
-}
-
-// TestChatAdminSaysAModelSeesImages: a self-hosted model whose name gives
-// no hint (test-model) gets attached images once the admin marks it
-// "Sees images: Yes", and stops getting them on "No". Bad values are refused.
-func TestChatAdminSaysAModelSeesImages(t *testing.T) {
+// TestChatImagesFollowTheModelsCapability: whether attached images reach a
+// model is its input.image capability alone. Unknown is treated like No
+// (owner rule: nothing is inferred from a model's name), an administrator's
+// Yes on the model sends them, an administrator's No stops them. The old
+// Admin → Chat → Models "Sees images" field is ignored when a console that
+// predates its removal still sends it.
+func TestChatImagesFollowTheModelsCapability(t *testing.T) {
 	h, sess := chatHarness(t)
-	setImages := func(v string) *http.Response {
-		return chatAdminPut(t, h, sess, func(m map[string]any) {
-			m["models"] = map[string]any{"test-model": map[string]any{"images": v}}
-		})
-	}
-	if res := setImages("maybe"); res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("bad value = %d", res.StatusCode)
-	}
-	if res := setImages("yes"); res.StatusCode != http.StatusOK {
-		t.Fatalf("set yes = %d", res.StatusCode)
-	}
 	conv := chatConversationFor(t, h, sess, "test-model")
-	pic := chatUploadOK(t, h, sess, "lake.png", testPNG(t, 2, 2))
-	sent := chatSend(t, h, sess, conv, map[string]any{"content": "Describe", "attachment_ids": []string{pic["id"].(string)}})
+	attach := func(content, file string) map[string]any {
+		pic := chatUploadOK(t, h, sess, file, testPNG(t, 2, 2))
+		return chatSend(t, h, sess, conv, map[string]any{"content": content, "attachment_ids": []string{pic["id"].(string)}})
+	}
+	if !strings.Contains(fmt.Sprint(attach("Unknown", "a.png")["warnings"]), "does not accept images") {
+		t.Fatal("unknown input.image: the image was sent as if the model saw it")
+	}
+	// A stale console's old field is accepted and dropped, not stored.
+	if res := chatAdminPut(t, h, sess, func(m map[string]any) {
+		m["models"] = map[string]any{"test-model": map[string]any{"images": "yes", "category": "vision"}}
+	}); res.StatusCode != http.StatusOK {
+		t.Fatalf("old field = %d", res.StatusCode)
+	}
+	h.server.invalidateChatAdmin()
+	if got := h.server.chatAdmin(context.Background()).Models["test-model"]; got.HasLegacyMedia() || got.Category != "vision" {
+		t.Fatalf("stored = %+v", got)
+	}
+	if !strings.Contains(fmt.Sprint(attach("Still unknown", "b.png")["warnings"]), "does not accept images") {
+		t.Fatal("the old Chat field still decides")
+	}
+	h.record(t, h.model.ID, capability.SourceAdmin, map[string]any{adapter.CapInImage: true})
+	sent := attach("Describe", "lake.png")
 	if w, _ := sent["warnings"].([]any); len(w) != 0 {
 		t.Fatalf("warnings = %v", w)
 	}
@@ -472,11 +442,8 @@ func TestChatAdminSaysAModelSeesImages(t *testing.T) {
 	if body := string(h.upstreamRequests[len(h.upstreamRequests)-1].Body); !strings.Contains(body, "data:image/png;base64,") {
 		t.Fatalf("image not sent: %s", body)
 	}
-	if res := setImages("no"); res.StatusCode != http.StatusOK {
-		t.Fatalf("set no = %d", res.StatusCode)
-	}
-	h.server.invalidateChatAdmin()
-	if !strings.Contains(fmt.Sprint(chatSend(t, h, sess, conv, map[string]any{"content": "Again", "attachment_ids": []string{chatUploadOK(t, h, sess, "b.png", testPNG(t, 2, 2))["id"].(string)}})["warnings"]), "does not accept images") {
-		t.Fatal("images still sent after No")
+	h.record(t, h.model.ID, capability.SourceAdmin, map[string]any{adapter.CapInImage: false})
+	if !strings.Contains(fmt.Sprint(attach("Again", "c.png")["warnings"]), "does not accept images") {
+		t.Fatal("images still sent after the administrator set No")
 	}
 }

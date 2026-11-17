@@ -15,7 +15,10 @@ import (
 type decisionCall struct {
 	TokensIn, TokensOut, TokensCached int64
 	CostUSD                           float64
-	CostReported                      bool
+	// CostNano is the quote parsed exactly; CostUSD is used only when a
+	// caller built the call without it.
+	CostNano     int64
+	CostReported bool
 	// Requests is how many requests the call took (the per-request fee
 	// applies to each); 0 counts as one.
 	Requests int
@@ -26,7 +29,10 @@ type decisionCall struct {
 //   - automatic: the provider's reported charge (OpenRouter's usage.cost)
 //     when present, else the rate card;
 //   - provider: only the reported charge;
-//   - card: always the rate card, even when the provider reports a charge;
+//   - card: the rate card when the provider quotes nothing. A quoted charge
+//     still wins (owner ruling: a provider's quote is the call's cost, over
+//     the rate card and any administrator price), so this now differs from
+//     automatic only in name; it is kept so saved settings stay valid;
 //   - none: free.
 //
 // The per-request fee is added for every source except none. The returned
@@ -42,18 +48,39 @@ func (s *Server) decisionCost(ctx context.Context, model *store.Model, c decisio
 	var cost int64
 	mode := usage.AccountingUpstream
 	switch {
-	case c.CostReported && set.CostSource != store.CostSourceCard:
-		cost, mode = int64(c.CostUSD*1e9+0.5), usage.AccountingUpstreamCost
+	case c.CostReported:
+		cost, mode = classify.Usage{CostUSD: c.CostUSD, CostNano: c.CostNano}.Nano(), usage.AccountingUpstreamCost
 	case set.CostSource == store.CostSourceProvider:
 		cost = 0
 	default:
-		rates := usage.Rates{InNano: model.RateInNano, OutNano: model.RateOutNano, CachedNano: model.RateCachedNano}
-		if card := s.cachedRateCard(ctx, model.ID); card.OK {
-			rates = usage.Rates{InNano: card.In, OutNano: card.Out, CachedNano: card.Cached}
-		}
-		cost = usage.ComputeCostAll(usage.TokenCounts{In: c.TokensIn, Out: c.TokensOut, Cached: c.TokensCached}, rates)
+		cost = usage.ComputeCostAll(usage.TokenCounts{In: c.TokensIn, Out: c.TokensOut, Cached: c.TokensCached}, s.decisionRates(ctx, model))
 	}
 	return cost + set.RequestFeeNano*int64(max(1, c.Requests)), mode
+}
+
+// decisionRates are the token rates a decision call is priced at when the
+// provider quotes nothing: the model's rate card in force now.
+func (s *Server) decisionRates(ctx context.Context, model *store.Model) usage.Rates {
+	rates := usage.Rates{InNano: model.RateInNano, OutNano: model.RateOutNano, CachedNano: model.RateCachedNano}
+	if card := s.cachedRateCard(ctx, model.ID); card.OK {
+		rates = usage.Rates{InNano: card.In, OutNano: card.Out, CachedNano: card.Cached}
+	}
+	return rates
+}
+
+// decisionEstimate is Janus's own price for a decision call whose cost the
+// provider quoted (mode AccountingUpstreamCost): the rate card and the
+// per-request fee, exactly what decisionCost charges when no quote comes.
+// The fee is part of both sides, since a quoted call is billed the quote
+// plus the fee. nil for every other call: nothing to compare.
+func (s *Server) decisionEstimate(ctx context.Context, model *store.Model, c decisionCall, mode string) *int64 {
+	if mode != usage.AccountingUpstreamCost || (s.Config != nil && s.Config.LocalOnly) {
+		return nil
+	}
+	set, _ := s.cachedDecisionSetting(ctx, model.ID)
+	est := usage.ComputeCostAll(usage.TokenCounts{In: c.TokensIn, Out: c.TokensOut, Cached: c.TokensCached}, s.decisionRates(ctx, model)) +
+		set.RequestFeeNano*int64(max(1, c.Requests))
+	return &est
 }
 
 // decisionCallFromUsage is the decisionCall of a classifier result, so
@@ -61,7 +88,7 @@ func (s *Server) decisionCost(ctx context.Context, model *store.Model, c decisio
 // decision (cached tokens, an explicit reported $0).
 func decisionCallFromUsage(u classify.Usage, calls int) decisionCall {
 	return decisionCall{TokensIn: u.TokensIn, TokensOut: u.TokensOut, TokensCached: u.TokensCached,
-		CostUSD: u.CostUSD, CostReported: u.CostReported, Requests: calls}
+		CostUSD: u.CostUSD, CostNano: u.Nano(), CostReported: u.CostReported, Requests: calls}
 }
 
 // decisionCostStatus is the reporting cost status of a priced decision
@@ -80,7 +107,7 @@ func (s *Server) decisionCostStatus(ctx context.Context, model *store.Model, c d
 	switch {
 	case set.CostSource == store.CostSourceNone, set.CostSource == store.CostSourceProvider:
 		return "known_free"
-	case c.CostReported && set.CostSource != store.CostSourceCard:
+	case c.CostReported:
 		return "known_free"
 	case !model.RateEffectiveFrom.IsZero():
 		return "known_free"
@@ -119,7 +146,9 @@ func (s *Server) meterDecisionCall(model *store.Model, upstream *store.Upstream)
 			event.ErrorCode = CodeUpstreamDown
 		} else {
 			event.TokensIn, event.TokensOut, event.TokensCached = res.Usage.TokensIn, res.Usage.TokensOut, res.Usage.TokensCached
-			event.CostNano, event.AccountingMode = s.decisionCost(ctx, model, decisionCallFromUsage(res.Usage, res.Calls))
+			call := decisionCallFromUsage(res.Usage, res.Calls)
+			event.CostNano, event.AccountingMode = s.decisionCost(ctx, model, call)
+			event.EstimatedCostNano = s.decisionEstimate(ctx, model, call, event.AccountingMode)
 		}
 		s.writeUsage(ctx, event, "secgw: write classifier usage event", nil)
 	}

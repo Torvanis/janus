@@ -21,6 +21,7 @@ vi.mock('../routes/admin/Provisioning', () => ({
   ProvisioningPage: () => <input aria-label="Directory draft" defaultValue="" />,
 }));
 vi.mock('../routes/admin/LicenseCard', () => ({ LicenseCard: () => <input aria-label="License draft" defaultValue="" /> }));
+vi.mock('../routes/admin/PriceCatalogCard', () => ({ PriceCatalogCard: () => null }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();

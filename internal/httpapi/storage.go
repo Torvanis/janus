@@ -173,6 +173,9 @@ func (s *Server) resolveStorageRequest(ctx context.Context, body *storageRequest
 		cfg.Region = blobstore.DefaultRegion
 	}
 	if cfg.SecretAccessKey == "" && saved.S3.SecretAccessKeyEnc != "" {
+		if cfg.Endpoint != saved.S3.Endpoint && !sameDestination(saved.S3.Endpoint, cfg.Endpoint) {
+			return "", cfg, saved, errSecretNeedsReentry("secret access key", "s3.secret_access_key")
+		}
 		if s.Cipher == nil {
 			return "", cfg, saved, ErrInvalidRequest("The gateway has no encryption key configured.")
 		}

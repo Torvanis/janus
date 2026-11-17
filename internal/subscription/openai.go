@@ -74,6 +74,13 @@ func (o *OpenAI) AdminNote() string {
 // AdapterType implements Provider.
 func (o *OpenAI) AdapterType() string { return adapter.CodexAdapterType }
 
+// OwnsURL implements EndpointOwner: OpenAI's sign-in host and the ChatGPT
+// backend (models, usage and inference share its origin).
+func (o *OpenAI) OwnsURL(u *url.URL) bool {
+	return sameOrigin(u, pick(o.UserCodeURL, openaiUserCodeURL), pick(o.DevicePoll, openaiDevicePollURL), pick(o.TokenURL, openaiTokenURL),
+		o.InferenceBaseURL())
+}
+
 // InferenceBaseURL implements Provider.
 func (o *OpenAI) InferenceBaseURL() string { return pick(o.InferenceURL, openaiInferenceURL) }
 
@@ -308,6 +315,9 @@ func (o *OpenAI) ListModels(ctx context.Context, client *http.Client, accessToke
 					Effort string `json:"effort"`
 				} `json:"supported_reasoning_levels"`
 				DefaultLevel string `json:"default_reasoning_level"`
+				// InputModalities is what the model takes ("text",
+				// "image"); Codex's catalog defaults it to both.
+				InputModalities []string `json:"input_modalities"`
 			} `json:"models"`
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -334,6 +344,7 @@ func (o *OpenAI) ListModels(ctx context.Context, client *http.Client, accessToke
 			slug string
 			rank int
 			r    *Reasoning
+			caps adapter.Capabilities
 		}
 		rows := []ranked{}
 		seen := map[string]bool{}
@@ -356,7 +367,7 @@ func (o *OpenAI) ListModels(ctx context.Context, client *http.Client, accessToke
 				}
 				r = ReasoningLevels(levels, m.DefaultLevel)
 			}
-			rows = append(rows, ranked{slug, rank, r})
+			rows = append(rows, ranked{slug, rank, r, openaiInputCaps(m.InputModalities)})
 		}
 		sort.SliceStable(rows, func(i, j int) bool {
 			if rows[i].rank != rows[j].rank {
@@ -366,7 +377,7 @@ func (o *OpenAI) ListModels(ctx context.Context, client *http.Client, accessToke
 		})
 		infos := make([]ModelInfo, len(rows))
 		for i, r := range rows {
-			infos[i] = ModelInfo{ID: r.slug, Reasoning: r.r}
+			infos[i] = ModelInfo{ID: r.slug, Reasoning: r.r, Capabilities: r.caps}
 		}
 		return infos, nil
 	}
@@ -488,4 +499,27 @@ func postJSON(ctx context.Context, client *http.Client, endpoint string, payload
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	return do(client, req, dst)
+}
+
+// openaiInputCaps reads a Codex catalog entry's input_modalities. The list
+// names everything the model takes, so what is not on it is a no; an
+// absent list says nothing.
+func openaiInputCaps(modalities []string) adapter.Capabilities {
+	if len(modalities) == 0 {
+		return nil
+	}
+	has := func(name string) bool {
+		for _, m := range modalities {
+			if strings.EqualFold(strings.TrimSpace(m), name) {
+				return true
+			}
+		}
+		return false
+	}
+	return adapter.Capabilities{
+		adapter.CapInText:  has("text"),
+		adapter.CapInImage: has("image"),
+		adapter.CapInAudio: has("audio"),
+		adapter.CapInVideo: has("video"),
+	}
 }

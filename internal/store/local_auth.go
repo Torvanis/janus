@@ -207,7 +207,6 @@ func (s *Store) CheckPassword(ctx context.Context, email, password string) (*Use
 	if !ok {
 		return nil, nil, ErrBadCredentials
 	}
-	_ = s.ClearSignInFailures(ctx, email)
 	if pol := s.SecurityPolicy(ctx).Passwords; pol.MaxAgeDays > 0 && !c.MustChange &&
 		nowUTC().Sub(c.PasswordChangedAt) > time.Duration(pol.MaxAgeDays)*24*time.Hour {
 		if err := s.exec(ctx, `UPDATE local_credential SET must_change = 1 WHERE user_id = ?`, u.ID); err == nil {
@@ -232,8 +231,12 @@ func (s *Store) CheckPassword(ctx context.Context, email, password string) (*Use
 		return nil, nil, ErrBadCredentials
 	}
 	if c.TOTPEnabled {
+		// The sign-in is only half done: the failure count stays until the
+		// second step succeeds (the caller clears it then). Clearing it here
+		// let wrong codes be retried forever, one fresh count per password.
 		return u, c, ErrTOTPRequired
 	}
+	_ = s.ClearSignInFailures(ctx, email)
 	return u, c, nil
 }
 

@@ -22,7 +22,8 @@ function renderPage(activeTeam: string) {
     active_team_id: activeTeam,
     teams: [{ id: 't1', name: 'Household', lead_user_id: '' }],
     feature_flags: {},
-    chat_preview: true,
+    chat_enabled: true,
+    chat_available: true,
   } as unknown as Me;
   return render(
     <QueryClientProvider client={qc}>
@@ -80,7 +81,14 @@ describe('ChatPage billing context', () => {
 describe('ChatPage blocked replies', () => {
   it('shows a blocked reply as a calm terminal note, not an error', async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+    const me = {
+      id: 'u1',
+      active_team_id: '',
+      teams: [],
+      feature_flags: {},
+      chat_enabled: true,
+      chat_available: true,
+    } as unknown as Me;
     const base = {
       team_id: '',
       tokens_in: 0,

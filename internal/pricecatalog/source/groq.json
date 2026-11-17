@@ -1,0 +1,109 @@
+{
+  "provider": "groq",
+  "entries": [
+    {
+      "provider": "groq",
+      "model": "canopylabs/orpheus-arabic-saudi",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 40000000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/text-to-speech/orpheus",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "canopylabs/orpheus-v1-english",
+      "type": "tts",
+      "lines": {
+        "price_mchar_nanousd": 22000000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/text-to-speech/orpheus",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "meta-llama/llama-prompt-guard-2-86m",
+      "type": "moderation",
+      "lines": {
+        "rate_in_nanousd": 40000000,
+        "rate_out_nanousd": 40000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/models",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 600000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/model/openai/gpt-oss-120b",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 75000000,
+        "rate_out_nanousd": 300000000,
+        "rate_cached_nanousd": 37000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/model/openai/gpt-oss-20b",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "openai/gpt-oss-safeguard-20b",
+      "type": "moderation",
+      "lines": {
+        "rate_in_nanousd": 75000000,
+        "rate_out_nanousd": 300000000,
+        "rate_cached_nanousd": 37000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/model/openai/gpt-oss-safeguard-20b",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "qwen/qwen3.8-27b",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 800000000,
+        "rate_out_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/model/qwen/qwen3.8-27b",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "groq",
+      "model": "whisper-large-v3",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 1850000
+      },
+      "source": {
+        "url": "https://console.groq.com/docs/speech-to-text",
+        "read_at": "2026-11-06"
+      }
+    }
+  ]
+}

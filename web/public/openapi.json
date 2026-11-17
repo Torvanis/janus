@@ -17,7 +17,7 @@
   "tags": [
     {
       "name": "proxy",
-      "description": "OpenAI-compatible surface. Any endpoint an upstream supports passes through /v1/*; the paths listed here are the ones Janus meters with full token accounting."
+      "description": "OpenAI-compatible surface. Janus forwards the inference endpoints it knows and the stored-object endpoints (videos, files, uploads, stored responses, conversations, vector stores, batches, fine-tuning jobs); a stored object is reachable only by the caller that created it, and any other path under /v1 is answered with 404. The paths listed here are the ones Janus meters with full token accounting."
     },
     {
       "name": "auth",
@@ -229,6 +229,71 @@
         "responses": {
           "200": {
             "description": "Aggregates by model, modality, team, and time."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/pricing/accuracy": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Pricing accuracy",
+        "description": "For calls whose cost the provider quoted (xAI, OpenRouter, Requesty, Perplexity, DeepInfra, LiteLLM), compares the quote, which is what the call is billed, with Janus's own price for the same call (estimated_cost_nanousd, computed when the call was recorded with the rates in force then). Per model and per provider: quoted calls, compared calls, quoted total, Janus total, difference (Janus minus quote, in nano-USD and percent of the quote), calls within 1% and 5%, and calls Janus has no price for (estimate $0, quote above $0). worst lists the compared calls with the largest absolute difference. Calls recorded before Janus kept its own price are compared only where the price history could price them.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Default month.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "quarter",
+                "custom"
+              ]
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "RFC 3339; with range=custom.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "RFC 3339; with range=custom.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "worst",
+            "in": "query",
+            "description": "How many calls to list with the largest difference (1-50, default 10).",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{range, report: {start, end, totals, models[], providers[], worst[]}}."
+          },
+          "403": {
+            "description": "Not an administrator."
           }
         }
       }
@@ -859,6 +924,403 @@
         }
       }
     },
+    "/api/v1/admin/models/{id}/pricing/catalog-preview": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Preview a reset of a model's prices to the Janus price catalog",
+        "description": "Read-only: returns what POST /api/v1/admin/models/{id}/pricing/reset-to-catalog would do, every price line before and after, and changes nothing (no price, no price history, no audit entry). When the catalog has nothing for the model the plan says why (available false, reason no_catalog, no_provider or no_entry). The model editor shows it when it opens.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {
+                      "$ref": "#/components/schemas/CatalogResetPlan"
+                    }
+                  },
+                  "required": [
+                    "plan"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/{id}/pricing/reset-to-catalog": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset a model's prices to the Janus price catalog",
+        "description": "Clears every price an administrator set on the model (the five token rates, which older releases copied from the old rate cards as administrator values, included), applies the Janus price catalog's entry for the model (else the catalog's default for its provider and model type) and keeps the model aligned to the catalog: later catalog updates (a new Janus release or the daily refresh) change its prices. Prices the provider publishes through its API still apply over the catalog, and a provider's quoted cost per call still wins for billing. A changed price appends a price history entry; the reset is audit-logged as model_prices_reset_to_catalog. To see every price line before and after without changing anything, use GET /api/v1/admin/models/{id}/pricing/catalog-preview. When the catalog has nothing for the model the plan says why (available false, reason no_catalog, no_provider or no_entry) and a reset is refused with 409.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "No fields; an empty body or {}."
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The plan and the model after the reset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {
+                      "$ref": "#/components/schemas/CatalogResetPlan"
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "$ref": "#/components/schemas/CatalogModel"
+                    }
+                  },
+                  "required": [
+                    "plan",
+                    "applied"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The Janus price catalog has nothing for this model; the message says why."
+          },
+          "400": {
+            "description": "The body carries a field (an old client's dry_run included); nothing changed."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/pricing/catalog-preview": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Preview a reset of many models' prices to the Janus price catalog",
+        "description": "Read-only: returns what POST /api/v1/admin/models/pricing/reset-to-catalog would do with the same body, one result per model with outcome would_reset, skipped (with its reason) or not_found and the model's plan, and changes nothing. A POST only because the id list can be too long for a URL.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "only_if_unchanged": {
+                    "type": "boolean",
+                    "description": "Keep aligned only where no price changes."
+                  }
+                },
+                "required": [
+                  "ids"
+                ]
+              },
+              "example": {
+                "ids": [
+                  "mdl_1",
+                  "mdl_2"
+                ],
+                "only_if_unchanged": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per model, each with its plan; applied is false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "model_id": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "reset",
+                              "would_reset",
+                              "skipped",
+                              "not_found"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "no_catalog",
+                              "no_provider",
+                              "no_entry",
+                              "prices_would_change"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "changed_lines": {
+                            "type": "integer"
+                          },
+                          "plan": {
+                            "$ref": "#/components/schemas/CatalogResetPlan"
+                          }
+                        },
+                        "required": [
+                          "model_id",
+                          "outcome"
+                        ]
+                      }
+                    },
+                    "counts": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "counts",
+                    "applied"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/pricing/reset-to-catalog": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reset many models' prices to the Janus price catalog, or keep them aligned",
+        "description": "The bulk form of POST /api/v1/admin/models/{id}/pricing/reset-to-catalog, one audit entry per model. Models the catalog has nothing for are skipped with their reason. With only_if_unchanged, only models whose prices stay exactly the same are set to keep aligned; the others are skipped with reason prices_would_change. To see the outcome first without changing anything, use POST /api/v1/admin/models/pricing/catalog-preview.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "only_if_unchanged": {
+                    "type": "boolean",
+                    "description": "Keep aligned only where no price changes."
+                  }
+                },
+                "required": [
+                  "ids"
+                ]
+              },
+              "example": {
+                "ids": [
+                  "mdl_1",
+                  "mdl_2"
+                ],
+                "only_if_unchanged": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One result per model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "model_id": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "reset",
+                              "skipped",
+                              "not_found"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "no_catalog",
+                              "no_provider",
+                              "no_entry",
+                              "prices_would_change"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "changed_lines": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "model_id",
+                          "outcome"
+                        ]
+                      }
+                    },
+                    "counts": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "counts",
+                    "applied"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/{id}/price-history": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A model's price history",
+        "description": "The model's saved prices, newest first (at most 100): one entry per change of a resolved price, with the price lines in force with it. Past requests are priced by the entry in force when they ran.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Price history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RateCardVersion"
+                      }
+                    }
+                  },
+                  "required": [
+                    "versions"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such model."
+          }
+        }
+      }
+    },
     "/api/v1/admin/overview": {
       "get": {
         "tags": [
@@ -876,6 +1338,15 @@
             "in": "query",
             "required": false,
             "description": "Return only these pieces (comma-separated): totals, series, leaders, performance, quotas. Without it the whole document is returned. The console loads each piece separately so charts fill in as their data arrives.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "models",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated model ids to plot in model_performance instead of the five most-used models (at most 8; ids without traffic in the range are left out). model_performance.available lists every model with traffic in the range.",
             "schema": {
               "type": "string"
             }
@@ -1058,32 +1529,13 @@
         }
       }
     },
-    "/api/v1/admin/ratecards/apply": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Apply the reference seed to unpriced models",
-        "description": "Explicit legacy seed application, with exact configured seed names/aliases. Each model is updated atomically. Skips models with any saved or automatic rate card, including explicit zero cards. Fills context only when unknown and not overridden. Applied seed fields become admin overrides. Automatic discovery uses provider-scoped, case-sensitive canonical IDs instead.",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The models priced by this call, plus context_windows_set."
-          }
-        }
-      }
-    },
-    "/api/v1/admin/ratecards/reference": {
+    "/api/v1/admin/price-catalog": {
       "get": {
         "tags": [
           "admin"
         ],
-        "summary": "Bundled reference rate cards",
-        "description": "The rate-card seed shipped inside the binary. List prices at authoring time — a starting point, not a live feed.",
+        "summary": "Price catalog status",
+        "description": "The price catalog in use (bundled in the binary, or downloaded), its version and counts, the refresh settings in force with where each comes from (environment, settings, offline mode, default) and whether the environment locks them, whether a signature is required, the trusted keys, and the outcome of the last check. Precedence for a model's prices: the provider's quote of a call > administrator price > provider API price > catalog entry for the exact model > catalog default for the provider and model type > none.",
         "security": [
           {
             "sessionCookie": []
@@ -1091,7 +1543,101 @@
         ],
         "responses": {
           "200": {
-            "description": "Seed entries with a caveat."
+            "description": "{catalog, bundled, settings, saved, status, default_url, trusted_keys}"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/price-catalog/check": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Check for a newer price catalog now",
+        "description": "Fetches the catalog and its detached signature (<url>.sig) once, verifies the signature unless JANUS_PRICE_CATALOG_REQUIRE_SIGNATURE=false, and applies it only when its version is newer. Applying rewrites the catalog values of every model; administrator and provider API prices are never changed. The update is audit-logged with the number of lines changed.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{status} with result updated, not_modified, up_to_date or error."
+          },
+          "409": {
+            "description": "The daily refresh is off (or offline mode keeps it off)."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/price-catalog/entries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Price catalog entries",
+        "description": "Every model entry (provider, exact model and aliases, type, lines in nano-USD, source URL and date read) and every default by provider and model type, from the catalog in use.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{version, label, generated_at, origin, entries, defaults}"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/price-catalog/settings": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Change the price catalog refresh settings",
+        "description": "Turns the opt-in daily refresh on or off and sets the catalog URL (empty returns to the default). A value set by JANUS_PRICE_CATALOG_REFRESH or JANUS_PRICE_CATALOG_URL, or kept off by offline mode, cannot be changed here. Audit-logged.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refresh_enabled": {
+                    "type": "boolean"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "{saved, settings}"
+          },
+          "400": {
+            "description": "Invalid URL."
+          },
+          "409": {
+            "description": "The environment or offline mode sets this value."
           }
         }
       }
@@ -1474,7 +2020,8 @@
         "tags": [
           "me"
         ],
-        "summary": "Change or add password",
+        "summary": "Change your password",
+        "description": "Browser session only: an API token is refused with 403. An account with no password is refused with 403; an administrator adds the first one.",
         "security": [
           {
             "sessionCookie": []
@@ -1894,7 +2441,7 @@
         ],
         "responses": {
           "200": {
-            "description": "directory (null when none; has_bind_password instead of the secret) and licensed."
+            "description": "directory (null when none; has_bind_password instead of the secret; default_domain, the domain a short sign-in name uses; windows_domain, the name accepted as DOMAIN\\name, empty = derived) and licensed."
           }
         }
       },
@@ -1902,7 +2449,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "Create or replace the directory (blank bind_password keeps the stored one)",
+        "summary": "Create or replace the directory (blank bind_password keeps the stored one; default_domain turns a short name such as ada, or CORP\\ada when CORP is windows_domain, into ada@<domain>; windows_domain defaults to the first label of default_domain in capitals)",
         "security": [
           {
             "sessionCookie": []
@@ -1913,7 +2460,7 @@
             "description": "Saved."
           },
           "400": {
-            "description": "url not ldap(s)://, missing base_dn, user_filter without {login}, group_filter without {dn}."
+            "description": "url not ldap(s)://, missing base_dn, user_filter without {login}, group_filter without {dn}, default_domain not a domain such as corp.example.com, windows_domain not 1-15 letters, digits, - or _ or set without default_domain."
           },
           "402": {
             "description": "license.feature_not_licensed (ldap)."
@@ -1953,7 +2500,7 @@
         ],
         "responses": {
           "200": {
-            "description": "ok; with login: user {dn, email, name, groups, would_be_admin}. ok=false carries the reason."
+            "description": "ok; with login: login (the name searched for, after default_domain and windows_domain are applied; a DOMAIN\\name for another domain gives ok=false) and user {dn, email, name, groups, would_be_admin}. ok=false carries the reason."
           },
           "402": {
             "description": "ldap not licensed."
@@ -3359,7 +3906,7 @@
           "app"
         ],
         "summary": "Granted models with pricing and health",
-        "description": "Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms — the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarized as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields.",
+        "description": "Models on a disabled upstream are left out even when granted, and so are managed models none of whose targets (alias target or fallback, pool members, router default and routes) is on an enabled upstream; re-enabling the upstream brings them back with their grants. Each real model carries live health next to its metadata: the owning upstream's last probe result (upstream_reachable, upstream_last_check_at, upstream_last_error, upstream_last_latency_ms — the same verdict the admin Upstreams page shows) and the model's own request/error rollup over the trailing 10 minutes (request_count_10m, error_count_10m, error_rate_percent), summarized as health. The rollup counts requests that reached or tried to reach the upstream; policy rejections (quota, grants, blocking rules) are excluded from both sides of the ratio. An error is any 5xx or an upstream.* error code. Managed aliases in managed_models do not carry health fields.",
         "security": [
           {
             "sessionCookie": []
@@ -3375,6 +3922,38 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/models/{id}/performance": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "A model's response figures over the last seven days",
+        "description": "Org-wide averages for one model the caller can use (a model id or a managed model id; an alias reports its current target): time to first token of successful streamed requests (avg_ttft_ms), output tokens per successful request (avg_output_tokens) and the token-weighted cache hit rate (cache_hit_rate, cached input / all input). cache_reported is false, and the rate null, when the model reported no prompt-cache use. Each *_series holds one value per day, null when nothing was measured. Gateway refusals, failures, status checks and the gateway's own calls are excluded. A model outside the caller's catalog is a 404.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seven-day averages and daily series."
+          },
+          "404": {
+            "description": "The caller cannot use this model."
           }
         }
       }
@@ -3564,6 +4143,165 @@
           },
           "404": {
             "description": "No such connection for this user."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}/capabilities": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "What your plan's models can take",
+        "description": "Every model the connected plan offers, with each capability's value in force and its source: default (built in for this vendor's plans), provider (reported by the vendor's model list), probe (measured by your Measure) or admin (set by you). Also lists each layer, the last measurement, and when Measure may be pressed again.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{subscription_id, provider, provider_name, keys, max_requests, measure_every_seconds, models: [{model, name, selected, resolved, defaults, reported, measured, set, probed?, measure_after?, not_measurable?}]}."
+          },
+          "403": {
+            "description": "Personal subscriptions or this provider are turned off, or the instance is offline."
+          },
+          "404": {
+            "description": "No such connection for this user."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Set a plan model's capabilities yourself",
+        "description": "{model, set: {key: value | null}}. A value is your own setting and beats the measurement, the vendor's list and the built-in default; null returns the key to its automatic value. Answers the model's view.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model",
+                  "set"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "gpt-6.1-sol"
+                  },
+                  "set": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "example": {
+                      "input.image": true,
+                      "input.audio": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The model's capabilities after the change."
+          },
+          "400": {
+            "description": "Unknown model or capability key, or a value of the wrong type."
+          },
+          "403": {
+            "description": "Personal subscriptions or this provider are turned off, or the instance is offline."
+          },
+          "404": {
+            "description": "No such connection for this user."
+          }
+        }
+      }
+    },
+    "/api/v1/me/subscriptions/{id}/capabilities/measure": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Measure a plan model",
+        "description": "{model}. Measures the model through your own connection in the background: up to 30 small requests, counted against your plan (images, sound, video, tools, thinking). Only what neither the vendor's list nor your own setting says is measured; built-in defaults are checked. One model can be measured once every 10 minutes. Answers 202 with the model's view (probed.status running).",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "gpt-6.1-sol"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Measuring has started."
+          },
+          "400": {
+            "description": "The plan does not offer the model, or it is not a chat model."
+          },
+          "403": {
+            "description": "Personal subscriptions or this provider are turned off, the instance is offline, or the plan needs to be reconnected."
+          },
+          "404": {
+            "description": "No such connection for this user."
+          },
+          "429": {
+            "description": "The model is being measured, or was measured less than 10 minutes ago (Retry-After)."
           }
         }
       }
@@ -3884,6 +4622,14 @@
             }
           },
           {
+            "name": "request_id",
+            "in": "query",
+            "description": "Narrow to one request (its own row and the calls Janus made for it, which share its request id), whenever it ran: the time range does not apply. Does not widen access to another user's events.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "range",
             "in": "query",
             "schema": {
@@ -4026,6 +4772,9 @@
                 "upstream_reported_cost",
                 "byte_count_fallback",
                 "unmetered_modality",
+                "request_measured",
+                "measured_unpriced",
+                "billed_on_result",
                 "not_billable"
               ]
             },
@@ -4398,7 +5147,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           },
           "400": {
             "description": "format is not markdown or json"
@@ -4444,7 +5193,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         },
         "parameters": [
@@ -4474,7 +5223,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           },
           "400": {
             "description": "Temporary chat, nothing to share yet, or too many links"
@@ -4509,7 +5258,7 @@
             "description": "Done"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         },
         "parameters": [
@@ -4549,7 +5298,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         },
         "parameters": [
@@ -4580,8 +5329,8 @@
           "200": {
             "description": "OK"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           }
         }
       },
@@ -4600,8 +5349,8 @@
           "201": {
             "description": "OK"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           },
           "400": {
             "description": "Invalid name or body, or the library is full"
@@ -4629,7 +5378,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           },
           "400": {
             "description": "Invalid name or body"
@@ -4665,7 +5414,7 @@
             "description": "Done"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         },
         "parameters": [
@@ -4725,8 +5474,8 @@
           "200": {
             "description": "OK"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW)"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           }
         }
       }
@@ -4746,9 +5495,6 @@
         "responses": {
           "200": {
             "description": "OK"
-          },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW)"
           }
         }
       }
@@ -4788,8 +5534,8 @@
           "400": {
             "description": "The file type is not accepted, or the file is unreadable"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           },
           "413": {
             "description": "The file is larger than the upload limit"
@@ -4824,7 +5570,7 @@
             "description": "Deleted"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           },
           "409": {
             "description": "The file was already sent with a message"
@@ -4859,7 +5605,7 @@
             "description": "The original file"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       }
@@ -4880,8 +5626,8 @@
           "200": {
             "description": "OK"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           }
         }
       },
@@ -4890,7 +5636,7 @@
           "app"
         ],
         "summary": "Start a chat conversation",
-        "description": "Body: model, title, and optionally temporary (never listed or searchable, removed once idle for a day), instructions (this chat only, at most 8,000 characters, stored encrypted) and reasoning_effort (\"\", low, medium, high). Billed to the session's Working under selection.",
+        "description": "Body: model, title, and optionally temporary (never listed or searchable, removed once idle for a day), instructions (this chat only, at most 8,000 characters, stored encrypted) and reasoning_effort (\"\" for the model default, or none, minimal, low, medium, high, xhigh, max; fitted to what the model takes). Billed to the session's Working under selection.",
         "security": [
           {
             "sessionCookie": []
@@ -4910,8 +5656,8 @@
           "201": {
             "description": "OK"
           },
-          "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+          "403": {
+            "description": "Chat is turned off in Administration → Chat, or not available to this account"
           }
         }
       }
@@ -4943,7 +5689,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       },
@@ -4983,7 +5729,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       },
@@ -5013,7 +5759,7 @@
             "description": "Deleted"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       }
@@ -5055,7 +5801,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       }
@@ -5103,7 +5849,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       }
@@ -5135,7 +5881,7 @@
             "description": "OK"
           },
           "404": {
-            "description": "Chat is not enabled (JANUS_CHAT_PREVIEW) or the item does not exist"
+            "description": "The item does not exist"
           }
         }
       }
@@ -5336,7 +6082,7 @@
         "summary": "Identity-provider health",
         "responses": {
           "200": {
-            "description": "Provider label and dev-auth flag."
+            "description": "Provider label, dev-auth flag, local_auth and needs_setup. directory_sign_in is true while an LDAP directory is enabled (the form accepts user names); default_domain, when set, is the domain a user name without one signs in with, and windows_domain the name accepted as DOMAIN\\name."
           }
         }
       }
@@ -5393,17 +6139,6 @@
           },
           "503": {
             "description": "A dependency is unreachable."
-          }
-        }
-      }
-    },
-    "/metrics": {
-      "get": {
-        "summary": "Prometheus metrics",
-        "description": "Operational metrics with bounded label cardinality.",
-        "responses": {
-          "200": {
-            "description": "Prometheus exposition format."
           }
         }
       }
@@ -5624,7 +6359,10 @@
                     "upstream_reported",
                     "upstream_reported_cost",
                     "byte_count_fallback",
-                    "unmetered_modality"
+                    "unmetered_modality",
+                    "request_measured",
+                    "measured_unpriced",
+                    "billed_on_result"
                   ]
                 },
                 "description": "How the figures were obtained: token counts priced by the rate card; a provider-reported cost (X.ai cost_in_usd_ticks); a text response without usage estimated at ~bytes/4; or a media response without usage recorded at zero (never byte-estimated)."
@@ -5733,7 +6471,10 @@
                     "upstream_reported",
                     "upstream_reported_cost",
                     "byte_count_fallback",
-                    "unmetered_modality"
+                    "unmetered_modality",
+                    "request_measured",
+                    "measured_unpriced",
+                    "billed_on_result"
                   ]
                 },
                 "description": "How the figures were obtained: token counts priced by the rate card; a provider-reported cost (X.ai cost_in_usd_ticks); a text response without usage estimated at ~bytes/4; or a media response without usage recorded at zero (never byte-estimated)."
@@ -5836,7 +6577,10 @@
                     "upstream_reported",
                     "upstream_reported_cost",
                     "byte_count_fallback",
-                    "unmetered_modality"
+                    "unmetered_modality",
+                    "request_measured",
+                    "measured_unpriced",
+                    "billed_on_result"
                   ]
                 },
                 "description": "How the figures were obtained: token counts priced by the rate card; a provider-reported cost (X.ai cost_in_usd_ticks); a text response without usage estimated at ~bytes/4; or a media response without usage recorded at zero (never byte-estimated)."
@@ -6309,7 +7053,7 @@
           {
             "name": "since",
             "in": "query",
-            "description": "RFC 3339 lower bound on captured_at.",
+            "description": "Lower bound on captured_at: an RFC 3339 timestamp, a duration such as 24h, or a number of days such as 7d.",
             "schema": {
               "type": "string"
             }
@@ -6442,7 +7186,7 @@
           {
             "name": "since",
             "in": "query",
-            "description": "RFC 3339 lower bound on captured_at.",
+            "description": "Lower bound on captured_at: an RFC 3339 timestamp, a duration such as 24h, or a number of days such as 7d.",
             "schema": {
               "type": "string"
             }
@@ -9452,7 +10196,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "RFC 3339 timestamp or a duration such as 24h."
+            "description": "RFC 3339 timestamp, a duration such as 24h, or a number of days such as 7d; anything else is refused with 400."
           },
           {
             "name": "limit",
@@ -17103,6 +17847,82 @@
         }
       }
     },
+    "/api/v1/tokens/{id}/reissue": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Re-issue a token under the same name",
+        "description": "Owner browser session and CSRF header required. Creates a new token with the same description and team context as the given token (active or revoked) and returns its value once. With revoke_old true and the old token still active, the old token is revoked in the same transaction and clients using it are refused from then on. Audited as token_created (with reissued_from) and, when revoked, token_revoked (reason reissued, replaced_by). Team context requires active membership.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revoke_old": {
+                    "type": "boolean",
+                    "description": "Also revoke the old token now. Ignored when it is already revoked."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "New token created; value is shown only in this response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "value",
+                    "revoked_old"
+                  ],
+                  "properties": {
+                    "token": {
+                      "$ref": "#/components/schemas/TeamToken"
+                    },
+                    "value": {
+                      "type": "string"
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "revoked_old": {
+                      "type": "boolean",
+                      "description": "True when this call revoked the old token."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No longer an active member of the token's team."
+          },
+          "403": {
+            "description": "Browser session required."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/v1/admin/chat/search-test": {
       "post": {
         "tags": [
@@ -17450,6 +18270,199 @@
           }
         }
       }
+    },
+    "/api/v1/admin/models/{id}/capabilities": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "What is known about a model's capabilities, by source",
+        "description": "Returns keys (every capability key with its kind: bool, string with enum, list or int), resolved (the value in force per key with its source: provider, probe or admin), and what each source said (provider, probe, admin). A key absent from resolved is unknown, which is not the same as false.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capability view."
+          },
+          "404": {
+            "description": "No such model."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set or clear capability overrides",
+        "description": "Body: {\"overrides\": {\"<key>\": value | null}}. A value overrides what the provider says and what a probe measured; null removes the override. Unknown keys, wrong types and values outside a key's enum reject the whole request. Audit-logged as model_capabilities_updated.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "overrides"
+                ],
+                "properties": {
+                  "overrides": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Capability view after the change."
+          },
+          "400": {
+            "description": "Invalid override."
+          },
+          "404": {
+            "description": "No such model."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/{id}/capabilities/probe": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Measure a model's capabilities now",
+        "description": "Starts a probe: up to 30 small chat requests sent to the model through its upstream, to measure what the provider does not say. Answers at once with the capability view; probed.status is running until the probe is done (read GET .../capabilities to follow it). A probe already under way is not started twice. Chat models only. Audit-logged as model_capabilities_probed.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Capability view with the probe claimed."
+          },
+          "400": {
+            "description": "Not a model that is measured."
+          },
+          "404": {
+            "description": "No such model."
+          }
+        }
+      }
+    },
+    "/api/v1/admin/models/capabilities/probe": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Measure every enabled chat model",
+        "description": "Queues a probe of every enabled chat model, run one after another. Body: {\"only_unmeasured\": true} leaves models with a finished measurement alone.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "only_unmeasured": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "{\"started\": n}"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/system/capability-probe": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Whether models are measured when enabled",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{\"on_enable\": bool}"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turn measuring on enable on or off",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "on_enable"
+                ],
+                "properties": {
+                  "on_enable": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored setting."
+          },
+          "400": {
+            "description": "on_enable missing."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -17772,7 +18785,8 @@
         "description": "Aggregated usage counters over a window or bucket.",
         "properties": {
           "tokens_in": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Input tokens. Input tokens include cached tokens, as providers bill them: the whole prompt (fresh input, cache reads and cache writes) for every provider. Cache hit rate = tokens_cached / tokens_in."
           },
           "tokens_out": {
             "type": "integer"
@@ -17848,6 +18862,10 @@
           "adapter_type": {
             "type": "string",
             "description": "Upstream adapter type (openai_compatible, anthropic, bedrock, …)."
+          },
+          "upstream_enabled": {
+            "type": "boolean",
+            "description": "Whether the owning upstream is enabled. Always true in user listings: models on a disabled upstream are left out of /v1/models and /api/v1/models even when granted; admin listings show them with false."
           },
           "name": {
             "type": "string",
@@ -17967,6 +18985,14 @@
               "type": "string"
             },
             "description": "Unsupported/conditional pricing or invalid provider prices; no guessed conversion is applied."
+          },
+          "cost_quoted": {
+            "type": "boolean",
+            "description": "Admin model list and model PATCH only: the model's provider quotes the cost of each call (xAI, OpenRouter, Requesty, Perplexity, DeepInfra), and that quote is the call's cost. The model's prices are then used only for the estimate in the pricing accuracy report."
+          },
+          "catalog_aligned": {
+            "type": "boolean",
+            "description": "Keep aligned to the Janus price catalog: the model has no prices set by an administrator, and its prices follow the catalog (prices the provider publishes through its API still apply over it). New models start aligned; setting a price turns it off. For a model from before this setting existed, Janus decides it once without changing anything billed: aligned only when no administrator price exists and the prices in force equal what the catalog gives."
           }
         },
         "required": [
@@ -17986,6 +19012,99 @@
           "upstream_last_error",
           "upstream_last_latency_ms",
           "health"
+        ]
+      },
+      "CatalogResetPlan": {
+        "type": "object",
+        "description": "What a reset to the Janus price catalog does to one model.",
+        "properties": {
+          "model_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "False when the catalog has nothing for the model; reason and message say why."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no_catalog",
+              "no_provider",
+              "no_entry"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "catalog": {
+            "type": "string",
+            "description": "The catalog values used, e.g. Janus price catalog 2026.11.16.1 (default for chat)."
+          },
+          "catalog_aligned": {
+            "type": "boolean"
+          },
+          "has_admin_prices": {
+            "type": "boolean"
+          },
+          "changes": {
+            "type": "array",
+            "description": "Every price line the model has before or after, with the value (nano-USD; null = not priced) and source of each.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "line": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64"
+                },
+                "before_source": {
+                  "type": "string"
+                },
+                "after": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64"
+                },
+                "after_source": {
+                  "type": "string"
+                },
+                "after_detail": {
+                  "type": "object"
+                },
+                "changed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "line",
+                "before",
+                "after",
+                "changed"
+              ]
+            }
+          },
+          "changed_lines": {
+            "type": "integer"
+          },
+          "provider_lines": {
+            "type": "integer",
+            "description": "Lines that, after the reset, bill the price the provider publishes through its API."
+          }
+        },
+        "required": [
+          "model_id",
+          "available",
+          "changes"
         ]
       },
       "DiscoveryInterval": {
@@ -18072,6 +19191,12 @@
               "reference",
               "unknown"
             ]
+          },
+          "source_detail": {
+            "$ref": "#/components/schemas/MetadataSourceDetail"
+          },
+          "automatic_detail": {
+            "$ref": "#/components/schemas/MetadataSourceDetail"
           }
         },
         "required": [
@@ -18129,6 +19254,21 @@
             "minimum": 0,
             "exclusiveMaximum": 9223372036.854776,
             "description": "USD per million tokens. Omit to preserve; null removes this override; zero sets an explicit free price. Rounded to integer nano-USD; must fit signed int64."
+          },
+          "catalog_aligned": {
+            "type": "boolean",
+            "description": "true resets the model's prices to the Janus price catalog and keeps them aligned (as POST /api/v1/admin/models/{id}/pricing/reset-to-catalog; refused when the catalog has nothing for the model or when the same request sets a price); false stops following the catalog and changes no price. Setting any price turns it off."
+          },
+          "price_lines": {
+            "type": "object",
+            "description": "Price lines beyond the five token rates, keyed by `<unit>` or `<unit>@<condition>=<value>,…` with conditions in alphabetical order. A number (USD) sets the administrator's price, null returns the line to its automatic value. Conditional token rates (`rate_in_nanousd@prompt_over=272000`: the whole request is charged at this rate once the prompt has more tokens than that) are per million tokens. Unit prices are per unit: `price_image_nanousd` per image, `price_video_second_nanousd` per second, `price_audio_minute_nanousd` per minute, `price_mchar_nanousd` per million characters, `price_kpage_nanousd` per thousand pages, `price_request_nanousd` per request; their conditions are quality, size, resolution, audio and tier. Resolved lines appear in `metadata` beside the rates, each with its source. In this release only long-prompt token rates change what a request costs; unit prices are stored and will be applied as each kind of request is measured.",
+            "additionalProperties": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
           },
           "context_window": {
             "type": [
@@ -21220,6 +22360,90 @@
           "dimensions"
         ],
         "description": "Retained authorized dimension domain, not a rolling time window; also includes currently authorized teams without prior use. Hard input limit fails rather than truncates."
+      },
+      "MetadataSourceDetail": {
+        "type": "object",
+        "description": "Where a value comes from, for display. label is text such as \"Admin override\", \"Provider API\", \"Janus price catalog 2026.11.16.1\" or \"Janus price catalog 2026.11.16.1 (default for tts)\".",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "model",
+              "default"
+            ],
+            "description": "Catalog values: the model's own entry, or the default for its provider and type."
+          },
+          "type": {
+            "type": "string",
+            "description": "Catalog defaults: the model type the default is for."
+          },
+          "url": {
+            "type": "string",
+            "description": "Catalog values: the page the price was read from."
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date",
+            "description": "The day the price was read: from the catalog's source page, or from the provider's API at the last discovery."
+          },
+          "set_at": {
+            "type": "string",
+            "format": "date",
+            "description": "Administrator values: the day the price was last set. Absent for prices set before this was recorded."
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "RateCardVersion": {
+        "type": "object",
+        "description": "One saved price of a model, in force from effective_from until the next one.",
+        "properties": {
+          "effective_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rate_in_nanousd": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rate_out_nanousd": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rate_cached_nanousd": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rate_cache_write_5m_nanousd": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rate_cache_write_1h_nanousd": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "lines": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Price lines in force with these rates, nano-USD, keyed as in ModelMetadataPatch.price_lines."
+          }
+        },
+        "required": [
+          "effective_from",
+          "rate_in_nanousd",
+          "rate_out_nanousd",
+          "rate_cached_nanousd",
+          "rate_cache_write_5m_nanousd",
+          "rate_cache_write_1h_nanousd"
+        ]
       }
     }
   }

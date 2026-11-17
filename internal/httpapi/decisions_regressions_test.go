@@ -188,7 +188,8 @@ func TestDecisionReservedRefusalNamesNoPolicy(t *testing.T) {
 	}
 }
 
-// E7: a decision model nobody priced is logged unpriced, as chat is.
+// E7 (revised by the provider-quote ruling): a decision model nobody priced
+// is logged by what priced the call: its provider's quote here.
 func TestUnpricedDecisionModelIsLoggedUnpriced(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -225,8 +226,11 @@ func TestUnpricedDecisionModelIsLoggedUnpriced(t *testing.T) {
 	if rec := h.doRaw(http.MethodPost, "/v1/systemone", "application/json", []byte(sprintf(s1Body, "nimble"))); rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if s := status(); s != "unpriced" {
-		t.Errorf("never-priced decision model logged as %q, want unpriced", s)
+	// The fake System One provider quotes each call's charge (usage.cost).
+	// Owner ruling: that quote is the call's cost even on the card source,
+	// so the call is priced although no rate card was ever set.
+	if s := status(); s != "priced" {
+		t.Errorf("decision call the provider quoted logged as %q, want priced", s)
 	}
 }
 

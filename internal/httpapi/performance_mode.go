@@ -64,7 +64,9 @@ func DecidePerformanceMode(requested bool, st license.State) PerformanceMode {
 
 // usageWriteTimeout bounds each database step for one event (insert, then the
 // follow-up work). Derived when the step runs, not when the event is queued.
-const usageWriteTimeout = 15 * time.Second
+// A variable only so a test that floods the writer on purpose can give a slow
+// machine more room; nothing in the product changes it.
+var usageWriteTimeout = 15 * time.Second
 
 type usageItem struct {
 	ctx   context.Context // uncancelled request context (values only)

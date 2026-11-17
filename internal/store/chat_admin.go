@@ -63,19 +63,30 @@ type ChatModelSetting struct {
 	Category    string `json:"category,omitempty"`
 	Order       int    `json:"order,omitempty"`
 	Recommended bool   `json:"recommended,omitempty"`
-	// Images says whether Chat sends this model the images people attach:
-	// "" = automatic (its modalities, else a guess from its name), "yes"
-	// or "no". Self-hosted models are often named so the guess is wrong.
-	Images string `json:"images,omitempty"`
-	// Audio / Video: the same for sound and video files people attach.
-	Audio string `json:"audio,omitempty"`
-	Video string `json:"video,omitempty"`
+	// LegacyImages, LegacyAudio and LegacyVideo are the old per-model
+	// "Sees images / Hears sound / Sees video" answers (yes/no). Whether a
+	// model takes images, sound or video now lives in the model's
+	// capabilities (input.image / input.audio / input.video). These fields
+	// are only read so a stored document from before that change can be
+	// moved there once (Server.MigrateChatMediaSettings); Validate clears
+	// them, so they are never stored again and a stale console sending
+	// them is ignored.
+	LegacyImages string `json:"images,omitempty"`
+	LegacyAudio  string `json:"audio,omitempty"`
+	LegacyVideo  string `json:"video,omitempty"`
+}
+
+// HasLegacyMedia reports whether the setting still carries an old
+// per-model media answer.
+func (m ChatModelSetting) HasLegacyMedia() bool {
+	return m.LegacyImages != "" || m.LegacyAudio != "" || m.LegacyVideo != ""
 }
 
 // ChatAdminSettings is the instance-wide Chat configuration.
 type ChatAdminSettings struct {
-	// Enabled turns Chat on for the instance. JANUS_CHAT_PREVIEW=false is a
-	// hard off above it.
+	// Enabled turns Chat on for the instance (on by default; migration
+	// 0086_chat_generally_available turned it on once for every install
+	// that had saved it off while Chat was a preview).
 	Enabled bool       `json:"enabled"`
 	Access  ChatAccess `json:"access"`
 	// DefaultModel is the picker's starting model for someone who has not
@@ -206,15 +217,9 @@ func (c *ChatAdminSettings) Validate() error {
 		if m.Category != "" && !contains(ChatCategories, m.Category) {
 			return &ValidationError{Field: "models", Message: fmt.Sprintf("unknown category %q for %s", m.Category, name)}
 		}
-		for _, f := range []struct {
-			what string
-			v    *string
-		}{{"images", &m.Images}, {"audio", &m.Audio}, {"video", &m.Video}} {
-			*f.v = strings.ToLower(strings.TrimSpace(*f.v))
-			if *f.v != "" && *f.v != "yes" && *f.v != "no" {
-				return &ValidationError{Field: "models", Message: fmt.Sprintf("%s for %s must be yes, no or empty (automatic)", f.what, name)}
-			}
-		}
+		// Media input is a model capability now; the old answers are
+		// moved there at startup and never stored again.
+		m.LegacyImages, m.LegacyAudio, m.LegacyVideo = "", "", ""
 		if m.Order < 0 || m.Order > 999 {
 			return &ValidationError{Field: "models", Message: "order must be between 0 and 999"}
 		}

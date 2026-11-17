@@ -9,6 +9,7 @@ import { cacheMeta } from '../lib/cache';
 import { AreaChart, BarList, DonutChart, QuotaRing } from '../components/charts';
 import { AsyncSection, Badge, EmptyState, SkeletonRows } from '../components/ui';
 import { ChargedTeam } from '../components/ChargedTeam';
+import { TimeCell } from '../components/TableText';
 import { useUrlState } from '../lib/hooks';
 import { t } from '../lib/i18n';
 import { useDefaultMetric, useLocalOnly, useMe, type DashboardMetric } from '../app/session';
@@ -238,7 +239,7 @@ export function DashboardPage(): ReactNode {
                     <tbody>
                       {data.recent_requests.map((event) => (
                         <tr key={event.id}>
-                          <td className="small muted">{formatDateTime(event.created_at)}</td>
+                          <TimeCell value={event.created_at} />
                           <td className="truncate">{event.model || '—'}</td>
                           <td className="small">
                             <ChargedTeam event={event} />

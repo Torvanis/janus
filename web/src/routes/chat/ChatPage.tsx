@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { useSession } from '../../app/session';
-import { publicModelName, type ManagedModel, type Model } from '../../lib/types';
+import { publicModelName, type ManagedModel, type Model, type PersonalCatalogModel } from '../../lib/types';
 import { Icon } from '../../components/IconButton';
 import { ChatMarkdown } from './Markdown';
 import { ChatSearch, ContextDivider, contextDivider } from './ChatSearch';
@@ -123,12 +123,7 @@ export interface ChatSource {
 }
 
 /** A model from the caller's own connected plan (GET /api/v1/models personal_models). */
-interface PersonalModel {
-  id: string;
-  owned_by: string;
-  /** modalities: what the plan model does (chat, image, video…). */
-  janus?: { native_name?: string; modalities?: string[] };
-}
+type PersonalModel = PersonalCatalogModel;
 
 interface ModelOption {
   value: string;
@@ -293,6 +288,28 @@ export function idleLabel(hours: number): string {
   return hours === 1 ? '1 hour' : `${hours} hours`;
 }
 
+/** True while the element is narrower than `px`: a ref callback that keeps a
+ *  ResizeObserver on whichever node it is attached to. For a row whose room
+ *  depends on the rails beside the chat, not on the window (a CSS container
+ *  query would make the row a stacking context and trap its pop-ups). */
+function useNarrowerThan(px: number): [(el: HTMLElement | null) => void, boolean] {
+  const [narrow, setNarrow] = useState(false);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback(
+    (el: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      observer.current = new ResizeObserver(([entry]) => {
+        if (entry) setNarrow(entry.contentRect.width < px);
+      });
+      observer.current.observe(el);
+    },
+    [px],
+  );
+  return [ref, narrow];
+}
+
 export default function ChatPage(): ReactNode {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -431,6 +448,7 @@ export default function ChatPage(): ReactNode {
   const threadRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const [composerBarRef, compactBar] = useNarrowerThan(420);
 
   // Fit the chat to the viewport below whatever the shell put above it, so
   // only the thread scrolls and the composer is always visible.
@@ -440,7 +458,15 @@ export default function ChatPage(): ReactNode {
     const fit = () => el.style.setProperty('--chat-top', `${Math.max(0, el.getBoundingClientRect().top + window.scrollY)}px`);
     fit();
     window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
+    // The top bar's height follows its content (e.g. "Working under" appears
+    // once the session loads), not only the window size.
+    const topbar = document.querySelector('header.topbar');
+    const observer = topbar && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (topbar) observer?.observe(topbar);
+    return () => {
+      window.removeEventListener('resize', fit);
+      observer?.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -800,6 +826,10 @@ export default function ChatPage(): ReactNode {
   const activeEffort = conv ? (conv.reasoning_effort ?? '') : pending.effort;
   const toolsOff = conv ? (conv.tools_off ?? []) : (pending.toolsOff ?? []);
   const catalogModel = chatCatalog.data?.models?.find((m) => m.name === model);
+  const chosenModel = catalog.data?.models?.find((m) => publicModelName(m) === model);
+  // A plan model's record (built-in default, the vendor's list, the owner's
+  // measurement or setting) drives the thinking picker the same way.
+  const chosenPlan = chosenModel ? undefined : catalog.data?.personal_models?.find((m) => m.id === model);
   const modelTools = [...(catalogModel?.tools ?? []), ...(catalogModel?.assist ?? [])];
   const effortLabel = EFFORTS.find((e) => e.value === activeEffort)?.label ?? 'Model default';
   const customised = !!activeInstructions || !!activeEffort || !!settings.data?.instructions;
@@ -929,7 +959,7 @@ export default function ChatPage(): ReactNode {
           Image models make a new image from your description and cannot use attached files. Remove them to send.
         </p>
       ) : null}
-      <div className="chat-composer-bar">
+      <div className={compactBar ? 'chat-composer-bar chat-composer-bar-compact' : 'chat-composer-bar'} ref={composerBarRef}>
         <button
           type="button"
           className="chat-attach"
@@ -1057,6 +1087,7 @@ export default function ChatPage(): ReactNode {
                           setRenaming(c.id);
                         }}
                         aria-current={c.id === id ? 'page' : undefined}
+                        title={c.title || 'New chat'}
                       >
                         {c.pinned ? (
                           <svg
@@ -1218,13 +1249,21 @@ export default function ChatPage(): ReactNode {
             </button>
           ) : null}
           <div className="chat-meter" aria-label="Conversation usage">
-            {!localOnly && !empty ? <span>{formatCost(conversationCost)} this chat</span> : null}
+            {!localOnly && !empty ? (
+              <span className="chat-cost" title={`${formatCost(conversationCost)} spent in this chat`}>
+                {formatCost(conversationCost)}
+                <span className="chat-meter-long"> this chat</span>
+              </span>
+            ) : null}
             {ctxWindow > 0 && ctxUsed > 0 ? (
-              <span className="chat-ctx" title={`${ctxUsed.toLocaleString()} of ${ctxWindow.toLocaleString()} tokens`}>
+              <span className="chat-ctx" title={`Context: ${ctxUsed.toLocaleString()} of ${ctxWindow.toLocaleString()} tokens`}>
                 <span className="chat-ctx-bar" aria-hidden="true">
                   <span style={{ width: `${Math.min(100, Math.max(2, (ctxUsed / ctxWindow) * 100))}%` }} />
                 </span>
-                context {Math.round((ctxUsed / ctxWindow) * 100)}% of {ctxWindow.toLocaleString()}
+                <span>
+                  <span className="chat-meter-long">context </span>
+                  {Math.round((ctxUsed / ctxWindow) * 100)}%<span className="chat-ctx-of"> of {ctxWindow.toLocaleString()}</span>
+                </span>
               </span>
             ) : null}
           </div>
@@ -1587,6 +1626,8 @@ export default function ChatPage(): ReactNode {
         onClose={() => setSettingsOpen(false)}
         instructions={activeInstructions}
         effort={activeEffort}
+        capabilities={chosenModel?.capabilities ?? chosenPlan?.janus?.capabilities}
+        thinkingOff={chosenModel?.thinking_off ?? chosenPlan?.janus?.thinking_off}
         onSave={saveSettings}
       />
     </div>

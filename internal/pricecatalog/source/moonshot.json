@@ -1,0 +1,68 @@
+{
+  "provider": "moonshot",
+  "entries": [
+    {
+      "provider": "moonshot",
+      "model": "kimi-k2.6",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 950000000,
+        "rate_out_nanousd": 4000000000,
+        "rate_cached_nanousd": 160000000
+      },
+      "source": {
+        "url": "https://platform.kimi.ai/docs/pricing/chat",
+        "read_at": "2026-11-06"
+      },
+      "note": "Legacy; retiring end of December 2026."
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k3",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 3000000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 300000000,
+        "rate_cache_write_5m_nanousd": 3000000000,
+        "rate_cache_write_1h_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://platform.kimi.ai/docs/pricing/chat",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k3.1-pro",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 2000000000,
+        "rate_cache_write_1h_nanousd": 4000000000
+      },
+      "source": {
+        "url": "https://platform.kimi.ai/docs/pricing/chat",
+        "read_at": "2026-11-06"
+      }
+    },
+    {
+      "provider": "moonshot",
+      "model": "kimi-k3.1-pro-highspeed",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 4000000000,
+        "rate_out_nanousd": 20000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_cache_write_5m_nanousd": 4000000000,
+        "rate_cache_write_1h_nanousd": 8000000000
+      },
+      "source": {
+        "url": "https://platform.kimi.ai/docs/pricing/chat",
+        "read_at": "2026-11-06"
+      }
+    }
+  ]
+}

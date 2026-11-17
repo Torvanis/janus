@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/torvanis/janus/internal/capability"
 )
 
 // subscriptionMigration adds personal provider subscriptions: a user's own
@@ -102,6 +104,18 @@ var subscriptionReasoningMigration = migration{name: "0043_subscription_reasonin
 	`ALTER TABLE usage_event ADD COLUMN reasoning_adjustment TEXT NOT NULL DEFAULT ''`,
 }}
 
+// subscriptionCapabilitiesMigration stores, per connection and model, what
+// is known about each plan model's capabilities: what the vendor's model
+// list reports, what the owner's Measure found and what the owner set
+// (capability.Record). It is per connection, so one person's measurement
+// or setting never reaches another person's plan; built-in vendor defaults
+// are not stored, they ship in code and change with releases.
+var subscriptionCapabilitiesMigration = migration{name: "0081_subscription_capabilities", stmt: []string{
+	`ALTER TABLE subscription_connection ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'`,
+}, down: []string{
+	`ALTER TABLE subscription_connection DROP COLUMN capabilities_json`,
+}}
+
 // Subscription connection states.
 const (
 	SubscriptionActive         = "active"
@@ -149,7 +163,11 @@ type SubscriptionConnection struct {
 	// Reasoning is the per-model reasoning facts (subscription.Reasoning
 	// keyed by model), JSON.
 	Reasoning json.RawMessage `json:"-"`
-	Models    []string        `json:"models"`
+	// Capabilities is what is known about each model's capabilities, by
+	// source (vendor list, the owner's measurement, the owner's setting),
+	// keyed by native model name. Built-in defaults are not in it.
+	Capabilities capability.Record `json:"-"`
+	Models       []string          `json:"models"`
 	// SelectedModels is the subset of Models the owner chose to use. Only
 	// these are listed in /v1/models and accepted by the proxy.
 	SelectedModels []string  `json:"selected_models"`
@@ -190,17 +208,23 @@ func (p *SubscriptionPending) EncryptedDeviceCode() string { return p.encryptedD
 
 const subscriptionColumns = `c.id, c.user_id, COALESCE(u.email,''), c.provider, c.account_subject, c.account_email, c.account_name,
 	c.access_token_encrypted, c.refresh_token_encrypted, c.access_expires_at, c.models_json, c.selected_models_json, c.status, c.last_error,
-	c.last_used_at, c.created_at, c.updated_at, c.meta_json, c.checked_at, c.check_error, c.usage_json, c.usage_at, c.reasoning_json`
+	c.last_used_at, c.created_at, c.updated_at, c.meta_json, c.checked_at, c.check_error, c.usage_json, c.usage_at, c.reasoning_json, c.capabilities_json`
 
 const subscriptionFrom = ` FROM subscription_connection c LEFT JOIN app_user u ON u.id = c.user_id `
 
 func scanSubscription(scan func(...any) error) (*SubscriptionConnection, error) {
 	var c SubscriptionConnection
-	var expires, models, selected, used, created, updated, meta, checked, usage, usageAt, reasoning string
+	var expires, models, selected, used, created, updated, meta, checked, usage, usageAt, reasoning, caps string
 	if err := scan(&c.ID, &c.UserID, &c.UserEmail, &c.Provider, &c.AccountSubject, &c.AccountEmail, &c.AccountName,
 		&c.encryptedAccess, &c.encryptedRefresh, &expires, &models, &selected, &c.Status, &c.LastError,
-		&used, &created, &updated, &meta, &checked, &c.CheckError, &usage, &usageAt, &reasoning); err != nil {
+		&used, &created, &updated, &meta, &checked, &c.CheckError, &usage, &usageAt, &reasoning, &caps); err != nil {
 		return nil, err
+	}
+	c.Capabilities = capability.ParseRecord(caps)
+	now := nowUTC()
+	for model, state := range c.Capabilities {
+		state.Settle(now)
+		c.Capabilities[model] = state
 	}
 	if reasoning != "" && json.Valid([]byte(reasoning)) {
 		c.Reasoning = json.RawMessage(reasoning)
@@ -336,6 +360,8 @@ func (s *Store) UpsertSubscription(ctx context.Context, in SubscriptionUpsert) (
 		 access_expires_at = excluded.access_expires_at, models_json = excluded.models_json,
 		 selected_models_json = excluded.selected_models_json, meta_json = excluded.meta_json,
 		 checked_at = excluded.checked_at, check_error = '', usage_json = '', usage_at = '', reasoning_json = excluded.reasoning_json,
+		 capabilities_json = CASE WHEN subscription_connection.account_subject = excluded.account_subject
+		   THEN subscription_connection.capabilities_json ELSE '{}' END,
 		 status = excluded.status, last_error = '', updated_at = excluded.updated_at`,
 		NewID(), in.UserID, in.Provider, in.AccountSubject, in.AccountEmail, in.Name, in.EncryptedAccess, in.EncryptedRefresh,
 		formatExpiry(in.AccessExpiresAt), string(models), string(selected), SubscriptionActive, now, now, string(meta), now, reasoning); err != nil {
@@ -412,6 +438,76 @@ func (s *Store) SetSubscriptionReasoning(ctx context.Context, id string, reasoni
 		reasoning = []byte("{}")
 	}
 	return s.exec(ctx, `UPDATE subscription_connection SET reasoning_json = ? WHERE id = ?`, string(reasoning), id)
+}
+
+// UpdateSubscriptionCapabilities changes a connection's capability record
+// under the row's write lock: change receives the stored record (never
+// nil) and edits it in place. change returning false leaves the row as it
+// is. It returns the connection as stored afterwards.
+func (s *Store) UpdateSubscriptionCapabilities(ctx context.Context, id string, change func(capability.Record) (bool, error)) (*SubscriptionConnection, error) {
+	var out *SubscriptionConnection
+	run := func(tx *Store) error {
+		// Take the write lock before reading, on both engines.
+		if err := tx.exec(ctx, `UPDATE subscription_connection SET id = id WHERE id = ?`, id); err != nil {
+			return err
+		}
+		c, err := tx.SubscriptionByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if c.Capabilities == nil {
+			c.Capabilities = capability.Record{}
+		}
+		changed, err := change(c.Capabilities)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := tx.exec(ctx, `UPDATE subscription_connection SET capabilities_json = ? WHERE id = ?`, c.Capabilities.String(), id); err != nil {
+				return err
+			}
+		}
+		out = c
+		return nil
+	}
+	if s.tx != nil {
+		err := run(s)
+		return out, err
+	}
+	err := s.InTx(ctx, func(sqlTx *sql.Tx) error { tx := *s; tx.tx = sqlTx; return run(&tx) })
+	return out, err
+}
+
+// SetSubscriptionReportedCapabilities records what the vendor's model list
+// said about each model (the provider layer of the record). Models the list
+// no longer reports lose that layer; what the owner measured or set stays.
+func (s *Store) SetSubscriptionReportedCapabilities(ctx context.Context, id string, reported map[string]capability.Facts) error {
+	_, err := s.UpdateSubscriptionCapabilities(ctx, id, func(rec capability.Record) (bool, error) {
+		changed := false
+		for model, state := range rec {
+			if _, still := reported[model]; !still && state.Provider != nil {
+				state.Provider = nil
+				rec[model] = state
+				changed = true
+			}
+		}
+		for model, facts := range reported {
+			state := rec[model]
+			if state.SetProvider(facts) {
+				changed = true
+			}
+			rec[model] = state
+		}
+		// A model nothing is known about any more needs no entry.
+		for model, state := range rec {
+			if state.Provider == nil && state.Probe == nil && state.Admin == nil && state.Probed == nil {
+				delete(rec, model)
+				changed = true
+			}
+		}
+		return changed, nil
+	})
+	return err
 }
 
 // SetSubscriptionSelectedModels stores the owner's choice of models. The

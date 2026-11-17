@@ -494,7 +494,8 @@ func captureFilterFromQuery(r *http.Request) store.TroubleshootingCaptureFilter 
 	applyTokenSizeParams(r, &rf)
 	f.TokensInGT, f.TokensInLT, f.TokensOutGT, f.TokensOutLT = rf.TokensInGT, rf.TokensInLT, rf.TokensOutGT, rf.TokensOutLT
 	if since := q.Get("since"); since != "" {
-		if t, err := time.Parse(time.RFC3339, since); err == nil {
+		// An unreadable value is ignored here, as before; see parseSince.
+		if t, err := parseSince(since, time.Now()); err == nil {
 			f.Since = t
 		}
 	}
@@ -537,6 +538,11 @@ func (s *Server) handleDownloadRequestCapture(w http.ResponseWriter, r *http.Req
 	if name == "" {
 		name = capture.UsageEventID
 	}
+	// Written before the body leaves: this is an administrator reading what
+	// someone sent a model, and the record must exist even if the download
+	// is cut short.
+	s.audit(r, "troubleshooting_capture_downloaded", "troubleshooting_capture", capture.ID, nil,
+		map[string]any{"usage_event_id": id, "request_id": capture.RequestID, "user_id": event.UserID})
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", `attachment; filename="janus-request-`+sanitizeFilename(name)+`.tar.gz"`)
 	w.WriteHeader(http.StatusOK)

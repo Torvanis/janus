@@ -279,11 +279,11 @@ func familyViolation(cfg *store.SecgwFamilyConfig, direction, action string, cou
 // familyIngressText is what the family check judges on a request: the new
 // turn of a chat body, or the prompt/input of a completions or embeddings
 // body (the raw body when it has neither).
-func familyIngressText(body []byte, media bool) string {
+func familyIngressText(body []byte, judged []string) string {
 	if msgs, ok := parseMessages(body); ok {
 		// Tool output is never the child's words: it is judged as content
 		// shown to the child (FamilyJudgeToolOutput), never as theirs.
-		return scopeText(userWordsOnly(msgs, media), store.SecgwJudgeNewTurn)
+		return scopeText(userWordsOnly(msgs, judged), store.SecgwJudgeNewTurn)
 	}
 	var raw struct {
 		Prompt json.RawMessage `json:"prompt"`
@@ -341,7 +341,7 @@ func (e *Engine) FamilyIngress(ctx context.Context, userID string, body []byte) 
 	if cfg == nil || p == nil {
 		return FamilyOutcome{}
 	}
-	text := familyIngressText(body, ToolOutputJudged(ctx))
+	text := familyIngressText(body, JudgedText(ctx))
 	texts, err := familyWindows(text)
 	if err != nil {
 		return FamilyOutcome{Action: FamilyBlock, Failed: true, Err: err}
@@ -435,7 +435,7 @@ func isSafetySlug(slug string) bool {
 // A request that only carries tool results has no new words of the child;
 // the question is then the child's last message.
 func FamilyPrompt(body []byte) string {
-	if t := familyIngressText(body, false); strings.TrimSpace(t) != "" {
+	if t := familyIngressText(body, nil); strings.TrimSpace(t) != "" {
 		return t
 	}
 	msgs, _ := parseMessages(body)

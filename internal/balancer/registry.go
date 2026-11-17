@@ -43,7 +43,10 @@ type Registry struct {
 	// Stale is how old a probe may be before its load figures are ignored.
 	Stale  time.Duration
 	Client *http.Client
-	Logger *slog.Logger
+	// ClientFor, when set, returns the client for one upstream's probes
+	// (Client with that upstream's header policy). Client is used otherwise.
+	ClientFor func(t Target) *http.Client
+	Logger    *slog.Logger
 
 	mu       sync.RWMutex
 	probes   map[string]Probe // by upstream id
@@ -145,7 +148,7 @@ func (r *Registry) probe(ctx context.Context, t Target) Probe {
 	defer cancel()
 	root := ServerRoot(t.BaseURL)
 	p := Probe{At: time.Now()}
-	status, body, err := r.get(ctx, root+"/health", t.APIKey, 4096)
+	status, body, err := r.get(ctx, t, root+"/health", 4096)
 	if err != nil {
 		p.Error = "health: " + err.Error()
 		return p
@@ -156,28 +159,31 @@ func (r *Registry) probe(ctx context.Context, t Target) Probe {
 		return p
 	}
 	p.Healthy = true
-	if status, body, err := r.get(ctx, root+"/metrics", t.APIKey, 2<<20); err == nil && status < 300 {
+	if status, body, err := r.get(ctx, t, root+"/metrics", 2<<20); err == nil && status < 300 {
 		p.Metrics = ParseMetrics(strings.NewReader(string(body)))
 	}
 	if p.Metrics.Engine != "vllm" {
 		// llama.cpp: context figures come from /slots (per-slot n_ctx and
 		// the tokens each busy slot holds). Absent unless --slots is on.
-		if status, body, err := r.get(ctx, root+"/slots", t.APIKey, 1<<20); err == nil && status < 300 {
+		if status, body, err := r.get(ctx, t, root+"/slots", 1<<20); err == nil && status < 300 {
 			p.SlotsCapacity, p.SlotsUsed, p.Slots = parseSlots(body)
 		}
 	}
 	return p
 }
 
-func (r *Registry) get(ctx context.Context, url, key string, limit int64) (int, []byte, error) {
+func (r *Registry) get(ctx context.Context, t Target, url string, limit int64) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, nil, err
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
+	if t.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.APIKey)
 	}
 	client := r.Client
+	if r.ClientFor != nil {
+		client = r.ClientFor(t)
+	}
 	if client == nil {
 		client = http.DefaultClient
 	}

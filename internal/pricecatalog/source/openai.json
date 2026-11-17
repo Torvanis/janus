@@ -1,0 +1,976 @@
+{
+  "provider": "openai",
+  "entries": [
+    {
+      "provider": "openai",
+      "model": "chat-latest",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 500000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "chatgpt-image-latest",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 32000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "type": "chat",
+      "aliases": [
+        "gpt-4.1-2025-04-14"
+      ],
+      "context_window": 1047576,
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 8000000000,
+        "rate_cached_nanousd": 500000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "type": "chat",
+      "aliases": [
+        "gpt-4.1-mini-2025-04-14"
+      ],
+      "context_window": 1047576,
+      "lines": {
+        "rate_in_nanousd": 400000000,
+        "rate_out_nanousd": 1600000000,
+        "rate_cached_nanousd": 100000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "type": "chat",
+      "aliases": [
+        "gpt-4o-2024-08-06",
+        "gpt-4o-2024-11-20"
+      ],
+      "context_window": 128000,
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "type": "chat",
+      "aliases": [
+        "gpt-4o-mini-2024-07-18"
+      ],
+      "context_window": 128000,
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 600000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-transcribe",
+      "type": "stt",
+      "aliases": [
+        "gpt-4o-mini-transcribe-2025-03-20",
+        "gpt-4o-mini-transcribe-2025-12-15"
+      ],
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 5000000000,
+        "price_audio_minute_nanousd": 3000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "type": "tts",
+      "aliases": [
+        "gpt-4o-mini-tts-2025-03-20",
+        "gpt-4o-mini-tts-2025-12-15"
+      ],
+      "lines": {
+        "rate_in_nanousd": 600000000,
+        "rate_out_nanousd": 12000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Billed per token (text in, audio out); the speech endpoint reports no tokens, so requests stay measured but unpriced until a per-character line is set."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-transcribe",
+      "type": "stt",
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 10000000000,
+        "price_audio_minute_nanousd": 6000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-transcribe-diarize",
+      "type": "stt",
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 10000000000,
+        "price_audio_minute_nanousd": 6000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token prices bill when OpenAI reports tokens; the per-minute line is OpenAI's estimated cost, used when only the duration is known."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5",
+      "type": "chat",
+      "aliases": [
+        "gpt-5-2025-08-07"
+      ],
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 125000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "type": "chat",
+      "aliases": [
+        "gpt-5-mini-2025-08-07"
+      ],
+      "lines": {
+        "rate_in_nanousd": 250000000,
+        "rate_out_nanousd": 2000000000,
+        "rate_cached_nanousd": 25000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "type": "chat",
+      "aliases": [
+        "gpt-5-nano-2025-08-07"
+      ],
+      "lines": {
+        "rate_in_nanousd": 50000000,
+        "rate_out_nanousd": 400000000,
+        "rate_cached_nanousd": 5000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-pro",
+      "type": "chat",
+      "aliases": [
+        "gpt-5-pro-2025-10-06"
+      ],
+      "lines": {
+        "rate_in_nanousd": 15000000000,
+        "rate_out_nanousd": 120000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-search-api",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 125000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.1",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.1-2025-11-13"
+      ],
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 125000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.2-2025-12-11"
+      ],
+      "lines": {
+        "rate_in_nanousd": 1750000000,
+        "rate_out_nanousd": 14000000000,
+        "rate_cached_nanousd": 175000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2-pro",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.2-pro-2025-12-11"
+      ],
+      "lines": {
+        "rate_in_nanousd": 21000000000,
+        "rate_out_nanousd": 168000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1750000000,
+        "rate_out_nanousd": 14000000000,
+        "rate_cached_nanousd": 175000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.4-2026-03-05"
+      ],
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 15000000000,
+        "rate_cached_nanousd": 250000000,
+        "rate_in_nanousd@prompt_over=272000": 5000000000,
+        "rate_out_nanousd@prompt_over=272000": 22500000000,
+        "rate_cached_nanousd@prompt_over=272000": 500000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.4-mini-2026-03-17"
+      ],
+      "lines": {
+        "rate_in_nanousd": 750000000,
+        "rate_out_nanousd": 4500000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-nano",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.4-nano-2026-03-17"
+      ],
+      "lines": {
+        "rate_in_nanousd": 200000000,
+        "rate_out_nanousd": 1250000000,
+        "rate_cached_nanousd": 20000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-pro",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.4-pro-2026-03-05"
+      ],
+      "lines": {
+        "rate_in_nanousd": 30000000000,
+        "rate_out_nanousd": 180000000000,
+        "rate_in_nanousd@prompt_over=272000": 60000000000,
+        "rate_out_nanousd@prompt_over=272000": 270000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.5-2026-04-23"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 500000000,
+        "rate_in_nanousd@prompt_over=272000": 10000000000,
+        "rate_out_nanousd@prompt_over=272000": 45000000000,
+        "rate_cached_nanousd@prompt_over=272000": 1000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5-pro",
+      "type": "chat",
+      "aliases": [
+        "gpt-5.5-pro-2026-04-23"
+      ],
+      "lines": {
+        "rate_in_nanousd": 30000000000,
+        "rate_out_nanousd": 180000000000,
+        "rate_in_nanousd@prompt_over=272000": 60000000000,
+        "rate_out_nanousd@prompt_over=272000": 270000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 200000000,
+        "rate_out_nanousd": 1200000000,
+        "rate_cached_nanousd": 20000000,
+        "rate_in_nanousd@prompt_over=272000": 400000000,
+        "rate_out_nanousd@prompt_over=272000": 1800000000,
+        "rate_cached_nanousd@prompt_over=272000": 40000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 4000000000,
+        "rate_out_nanousd": 20000000000,
+        "rate_cached_nanousd": 400000000,
+        "rate_in_nanousd@prompt_over=272000": 8000000000,
+        "rate_out_nanousd@prompt_over=272000": 30000000000,
+        "rate_cached_nanousd@prompt_over=272000": 800000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 12000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=272000": 4000000000,
+        "rate_out_nanousd@prompt_over=272000": 18000000000,
+        "rate_cached_nanousd@prompt_over=272000": 400000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 1000000000,
+        "rate_in_nanousd@prompt_over=272000": 20000000000,
+        "rate_out_nanousd@prompt_over=272000": 75000000000,
+        "rate_cached_nanousd@prompt_over=272000": 2000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra-law",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 10000000000,
+        "rate_out_nanousd": 50000000000,
+        "rate_cached_nanousd": 1000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 500000000,
+        "rate_cached_nanousd": 10000000,
+        "rate_in_nanousd@prompt_over=272000": 200000000,
+        "rate_out_nanousd@prompt_over=272000": 750000000,
+        "rate_cached_nanousd@prompt_over=272000": 20000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-sol",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=272000": 4000000000,
+        "rate_out_nanousd@prompt_over=272000": 15000000000,
+        "rate_cached_nanousd@prompt_over=272000": 400000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-sol",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 100000000,
+        "rate_in_nanousd@prompt_over=272000": 4000000000,
+        "rate_out_nanousd@prompt_over=272000": 15000000000,
+        "rate_cached_nanousd@prompt_over=272000": 200000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-terra",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 5000000000,
+        "rate_cached_nanousd": 50000000,
+        "rate_in_nanousd@prompt_over=272000": 2000000000,
+        "rate_out_nanousd@prompt_over=272000": 7500000000,
+        "rate_cached_nanousd@prompt_over=272000": 100000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Cache writes (30m/12h) are billed by OpenAI but not reported separately on Chat Completions; they bill as input here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-audio",
+      "type": "chat",
+      "aliases": [
+        "gpt-audio-2025-08-28"
+      ],
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-audio-1.5",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2500000000,
+        "rate_out_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-audio-mini",
+      "type": "chat",
+      "aliases": [
+        "gpt-audio-mini-2025-12-15"
+      ],
+      "lines": {
+        "rate_in_nanousd": 600000000,
+        "rate_out_nanousd": 2400000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text token prices. Audio tokens (higher) are not reported apart from text on this route, so audio bills at the text rate here."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-1-mini",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 8000000000,
+        "rate_cached_nanousd": 200000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-1.5",
+      "type": "image",
+      "aliases": [
+        "gpt-image-1.5-2025-12-16"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 32000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-2",
+      "type": "image",
+      "aliases": [
+        "gpt-image-2-2026-04-21"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-2.5-flare",
+      "type": "image",
+      "aliases": [
+        "gpt-image-2.5-flare-2026-09-08"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-2.5-sunburst",
+      "type": "image",
+      "aliases": [
+        "gpt-image-2.5-sunburst-2026-09-08"
+      ],
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-2.6-flare",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-image-2.6-sunburst",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 5000000000,
+        "rate_out_nanousd": 30000000000,
+        "rate_cached_nanousd": 1250000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_in is the text input price, rate_out the image output price and rate_cached the text cached-input price. Image inputs (edits) bill at the text input rate here, below OpenAI's image input price."
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-live-transcribe",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 17000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-realtime-translate",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 34000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-realtime-whisper",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 17000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-transcribe",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 4500000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "o3",
+      "type": "chat",
+      "aliases": [
+        "o3-2025-04-16"
+      ],
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 8000000000,
+        "rate_cached_nanousd": 500000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "o3-pro",
+      "type": "chat",
+      "aliases": [
+        "o3-pro-2025-06-10"
+      ],
+      "lines": {
+        "rate_in_nanousd": 20000000000,
+        "rate_out_nanousd": 80000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "omni-moderation-latest",
+      "type": "moderation",
+      "aliases": [
+        "omni-moderation-2024-09-26"
+      ],
+      "lines": {
+        "rate_in_nanousd": 0,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Free."
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-3-large",
+      "type": "embedding",
+      "context_window": 8191,
+      "lines": {
+        "rate_in_nanousd": 130000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "type": "embedding",
+      "context_window": 8191,
+      "lines": {
+        "rate_in_nanousd": 20000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-ada-002",
+      "type": "embedding",
+      "context_window": 8191,
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "tts-1",
+      "type": "tts",
+      "aliases": [
+        "tts-1-1106"
+      ],
+      "lines": {
+        "price_mchar_nanousd": 15000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "tts-1-hd",
+      "type": "tts",
+      "aliases": [
+        "tts-1-hd-1106"
+      ],
+      "lines": {
+        "price_mchar_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "openai",
+      "model": "whisper-1",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 6000000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    }
+  ],
+  "defaults": [
+    {
+      "provider": "openai",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 20000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Priced as text-embedding-3-small, OpenAI's current general embedding price."
+    },
+    {
+      "provider": "openai",
+      "type": "moderation",
+      "lines": {
+        "rate_in_nanousd": 0,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "OpenAI moderation models are free."
+    },
+    {
+      "provider": "openai",
+      "type": "stt",
+      "lines": {
+        "price_audio_minute_nanousd": 4500000
+      },
+      "source": {
+        "url": "https://developers.openai.com/api/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Priced as gpt-transcribe, OpenAI's current transcription model."
+    }
+  ]
+}

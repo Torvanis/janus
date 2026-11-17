@@ -65,6 +65,7 @@ func (s *Server) handleProviderLogin(w http.ResponseWriter, r *http.Request) {
 		s.renderLoginError(w, r, "Sign-in could not be started. Try again.")
 		return
 	}
+	s.bindLoginToBrowser(w, target)
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -81,6 +82,11 @@ func (s *Server) handleProviderCallback(w http.ResponseWriter, r *http.Request) 
 	p, row, err := s.providerFor(r, chi.URLParam(r, "slug"))
 	if err != nil {
 		s.renderLoginError(w, r, "That sign-in method is not available.")
+		return
+	}
+	if !s.loginStartedHere(w, r, state) {
+		s.authAudit(r, "sign_in_failed", nil, "", store.AuditFailure, map[string]any{"reason": "not_started_in_this_browser", "method": "oidc", "provider": row.Slug})
+		s.renderLoginError(w, r, loginNotStartedHere)
 		return
 	}
 	identity, redirectTo, err := p.Exchange(r.Context(), code, state)
@@ -217,6 +223,10 @@ func (s *Server) handleAdminUpdateIdentityProvider(w http.ResponseWriter, r *htt
 		WriteError(w, r, apiErr)
 		return
 	}
+	if in.ClientSecret == "" && !sameDestination(before.IssuerURL, in.IssuerURL) {
+		WriteError(w, r, errSecretNeedsReentry("client secret", "client_secret"))
+		return
+	}
 	p, err := s.Store.UpdateIdentityProvider(r.Context(), s.Cipher, id, in)
 	if errors.Is(err, store.ErrProviderSlugTaken) {
 		WriteError(w, r, ErrConflict(err.Error()))
@@ -230,7 +240,8 @@ func (s *Server) handleAdminUpdateIdentityProvider(w http.ResponseWriter, r *htt
 		s.Registry.Forget(before.Slug)
 	}
 	s.reevaluateGroupAdmins(r.Context())
-	s.audit(r, "identity_provider.update", "identity_provider", p.ID, map[string]any{"slug": before.Slug, "enabled": before.Enabled}, map[string]any{"slug": p.Slug, "enabled": p.Enabled})
+	s.audit(r, "identity_provider.update", "identity_provider", p.ID, map[string]any{"slug": before.Slug, "enabled": before.Enabled, "issuer_url": before.IssuerURL},
+		map[string]any{"slug": p.Slug, "enabled": p.Enabled, "issuer_url": p.IssuerURL, "client_secret_changed": in.ClientSecret != ""})
 	WriteJSON(w, http.StatusOK, s.withCallback(p))
 }
 

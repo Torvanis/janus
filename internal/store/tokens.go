@@ -138,3 +138,57 @@ func (s *Store) RevokeTokensForUser(ctx context.Context, userID string) error {
 func (s *Store) TouchToken(ctx context.Context, id string) error {
 	return s.exec(ctx, `UPDATE api_token SET last_used_at = ? WHERE id = ?`, FormatTime(nowUTC()), id)
 }
+
+// ReissueResult is what ReissueToken did: the new credential (with its
+// plaintext, shown once), the token it replaces as it was before the call, and
+// whether that old token was revoked by this call.
+type ReissueResult struct {
+	Token      *Token
+	Plaintext  string
+	Old        *Token
+	RevokedOld bool
+}
+
+// ReissueToken mints a new credential with the same name and context as an
+// existing one owned by ownerID, optionally revoking the old one in the same
+// transaction so there is never a moment with neither or (when asked) both.
+// A user token's settings are its description and team context; both are
+// copied. Team membership is re-checked as on create. Gateway-owned tokens and
+// other users' tokens are ErrNotFound, so callers cannot probe for them.
+func (s *Store) ReissueToken(ctx context.Context, tokenID, ownerID string, revokeOld bool) (*ReissueResult, error) {
+	var result *ReissueResult
+	err := s.modelTx(ctx, func(tx *Store) error {
+		// Same lock order as ChangeTokenTeam: membership first, then the
+		// token, so a concurrent revoke or team change cannot interleave.
+		if err := tx.lockTeamMembership(ctx); err != nil {
+			return err
+		}
+		if err := tx.exec(ctx, `UPDATE api_token SET id=id WHERE id=?`, tokenID); err != nil {
+			return err
+		}
+		old, err := tx.TokenByID(ctx, tokenID)
+		if err != nil {
+			return err
+		}
+		if old.UserID != ownerID || old.Kind != "" {
+			return ErrNotFound
+		}
+		created, plaintext, err := tx.CreateTeamToken(ctx, ownerID, old.Description, old.TeamID)
+		if err != nil {
+			return err
+		}
+		revoked := false
+		if revokeOld && old.RevokedAt.IsZero() {
+			if err := tx.RevokeToken(ctx, old.ID); err != nil {
+				return err
+			}
+			revoked = true
+		}
+		result = &ReissueResult{Token: created, Plaintext: plaintext, Old: old, RevokedOld: revoked}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

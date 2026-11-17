@@ -75,7 +75,7 @@ func (s *Server) revokeSubscriptionAtVendor(ctx context.Context, conn *store.Sub
 	}
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := provider.Revoke(rctx, s.upstreamHTTPClient(ctx), refresh); err != nil {
+	if err := provider.Revoke(rctx, s.ownPersonalClient(ctx, provider), refresh); err != nil {
 		s.Logger.WarnContext(ctx, "revoke subscription at vendor", "subscription_id", conn.ID, "provider", conn.Provider, "error", err.Error())
 	}
 }

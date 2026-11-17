@@ -7,6 +7,9 @@
 
 .auth-card {
   width: min(420px, 100%);
+  /* A grid item defaults to its content's minimum width; the notice card was
+     350px wide on a 360px phone and pushed the page sideways. */
+  min-width: 0;
   background: color-mix(in srgb, var(--janus-color-bg-surface) 88%, transparent);
   backdrop-filter: blur(16px);
   border: 1px solid var(--janus-color-border-strong);
@@ -69,21 +72,59 @@
   border-top: 1px solid var(--janus-color-border-default);
 }
 
-/* The notice and consent banner before sign-in: long text scrolls inside
-   the card so the button stays reachable on a phone. */
+/* The notice and consent banner before sign-in. The card never grows past
+   the window: the notice takes whatever height is left and scrolls inside,
+   so the whole notice shows when the window is tall enough and the
+   acknowledge button stays on screen when it is not. */
+.auth-card-consent {
+  max-height: calc(100dvh - 2 * var(--janus-space-6));
+  padding-block: var(--janus-space-6);
+}
+.auth-card-consent > * {
+  flex-shrink: 0;
+}
+.auth-card-consent > .consent-banner {
+  flex: 0 1 auto;
+  min-height: 0;
+}
 .consent-banner {
+  display: flex;
+  flex-direction: column;
   text-align: left;
 }
+.consent-banner > * {
+  flex-shrink: 0;
+}
 .consent-text {
-  max-height: min(48vh, 420px);
+  flex: 0 1 auto;
+  min-height: 7rem;
   overflow-y: auto;
   padding: var(--janus-space-3);
   border: 1px solid var(--janus-color-border-default);
   border-radius: var(--janus-radius-md);
-  background: var(--janus-color-bg-sunken);
+  /* Scroll shadows: a soft edge appears at the top or bottom only while
+     there is more text that way, so a clipped notice reads as scrollable. */
+  background:
+    linear-gradient(var(--janus-color-bg-sunken) 30%, transparent) top / 100% 2.5rem no-repeat local,
+    linear-gradient(transparent, var(--janus-color-bg-sunken) 70%) bottom / 100% 2.5rem no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgb(0 0 0 / 0.22), transparent) top / 100% 0.9rem no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgb(0 0 0 / 0.22), transparent) bottom / 100% 0.9rem no-repeat scroll,
+    var(--janus-color-bg-sunken);
   font-size: 0.84rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.consent-more {
+  margin: 0;
+  font-size: var(--janus-text-xs);
+  color: var(--janus-color-text-muted);
+}
+/* Short windows: the brand mark and tagline give their room to the notice. */
+@media (max-height: 820px) {
+  .auth-card-consent .auth-brand svg,
+  .auth-card-consent .auth-brand p {
+    display: none;
+  }
 }
 .consent-text p {
   margin: 0 0 0.75em;

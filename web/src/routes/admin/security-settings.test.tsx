@@ -208,6 +208,20 @@ describe('Sign-in notice', () => {
     await waitFor(() => expect(done).toHaveBeenCalled());
     expect(mocked.post).toHaveBeenCalledWith('/auth/banner/ack', {});
   });
+
+  it('says the notice scrolls when it is taller than its box, and stays quiet when it fits', () => {
+    const banner = { enabled: true, title: 'DoD Notice', text: 'First.\n\nSecond.' };
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(900);
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300);
+    const tall = wrap(<ConsentBanner banner={banner} onAcknowledged={() => {}} />);
+    expect(screen.getByText('Scroll to read the whole notice.')).toBeTruthy();
+    tall.unmount();
+    height.mockReturnValue(300);
+    wrap(<ConsentBanner banner={banner} onAcknowledged={() => {}} />);
+    expect(screen.queryByText('Scroll to read the whole notice.')).toBeNull();
+    height.mockRestore();
+    client.mockRestore();
+  });
 });
 
 describe('password rules', () => {

@@ -21,10 +21,11 @@ export function ActiveTeamSelector({
   });
   const unavailable = activeTeam && !teams.some((team) => team.id === activeTeam);
   return (
-    <div className="active-team-context" style={{ minWidth: 0 }}>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <span>Working under</span>
+    <div className="active-team-context">
+      <label className="active-team-field">
+        <span className="active-team-label">Working under</span>
         <select
+          className="select active-team-select"
           aria-label="Working under"
           value={activeTeam}
           disabled={change.isPending}
@@ -40,11 +41,17 @@ export function ActiveTeamSelector({
           ))}
         </select>
       </label>
-      <a className="small" href="/tokens" title="Browser selection does not change API keys. Manage each key’s team on Tokens.">
+      <a
+        className="active-team-tokens small"
+        href="/tokens"
+        title="Browser selection does not change API keys. Manage each key’s team on Tokens."
+      >
         Manage token teams
       </a>
       {change.isError ? (
-        <span role="alert">{change.error instanceof Error ? change.error.message : 'Unable to change team.'}</span>
+        <span className="active-team-error" role="alert">
+          {change.error instanceof Error ? change.error.message : 'Unable to change team.'}
+        </span>
       ) : null}
     </div>
   );

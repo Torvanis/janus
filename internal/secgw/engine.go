@@ -2,11 +2,13 @@ package secgw
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/torvanis/janus/internal/secgw/jsontext"
 	"log/slog"
 	"strings"
 	"time"
@@ -40,6 +42,10 @@ type Engine struct {
 	maxSpan      int
 }
 
+// uncachedBelow is the length under which a document value is scanned
+// without consulting the verdict cache.
+const uncachedBelow = 64
+
 // VerdictCacheSize bounds verdictCache. 65,536 entries ≈ the last few
 // thousand active conversations' worth of message history.
 const VerdictCacheSize = 1 << 16
@@ -70,11 +76,26 @@ type Violation struct {
 	ClassifierModel string
 }
 
-// Hash is the sha256 of the matched span, always persisted so "same secret
-// again?" is answerable without the secret.
-func (v Violation) Hash() string {
-	sum := sha256.Sum256([]byte(v.Text))
-	return hex.EncodeToString(sum[:])
+// MatchHashPrefix marks a keyed match hash. Rows written before the hash
+// was keyed carry a bare SHA-256 and do not link to these.
+const MatchHashPrefix = "hmac-sha256:"
+
+// KeyedHash identifies the matched text without storing it: the same text
+// always gives the same value on this deployment, so "this again?" can be
+// answered and every request that carried it found. It is an HMAC under a
+// key derived from the gateway's encryption key. A plain hash would not do:
+// what gets matched is often short and guessable (a card number, a phone
+// number, a word from a term list), and a plain hash of that can be reversed
+// by hashing every candidate. Without the key, this cannot.
+//
+// Empty when there is no matched text (model-backed findings) or no key.
+func (v Violation) KeyedHash(key []byte) string {
+	if v.Text == "" || len(key) == 0 {
+		return ""
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(v.Text))
+	return MatchHashPrefix + hex.EncodeToString(mac.Sum(nil))
 }
 
 // CaptureText reports whether the capture matrix allows this violation's
@@ -96,10 +117,10 @@ func (v Violation) CaptureText(cfg store.SecgwCaptureConfig) (string, bool) {
 }
 
 // ToStore converts a violation for persistence, applying the capture matrix.
-func (v Violation) ToStore(cfg store.SecgwCaptureConfig, encrypt func(string) (string, error)) *store.SecgwViolation {
+func (v Violation) ToStore(cfg store.SecgwCaptureConfig, encrypt func(string) (string, error), hashKey []byte) *store.SecgwViolation {
 	out := &store.SecgwViolation{
 		Kind: string(v.Kind), RuleID: v.RuleID, Severity: v.Severity, Direction: v.Direction, Action: v.Action,
-		MatchOffset: v.Offset, MatchLength: v.Length, MatchHash: v.Hash(), PolicyID: v.PolicyID, BindingID: v.BindingID,
+		MatchOffset: v.Offset, MatchLength: v.Length, MatchHash: v.KeyedHash(hashKey), PolicyID: v.PolicyID, BindingID: v.BindingID,
 		ClassifierScore: v.ClassifierScore, ClassifierModel: v.ClassifierModel,
 	}
 	if text, ok := v.CaptureText(cfg); ok && text != "" && encrypt != nil {
@@ -321,6 +342,11 @@ type Message struct {
 	// contentPath is how to write a redacted string back: "string" when
 	// content was a plain string, "parts" when it was a content array.
 	contentPath string
+	// ref is the document value this text was read from, for text found
+	// outside the chat messages (see readRequest).
+	ref *jsontext.Text
+	// outside marks text that is not part of a conversation turn.
+	outside bool
 }
 
 // Request is a downstream call awaiting inspection.
@@ -357,7 +383,7 @@ func Recorded(vs []Violation) int {
 func newTurnStart(msgs []Message) int {
 	from := 0
 	for _, m := range msgs {
-		if m.Role == "assistant" || strings.HasPrefix(m.Role, "assistant.") {
+		if !m.outside && (m.Role == "assistant" || strings.HasPrefix(m.Role, "assistant.")) && m.Index+1 > from {
 			from = m.Index + 1
 		}
 	}
@@ -402,17 +428,21 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 	}
 
 	// 2. deterministic text checks, per message.
-	msgs, parsed := parseMessages(req.Body)
-	if !parsed {
-		// Not a chat-shaped body (embeddings, audio, images). Scan the raw
-		// body as one text so a secret in an embeddings input is still seen.
-		msgs = []Message{{Index: 0, Role: "body", Text: string(req.Body)}}
-	}
+	// Every string of the body is read, whatever its layout (readRequest).
+	read := readRequest(req.Body)
+	msgs := read.msgs
 	var blockKind store.SecgwCheckKind
 	redacted := false
 	newFrom := newTurnStart(msgs)
 	for i := range msgs {
-		vs := e.scanCached(eff, direction, msgs[i].Role, msgs[i].Text)
+		var vs []Violation
+		if msgs[i].ref != nil && len(msgs[i].Text) < uncachedBelow {
+			// A document has many short values (names, enum values); they
+			// cost nothing to scan and would crowd the verdict cache.
+			vs = e.scanText(eff, direction, msgs[i].Text)
+		} else {
+			vs = e.scanCached(eff, direction, msgs[i].Role, msgs[i].Text)
+		}
 		if len(vs) == 0 {
 			continue
 		}
@@ -420,6 +450,9 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		for j := range vs {
 			vs[j].MessageIndex = msgs[i].Index
 			vs[j].Record = msgs[i].Index >= newFrom
+			if msgs[i].outside {
+				vs[j].MessageIndex = -1
+			}
 			if msgs[i].Tool {
 				// Found in what a tool fed the model, not in what the
 				// person wrote: say so on the record.
@@ -458,15 +491,16 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 	if req.Extra != nil {
 		extras = append([]*Extra{req.Extra}, extras...)
 	}
-	modelMsgs := msgs
+	modelMsgs := read.judged()
 	if ToolOutputJudged(ctx) {
 		// The caller (Chat) judged each tool result when the tool made
 		// it, against this same policy, and withheld what was flagged.
 		// Judging it again here would read the page as the person's own
 		// message and stop the whole reply.
-		modelMsgs = userWordsOnly(msgs, true)
+		modelMsgs = userWordsOnly(modelMsgs, JudgedText(ctx))
 	}
-	inj, safe, stats := e.runModelChecks(ctx, eff, modelMsgs, parsed, extras)
+	// A body that is not JSON has no message to judge for content safety.
+	inj, safe, stats := e.runModelChecks(ctx, eff, modelMsgs, read.canRewrite(), extras)
 	dec.Model = stats
 	if inj.ran {
 		c, _ := eff.Has(store.SecgwCheckPromptInjection, direction)
@@ -509,8 +543,8 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		}
 	}
 
-	if redacted && parsed {
-		body, err := rewriteMessages(req.Body, msgs)
+	if redacted && read.canRewrite() {
+		body, err := read.rewrite(req.Body)
 		if err != nil {
 			return dec, fmt.Errorf("rewrite redacted body: %w", err)
 		}
@@ -518,6 +552,19 @@ func (e *Engine) Ingress(ctx context.Context, eff *Effective, req Request) (Deci
 		dec.Action = store.SecgwActionRedacted
 	} else if len(dec.Violations) > 0 {
 		dec.Action = store.SecgwActionObserved
+		if redacted {
+			// A redact-mode check matched, but this body is not JSON (an
+			// upload), so the original bytes go to the provider.
+			// Say what happened: nothing was removed. Recording "redacted"
+			// here (and counting redactions in the response header) would
+			// tell the administrator a secret was withheld when it was sent.
+			dec.Redactions = 0
+			for i := range dec.Violations {
+				if dec.Violations[i].Action == store.SecgwActionRedacted {
+					dec.Violations[i].Action = store.SecgwActionObserved
+				}
+			}
+		}
 	}
 	return dec, nil
 }
@@ -715,20 +762,25 @@ func (e *Engine) EgressContentSafety(ctx context.Context, eff *Effective, reqBod
 	if !ok {
 		return nil
 	}
-	texts, ok := responseTexts(respBody)
-	if !ok || len(texts) == 0 {
+	// The answer under judgment, in the context of the request that
+	// produced it, whatever API either came through. Reasoning and tool
+	// calls are not moderated here: the taxonomy is about what a user is
+	// shown.
+	answer := replyText(respBody)
+	if strings.TrimSpace(answer) == "" {
 		return nil
 	}
-	msgs, _ := parseMessages(reqBody)
-	// Append the first choice's content as the assistant turn under
-	// judgment. Reasoning and tool-call paths are not moderated here:
-	// the taxonomy is about what a user is shown.
-	for _, t := range texts {
-		if t.Path == "content" && strings.TrimSpace(t.Text) != "" {
-			msgs = append(msgs, Message{Index: len(msgs), Role: "assistant", Text: t.Text})
-			break
+	msgs := readRequest(reqBody).judged()
+	if len(msgs) == 1 && msgs[0].Role == "body" {
+		msgs = nil // the request was not JSON: no prompt to show the guard
+	}
+	next := 0
+	for _, m := range msgs {
+		if m.Index >= next {
+			next = m.Index + 1
 		}
 	}
+	msgs = append(msgs, Message{Index: next, Role: "assistant", Text: answer})
 	if e.classify != nil {
 		// A decision model is asked the harm question about the reply;
 		// a generative guard judges the conversation (below).
@@ -797,23 +849,33 @@ type EgressResult struct {
 	BlockKind  store.SecgwCheckKind
 }
 
-// Egress scans an OpenAI-shaped, non-streaming response body.
+// Egress scans a non-streaming response body. A chat completion is read
+// channel by channel (content, reasoning, tool arguments); every other
+// string of the reply, and every string of a reply in any other JSON layout
+// (a Responses output, a completion, a provider's own format), is read too.
 func (e *Engine) Egress(eff *Effective, body []byte) EgressResult {
 	res := EgressResult{Body: body}
 	if eff.Empty() {
 		return res
 	}
 	direction := store.SecgwDirectionEgress
-	texts, ok := responseTexts(body)
-	if !ok || len(texts) == 0 {
-		return res
+	texts, isChat := responseTexts(body)
+	doc, _ := jsontext.Parse(body)
+	var rest []*jsontext.Text
+	if doc != nil {
+		for _, t := range doc.Texts {
+			if !isChat || !responseCovered(t) {
+				rest = append(rest, t)
+			}
+		}
 	}
 	var blockKind store.SecgwCheckKind
-	changed := false
-	for i := range texts {
-		vs := e.scanText(eff, direction, texts[i].Text)
+	// scan applies the checks to one text and returns it, redacted when a
+	// redact-mode check matched.
+	scan := func(text string) string {
+		vs := e.scanText(eff, direction, text)
 		if len(vs) == 0 {
-			continue
+			return text
 		}
 		var spans []detect.Match
 		for j := range vs {
@@ -834,22 +896,51 @@ func (e *Engine) Egress(eff *Effective, body []byte) EgressResult {
 		}
 		res.Violations = append(res.Violations, vs...)
 		if len(spans) > 0 && blockKind == "" {
-			texts[i].Text = detect.Redact(texts[i].Text, spans)
 			res.Redactions += len(spans)
-			changed = true
+			return detect.Redact(text, spans)
 		}
+		return text
+	}
+	chatChanged := false
+	for i := range texts {
+		if out := scan(texts[i].Text); out != texts[i].Text {
+			texts[i].Text = out
+			chatChanged = true
+		}
+	}
+	for _, t := range rest {
+		doc.Set(t, scan(t.Value))
 	}
 	if blockKind != "" {
 		res.Action = store.SecgwActionBlocked
 		res.BlockKind = blockKind
 		return res
 	}
-	if changed {
-		if out, err := rewriteResponseTexts(body, texts); err == nil {
+	if chatChanged || (doc != nil && doc.Changed()) {
+		out, err := body, error(nil)
+		if doc != nil && doc.Changed() {
+			out, err = doc.Marshal()
+		}
+		if err == nil && chatChanged {
+			out, err = rewriteResponseTexts(out, texts)
+		}
+		if err == nil {
 			res.Body = out
 			res.Action = store.SecgwActionRedacted
+			return res
 		}
-	} else if len(res.Violations) > 0 {
+		// The reply could not be rewritten: withhold it rather than send
+		// what a redact-mode check matched.
+		res.Action = store.SecgwActionBlocked
+		for _, v := range res.Violations {
+			if v.Action == store.SecgwActionRedacted {
+				res.BlockKind = v.Kind
+				break
+			}
+		}
+		return res
+	}
+	if len(res.Violations) > 0 {
 		res.Action = store.SecgwActionObserved
 	}
 	return res

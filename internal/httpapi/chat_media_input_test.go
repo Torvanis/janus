@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/torvanis/janus/internal/adapter"
+	"github.com/torvanis/janus/internal/capability"
 )
 
 var (
@@ -85,12 +89,7 @@ func (f *fakeMediaUpstream) lastChatBody(t *testing.T) string {
 func TestChatSendsSoundAndVideoToAModelThatTakesThem(t *testing.T) {
 	h, sess := chatHarness(t)
 	f := newFakeMediaUpstream(t, h)
-	if res := chatAdminPut(t, h, sess, func(m map[string]any) {
-		m["models"] = map[string]any{"test-model": map[string]any{"audio": "yes", "video": "yes"}}
-	}); res.StatusCode != http.StatusOK {
-		t.Fatalf("admin = %d", res.StatusCode)
-	}
-	h.server.invalidateChatAdmin()
+	h.record(t, h.model.ID, capability.SourceAdmin, map[string]any{adapter.CapInAudio: true, adapter.CapInVideo: true})
 	conv := chatConversationFor(t, h, sess, "test-model")
 	song := chatUploadOK(t, h, sess, "memo.mp3", testMP3)
 	clip := chatUploadOK(t, h, sess, "clip.mp4", testMP4)
@@ -158,11 +157,19 @@ func TestChatTranscribesSoundForAModelThatCannotHear(t *testing.T) {
 }
 
 // A model that does not watch video gets a description from one that does
-// (here a Qwen VL model), made once and kept.
+// (its record says input.video), made once and kept. A model whose name
+// suggests video but whose record says nothing is not used (owner rule:
+// nothing is inferred from a model's name).
 func TestChatDescribesVideoForAModelThatCannotWatch(t *testing.T) {
 	h, sess := chatHarness(t)
 	f := newFakeMediaUpstream(t, h)
+	addMediaModel(t, h, "gemini-video-lookalike", []string{"chat"})
 	addMediaModel(t, h, "qwen3-vl-test", []string{"chat"})
+	watcher, err := h.store.ModelByUpstreamAndName(context.Background(), h.model.UpstreamID, "qwen3-vl-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.record(t, watcher.ID, capability.SourceProbe, map[string]any{adapter.CapInVideo: true})
 	conv := chatConversationFor(t, h, sess, "test-model")
 	clip := chatUploadOK(t, h, sess, "kite.mp4", testMP4)
 	sent := chatSend(t, h, sess, conv, map[string]any{"content": "What happens?", "attachment_ids": []string{clip["id"].(string)}})
@@ -183,6 +190,10 @@ func TestChatDescribesVideoForAModelThatCannotWatch(t *testing.T) {
 	f.mu.Unlock()
 	if !strings.Contains(describeBody, `"model":"qwen3-vl-test"`) {
 		t.Errorf("description asked of: %.200s", describeBody)
+	}
+	// A support call: asked for no thinking, like naming.
+	if !strings.Contains(describeBody, `"reasoning_effort":"none"`) {
+		t.Errorf("description asked with thinking: %.300s", describeBody)
 	}
 	body := f.lastChatBody(t)
 	if !strings.Contains(body, "A red kite rises over a beach") || strings.Contains(body, "video_url") {

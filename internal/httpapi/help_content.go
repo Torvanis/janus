@@ -139,16 +139,18 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				"requests — it is the name the gateway routes on. Administrators can rename a model at any " +
 				"time; when that happens the original upstream name keeps working as a fallback, so existing " +
 				"tool configurations never break. If a model you expect is missing, ask an administrator to " +
-				"grant it to you, your group, or all users. Prices are shown per million tokens and are the " +
-				"rates used to attribute your spend. A rate card carries up to five prices: " +
+				"grant it to you, your group, or all users. Token prices are shown per million tokens and are the " +
+				"rates used to attribute your spend. A rate card carries up to five token prices: " +
 				"input, output, cached input, and — for providers that bill prompt-cache writes, such as " +
-				"Anthropic — 5-minute and 1-hour cache-write rates. A price of $0 means the model is explicitly " +
-				"free (typical for self-hosted models), not unpriced: administrators must save a rate card, even " +
-				"an all-zero one, before a model can be enabled. The bundled reference prices are a snapshot at " +
-				"the time they were authored — administrators should verify them against the provider's current " +
-				"pricing before applying. Each model also shows its context window — the maximum number of " +
+				"Anthropic — 5-minute and 1-hour cache-write rates; price lines cover other units, such as per " +
+				"image or per second of video. When the provider quotes the cost of a call, that quote is the " +
+				"cost. A price of $0 means the model is explicitly " +
+				"free (typical for self-hosted models), not unpriced: a model needs a price, even " +
+				"an all-zero one, before it can be enabled. Prices come from the signed Janus price catalog " +
+				"(each with the page and date it was read), from the provider's own model list, or from an " +
+				"administrator. Each model also shows its context window — the maximum number of " +
 				"tokens it accepts as input (the catalog's context_window field, in tokens). Known models get " +
-				"the value from the bundled reference seed; administrators can set or correct it on any model. " +
+				"the value from the upstream or the price catalog; administrators can set or correct it on any model. " +
 				"A dash means the context window is not recorded (context_window 0), not that the model has none.",
 			"snippets": []map[string]string{
 				{"language": "bash", "label": "List models you can call",
@@ -189,7 +191,7 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				{"code": "policy.model_not_granted", "status": "403", "fix": "You have not been granted this model. Call /v1/models to see what you can use."},
 				{"code": "policy.endpoint_blocked", "status": "403", "fix": "A gateway policy rule matched this request. The reason field explains which signal fired."},
 				{"code": "policy.quota_exceeded", "status": "429", "fix": "You reached a limit. Wait until reset_at, or ask for a higher quota."},
-				{"code": "upstream.unavailable", "status": "503", "fix": "The provider could not be reached. Retry shortly."},
+				{"code": "upstream.unavailable", "status": "503", "fix": "The provider could not be reached, or an administrator turned its upstream off (the message says which). Retry shortly, or pick a model /v1/models lists."},
 				{"code": "upstream.rate_limit", "status": "429", "fix": "The provider throttled the gateway. Back off and retry."},
 				{"code": "upstream.stream_interrupted", "status": "502 (in-band, after 200)", "fix": "The provider ended the stream early; the answer is incomplete. Retry."},
 				{"code": "policy.service_token_expired", "status": "401", "fix": "This service token passed its expiry date. Ask an administrator for a replacement."},
@@ -214,10 +216,10 @@ func helpTopic(topic, endpoint, token, model string) (map[string]any, bool) {
 				{"term": "Upstream", "definition": "A configured provider endpoint that Janus forwards requests to."},
 				{"term": "Adapter", "definition": "The plug-in that translates between the OpenAI wire format and one provider's protocol."},
 				{"term": "Grant", "definition": "Permission for a user, group, all users, a team, all teams, or a service token to call a model or managed model."},
-				{"term": "Rate card", "definition": "The per-million-token prices used to attribute spend: input, output, cached input, and 5-minute/1-hour cache-write rates. Versioned, so historical usage keeps its original rate. An explicitly saved $0 card means free, not unpriced."},
+				{"term": "Rate card", "definition": "The prices used to attribute spend: per-million-token rates for input, output, cached input, and 5-minute/1-hour cache writes, plus price lines for other units such as per image or per second of video. Versioned, so historical usage keeps its original rate. An explicitly saved $0 card means free, not unpriced."},
 				{"term": "Context window", "definition": "The maximum number of tokens a model accepts as input, shown in the catalog (context_window). Seeded from the bundled reference data for well-known models and correctable by administrators; 0 renders as a dash meaning unknown."},
 				{"term": "Modality", "definition": "What kind of work a request performs: chat, embedding, image, audio, and so on."},
-				{"term": "Cached tokens", "definition": "Input tokens the provider served from its own prompt cache, usually billed at a lower rate."},
+				{"term": "Cached tokens", "definition": "Input tokens the provider served from its own prompt cache, billed at the cached rate. They are part of the input tokens for every provider."},
 				{"term": "Cache-write tokens", "definition": "Tokens written to the provider's prompt cache (5-minute or 1-hour TTL). Anthropic bills these above the input rate; providers that do not report them meter zero."},
 				{"term": "Quota window", "definition": "The period a limit is measured over: calendar day, week, month, or a rolling span."},
 				{"term": "TTFB", "definition": "Time to first byte — how long the provider took to start responding."},

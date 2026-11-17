@@ -174,6 +174,13 @@ func (s *Server) handleUpdateSecgwPolicy(w http.ResponseWriter, r *http.Request)
 	}
 	p.ID = id
 	p.CreatedBy, p.CreatedAt = existing.CreatedBy, existing.CreatedAt
+	if p.Capture.PromptInjectionBodies == nil {
+		// An update that does not mention capture leaves it as it is.
+		// Storing the omission would read back as "on" (the meaning an
+		// absent value has on policies from before the setting existed)
+		// and start keeping flagged messages nobody asked to keep.
+		p.Capture.PromptInjectionBodies = existing.Capture.PromptInjectionBodies
+	}
 	if err := s.requireEnforceLicensed(&p); err != nil {
 		WriteError(w, r, err)
 		return
@@ -218,7 +225,11 @@ func secgwPolicyAudit(p *store.SecgwPolicy) map[string]any {
 			kinds = append(kinds, string(c.Kind)+":"+c.Mode)
 		}
 	}
-	return map[string]any{"name": p.Name, "enabled": p.Enabled, "mandatory": p.Mandatory, "checks": kinds, "synthetic_refusal": p.SyntheticRefusal}
+	// capture_flagged_messages is the effective setting (an absent stored
+	// value means on): turning the keeping of flagged prompts and replies on
+	// or off is a change the audit trail must show.
+	return map[string]any{"name": p.Name, "enabled": p.Enabled, "mandatory": p.Mandatory, "checks": kinds, "synthetic_refusal": p.SyntheticRefusal,
+		"capture_flagged_messages": p.Capture.PromptInjectionBodiesEnabled()}
 }
 
 // validateSecgwClassifierRefs ensures every model-backed check names a
@@ -509,16 +520,14 @@ func (s *Server) handleExportSecgwTermList(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleListSecgwViolations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.SecgwViolationFilter{Kind: q.Get("kind"), Action: q.Get("action"), UserID: q.Get("user_id"), ModelName: q.Get("model"), Category: q.Get("category")}
+	f := store.SecgwViolationFilter{Kind: q.Get("kind"), Action: q.Get("action"), UserID: q.Get("user_id"), ModelName: q.Get("model"), Category: q.Get("category"), MatchHash: q.Get("match")}
 	if v := q.Get("since"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			f.Since = t
-		} else if d, err := time.ParseDuration(v); err == nil {
-			f.Since = time.Now().UTC().Add(-d)
-		} else {
-			WriteError(w, r, ErrInvalidRequest("since must be an RFC 3339 timestamp or a duration like 24h").WithParam("since"))
+		t, err := parseSince(v, time.Now())
+		if err != nil {
+			WriteError(w, r, ErrInvalidRequest(err.Error()).WithParam("since"))
 			return
 		}
+		f.Since = t
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
 	f.Offset, _ = strconv.Atoi(q.Get("offset"))

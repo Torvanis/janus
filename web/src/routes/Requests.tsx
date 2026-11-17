@@ -4,9 +4,10 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
 import { publicModelName, type Model, type UsageEvent } from '../lib/types';
-import { formatDateTime, formatDuration, formatNumber, formatUSD, modalityLabel, statusTone } from '../lib/format';
+import { formatDuration, formatNumber, formatUSD, modalityLabel, statusTone } from '../lib/format';
 import { AsyncSection, Badge, Drawer, EmptyState, Pagination } from '../components/ui';
 import { ChargedTeam } from '../components/ChargedTeam';
+import { TimeCell } from '../components/TableText';
 import { useUrlState, useUrlStateBatch } from '../lib/hooks';
 import { t } from '../lib/i18n';
 import { FilterSelect, RangePicker, RequestDetail, SortHeader, TokenSizeFilter, tokenSizeParams, type RangeKey } from './shared';
@@ -209,7 +210,7 @@ export function RequestsPage(): ReactNode {
                             if (keyEvent.key === 'Enter') setSelected(event);
                           }}
                         >
-                          <td className="small muted">{formatDateTime(event.created_at)}</td>
+                          <TimeCell value={event.created_at} />
                           <td className="truncate">{event.model || '—'}</td>
                           <td className="small">
                             <ChargedTeam event={event} />

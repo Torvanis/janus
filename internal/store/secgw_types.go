@@ -543,9 +543,12 @@ type SecgwViolationFilter struct {
 	// PolicyID narrows to one policy's violations (the Family safety
 	// card lists only its own events).
 	PolicyID string
-	Since    time.Time
-	Limit    int
-	Offset   int
+	// MatchHash narrows to the violations whose matched text was the same
+	// (see secgw.Violation.KeyedHash).
+	MatchHash string
+	Since     time.Time
+	Limit     int
+	Offset    int
 }
 
 // SecgwClassifierRun is one classifier call made while inspecting a single

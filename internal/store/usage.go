@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const usageColumns = `id, created_at, user_id, service_token_id, token_id, team_ids, upstream_id, model_id, model_name,
@@ -18,7 +19,7 @@ const usageColumns = `id, created_at, user_id, service_token_id, token_id, team_
 	blocking_rule_id, request_id, tokens_in_per_second, tokens_out_per_second, throughput_source, fallback_reason,
 	secgw_action, secgw_violations, subscription_id, reasoning_adjustment, pool_reason, pool_attempts,
 	classifier_ms, classifier_calls, classification, managed_model_id, route_reason, served_managed_model_id,
-	chat_message_id, chat_subcall`
+	chat_message_id, chat_subcall, billed_unit, billed_quantity, billed_line, estimated_cost_nanousd`
 
 // InsertUsageEvent appends a metering record with the team context admitted
 // for the request (empty = Personal). The current roster is never consulted,
@@ -35,6 +36,30 @@ func (s *Store) InsertUsageEvent(ctx context.Context, e *UsageEvent) error {
 }
 
 func usageArgs(e *UsageEvent) []any {
+	return storableArgs(usageArgsRaw(e))
+}
+
+// storableArgs makes every text value safe to insert on both databases:
+// invalid UTF-8 becomes U+FFFD and NUL bytes are dropped. Several usage
+// fields carry text a caller chose (path, headers, model name), and
+// PostgreSQL refuses a row containing either, which would lose the record of
+// a request that has already been served and billed by the provider.
+func storableArgs(args []any) []any {
+	for i, a := range args {
+		if v, ok := a.(string); ok {
+			if !utf8.ValidString(v) {
+				v = strings.ToValidUTF8(v, "\uFFFD")
+			}
+			if strings.IndexByte(v, 0) >= 0 {
+				v = strings.ReplaceAll(v, "\x00", "")
+			}
+			args[i] = v
+		}
+	}
+	return args
+}
+
+func usageArgsRaw(e *UsageEvent) []any {
 	return []any{e.ID, FormatTime(e.CreatedAt), e.UserID, e.ServiceTokenID, e.TokenID, e.TeamIDs, e.UpstreamID, e.ModelID, e.ModelName,
 		e.RequestedModelName, e.EndpointPath, e.HTTPMethod, e.Modality, boolInt(e.Streaming), e.RequestBytes, e.ResponseBytes,
 		e.AttachmentCount, e.TokensIn, e.TokensOut, e.TokensCached, e.TokensCacheWrite5m, e.TokensCacheWrite1h,
@@ -44,7 +69,15 @@ func usageArgs(e *UsageEvent) []any {
 		e.TokensInPerSecond, e.TokensOutPerSecond, e.ThroughputSource, e.FallbackReason,
 		e.SecgwAction, e.SecgwViolations, e.SubscriptionID, e.ReasoningAdjustment, e.PoolReason, e.PoolAttempts,
 		e.ClassifierMs, e.ClassifierCalls, e.Classification, e.ManagedModelID, e.RouteReason, e.ServedManagedModelID,
-		e.ChatMessageID, boolInt(e.ChatSubcall)}
+		e.ChatMessageID, boolInt(e.ChatSubcall), e.BilledUnit, e.BilledQuantity, e.BilledLine, nullableInt64(e.EstimatedCostNano)}
+}
+
+// nullableInt64 stores a nil pointer as SQL NULL.
+func nullableInt64(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
@@ -57,7 +90,7 @@ func (s *Store) insertUsageEvent(ctx context.Context, e *UsageEvent) error {
 	})
 }
 
-// usageBatchRows bounds one multi-row INSERT: 54 columns x 200 rows stays far
+// usageBatchRows bounds one multi-row INSERT: 58 columns x 200 rows stays far
 // below PostgreSQL's 65535 and SQLite's 32766 bind-parameter limits.
 const usageBatchRows = 200
 
@@ -114,6 +147,7 @@ func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 	var e UsageEvent
 	var created string
 	var streaming, violated, subcall int
+	var estimate sql.NullInt64
 	if err := scan(&e.ID, &created, &e.UserID, &e.ServiceTokenID, &e.TokenID, &e.TeamIDs, &e.UpstreamID, &e.ModelID, &e.ModelName,
 		&e.RequestedModelName, &e.EndpointPath, &e.HTTPMethod, &e.Modality, &streaming, &e.RequestBytes, &e.ResponseBytes,
 		&e.AttachmentCount, &e.TokensIn, &e.TokensOut, &e.TokensCached, &e.TokensCacheWrite5m, &e.TokensCacheWrite1h,
@@ -123,8 +157,11 @@ func scanUsage(scan func(...any) error) (*UsageEvent, error) {
 		&e.TokensInPerSecond, &e.TokensOutPerSecond, &e.ThroughputSource, &e.FallbackReason,
 		&e.SecgwAction, &e.SecgwViolations, &e.SubscriptionID, &e.ReasoningAdjustment, &e.PoolReason, &e.PoolAttempts,
 		&e.ClassifierMs, &e.ClassifierCalls, &e.Classification, &e.ManagedModelID, &e.RouteReason, &e.ServedManagedModelID,
-		&e.ChatMessageID, &subcall); err != nil {
+		&e.ChatMessageID, &subcall, &e.BilledUnit, &e.BilledQuantity, &e.BilledLine, &estimate); err != nil {
 		return nil, err
+	}
+	if estimate.Valid {
+		e.EstimatedCostNano = &estimate.Int64
 	}
 	e.CreatedAt = ParseTime(created)
 	e.Streaming = streaming == 1
@@ -188,6 +225,9 @@ type RequestFilter struct {
 	SkipTotal bool
 	// ServiceTokenID narrows to one integration credential's traffic.
 	ServiceTokenID string
+	// RequestID narrows to one request: the caller's row and the calls
+	// Janus made for it (which share its request_id).
+	RequestID string
 	// Principal restricts the log to one kind of principal. The default
 	// (PrincipalAny) shows everything the other filters allow.
 	Principal PrincipalFilter
@@ -226,6 +266,11 @@ const InternalClientApp = "janus-security-gateway"
 // attributable, are platform overhead, and are hidden from the request log
 // by default.
 const InternalRoutingClientApp = "janus-auto-routing"
+
+// InternalProbeClientApp marks the tiny requests a capability probe sends a
+// model to measure what it can do. Platform overhead, hidden from the
+// request log by default, charged to no one's quota.
+const InternalProbeClientApp = "janus-capability-probe"
 
 // requestSortOrder maps the request-log sort vocabulary to an ORDER BY
 // expression. Every key has a `<key>_asc` ascending twin except "time", whose
@@ -349,6 +394,10 @@ func (f RequestFilter) clause() (string, []any) {
 		where = append(where, "token_id = ?")
 		args = append(args, f.TokenID)
 	}
+	if f.RequestID != "" {
+		where = append(where, "request_id = ?")
+		args = append(args, f.RequestID)
+	}
 	if f.Model != "" {
 		where = append(where, "model_name = ?")
 		args = append(args, f.Model)
@@ -358,8 +407,8 @@ func (f RequestFilter) clause() (string, []any) {
 		args = append(args, f.Modality)
 	}
 	if !f.IncludeInternal {
-		where = append(where, "(client_app IS NULL OR client_app NOT IN (?, ?))")
-		args = append(args, InternalClientApp, InternalRoutingClientApp)
+		where = append(where, "(client_app IS NULL OR client_app NOT IN (?, ?, ?))")
+		args = append(args, InternalClientApp, InternalRoutingClientApp, InternalProbeClientApp)
 	}
 	switch f.Source {
 	case "subscription":
@@ -450,6 +499,9 @@ func (s *Store) ListRequests(ctx context.Context, f RequestFilter) ([]*UsageEven
 	if err := s.attachUsageTeamNames(ctx, out); err != nil {
 		return nil, 0, err
 	}
+	if err := s.attachQuotingUpstreamNames(ctx, out); err != nil {
+		return nil, 0, err
+	}
 	return out, total, nil
 }
 
@@ -465,15 +517,19 @@ func (s *Store) UsageEventByID(ctx context.Context, id string) (*UsageEvent, err
 	if err := s.attachUsageTeamNames(ctx, []*UsageEvent{e}); err != nil {
 		return nil, err
 	}
+	if err := s.attachQuotingUpstreamNames(ctx, []*UsageEvent{e}); err != nil {
+		return nil, err
+	}
 	return e, nil
 }
 
 // Totals is an aggregate over a set of usage events.
 //
-// The cache-write sums exist so every consumer can compute the one canonical
-// cache-hit rate: tokens_cached / (tokens_in + tokens_cache_write_5m +
-// tokens_cache_write_1h), undefined when the denominator is zero. Events
-// recorded before migration 0013 contribute zero to both cache-write sums.
+// TokensIn is the whole prompt (cached tokens and cache writes are parts of
+// it, for every provider: see UsageEvent.TokensIn), so the one canonical
+// cache-hit rate is tokens_cached / tokens_in, undefined when tokens_in is
+// zero. Events recorded before migration 0013 contribute zero to both
+// cache-write sums.
 type Totals struct {
 	TokensIn           int64 `json:"tokens_in"`
 	TokensOut          int64 `json:"tokens_out"`
@@ -1024,12 +1080,15 @@ func (s *Store) PurgeUsageEvents(ctx context.Context, before time.Time) (int64, 
 // returned no usage the adapter could read, so the requests carry zero tokens
 // and zero cost. Each row is a configuration gap for the operator to close.
 type AccountingGap struct {
-	ModelName    string    `json:"model_name"`
-	UpstreamID   string    `json:"upstream_id"`
-	UpstreamName string    `json:"upstream_name"`
-	Modality     string    `json:"modality"`
-	Requests     int64     `json:"requests"`
-	LastSeenAt   time.Time `json:"last_seen_at"`
+	ModelName    string `json:"model_name"`
+	UpstreamID   string `json:"upstream_id"`
+	UpstreamName string `json:"upstream_name"`
+	Modality     string `json:"modality"`
+	// Accounting is unmetered_modality (nothing could be measured) or
+	// measured_unpriced (measured, but the model has no price line).
+	Accounting string    `json:"accounting"`
+	Requests   int64     `json:"requests"`
+	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
 // AccountingSummary rolls up how requests since a point in time were metered,
@@ -1039,7 +1098,12 @@ type AccountingSummary struct {
 	UpstreamReportedCost int64 `json:"upstream_reported_cost"`
 	ByteEstimated        int64 `json:"byte_estimated"`
 	Unmetered            int64 `json:"unmetered"`
-	// Gaps lists the unmetered models, most requests first.
+	// Measured counts requests billed by a measured unit and its price
+	// line; MeasuredUnpriced those measured whose model has no line for
+	// the unit (a missing price).
+	Measured         int64 `json:"measured"`
+	MeasuredUnpriced int64 `json:"measured_unpriced"`
+	// Gaps lists the unmetered and unpriced models, most requests first.
 	Gaps []AccountingGap `json:"gaps"`
 }
 
@@ -1068,6 +1132,10 @@ func (s *Store) AccountingSummarySince(ctx context.Context, since time.Time) (Ac
 			out.ByteEstimated = n
 		case "unmetered_modality":
 			out.Unmetered = n
+		case "request_measured":
+			out.Measured = n
+		case "measured_unpriced":
+			out.MeasuredUnpriced = n
 		}
 	}
 	rows.Close()
@@ -1075,13 +1143,13 @@ func (s *Store) AccountingSummarySince(ctx context.Context, since time.Time) (Ac
 		return out, err
 	}
 	out.Gaps = []AccountingGap{}
-	if out.Unmetered == 0 {
+	if out.Unmetered == 0 && out.MeasuredUnpriced == 0 {
 		return out, nil
 	}
-	gaps, err := s.query(ctx, `SELECT e.model_name, e.upstream_id, COALESCE(u.name, ''), e.modality, COUNT(*), MAX(e.created_at)
+	gaps, err := s.query(ctx, `SELECT e.model_name, e.upstream_id, COALESCE(u.name, ''), e.modality, e.token_accounting_method, COUNT(*), MAX(e.created_at)
 		FROM usage_event e LEFT JOIN upstream u ON u.id = e.upstream_id
-		WHERE e.created_at >= ? AND e.http_status < 300 AND e.token_accounting_method = 'unmetered_modality'
-		GROUP BY e.model_name, e.upstream_id, u.name, e.modality
+		WHERE e.created_at >= ? AND e.http_status < 300 AND e.token_accounting_method IN ('unmetered_modality', 'measured_unpriced')
+		GROUP BY e.model_name, e.upstream_id, u.name, e.modality, e.token_accounting_method
 		ORDER BY COUNT(*) DESC, e.model_name ASC LIMIT 20`, FormatTime(since))
 	if err != nil {
 		return out, fmt.Errorf("accounting gaps: %w", err)
@@ -1090,7 +1158,7 @@ func (s *Store) AccountingSummarySince(ctx context.Context, since time.Time) (Ac
 	for gaps.Next() {
 		var g AccountingGap
 		var last string
-		if err := gaps.Scan(&g.ModelName, &g.UpstreamID, &g.UpstreamName, &g.Modality, &g.Requests, &last); err != nil {
+		if err := gaps.Scan(&g.ModelName, &g.UpstreamID, &g.UpstreamName, &g.Modality, &g.Accounting, &g.Requests, &last); err != nil {
 			return out, err
 		}
 		g.LastSeenAt = ParseTime(last)

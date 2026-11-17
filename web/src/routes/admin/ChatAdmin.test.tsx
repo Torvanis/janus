@@ -27,7 +27,6 @@ const baseDoc: ChatAdminDoc = {
   starter_prompts: [],
   models: {},
   access_licensed: false,
-  preview_on: true,
 };
 
 const grant = {
@@ -191,6 +190,21 @@ describe('Administration → Chat', () => {
     expect((mocked.put.mock.calls[0]?.[1] as ChatAdminDoc).models).toEqual({
       'qwen-27b': { category: 'local', recommended: true },
     });
+  });
+
+  it('has no per-model media columns: images, sound and video are model capabilities', async () => {
+    mockGets(baseDoc);
+    renderAt('/admin/chat/models');
+    const table = await screen.findByRole('table', { name: 'Chat models' });
+    await within(table).findByText('qwen-27b');
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(headers).toEqual(['Model', 'Chat name (from grants)', 'In Chat', 'Category', 'Order', 'Recommended']);
+    expect(within(table).queryByLabelText(/^(Images|Sound|Video) for /)).toBeNull();
+    expect(screen.queryByText(/Sees images|Hears sound|Sees video/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Models' }).getAttribute('href')).toBe('/admin/models');
+    expect(screen.getByText(/use Change on its Capabilities/)).toBeTruthy();
   });
 
   it('shows "who can use Chat" as Business on Community, disabled, with no save', async () => {

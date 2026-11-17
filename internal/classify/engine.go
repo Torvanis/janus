@@ -215,6 +215,7 @@ func (o *Outcome) add(r Result) {
 	o.Usage.TokensOut += r.Usage.TokensOut
 	o.Usage.TokensCached += r.Usage.TokensCached
 	o.Usage.CostUSD += r.Usage.CostUSD
+	o.Usage.CostNano += r.Usage.Nano()
 	o.Usage.CostReported = o.Usage.CostReported || r.Usage.CostReported
 	if r.Model != "" {
 		o.Model = r.Model
@@ -230,8 +231,8 @@ func (o Outcome) priced(plan *Plan) Outcome {
 		// The gateway's pricer applies the model's cost source (reported
 		// charge, rate card, request fee per call).
 		o.CostNano = plan.PriceNano(o.Usage, o.Calls)
-	case o.Usage.CostUSD > 0:
-		o.CostNano = int64(o.Usage.CostUSD*1e9 + 0.5)
+	case o.Usage.Nano() > 0:
+		o.CostNano = o.Usage.Nano()
 	}
 	return o
 }

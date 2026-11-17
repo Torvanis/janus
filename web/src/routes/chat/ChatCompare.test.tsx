@@ -90,7 +90,14 @@ it('keeps every compared reply side by side once they finish, and Prefer this an
     created_at: '',
     updated_at: '',
   } as never);
-  const me = { id: 'u1', active_team_id: '', teams: [], feature_flags: {}, chat_preview: true } as unknown as Me;
+  const me = {
+    id: 'u1',
+    active_team_id: '',
+    teams: [],
+    feature_flags: {},
+    chat_enabled: true,
+    chat_available: true,
+  } as unknown as Me;
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <SessionContext.Provider value={{ me, config: null, loading: false, error: null, refresh: () => {} }}>

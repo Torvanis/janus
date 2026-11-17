@@ -1,0 +1,418 @@
+{
+  "provider": "google",
+  "entries": [
+    {
+      "provider": "google",
+      "model": "gemini-2.5-flash",
+      "type": "chat",
+      "context_window": 1048576,
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 30000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Deprecated; routes to gemini-3.5-flash-lite from 2026-12-01. Audio input bills $1.00."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-flash-image",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-flash-lite",
+      "type": "chat",
+      "context_window": 1048576,
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 400000000,
+        "rate_cached_nanousd": 10000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Audio input bills $0.30."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-flash-preview-tts",
+      "type": "tts",
+      "lines": {
+        "rate_in_nanousd": 500000000,
+        "rate_out_nanousd": 10000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text in, audio out (25 audio tokens per second)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-pro",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1250000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 125000000,
+        "rate_in_nanousd@prompt_over=200000": 2500000000,
+        "rate_out_nanousd@prompt_over=200000": 15000000000,
+        "rate_cached_nanousd@prompt_over=200000": 250000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Deprecated; routes to gemini-3.8-flash from 2026-12-01."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2.5-pro-preview-tts",
+      "type": "tts",
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text in, audio out (25 audio tokens per second)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-flash-preview",
+      "type": "chat",
+      "context_window": 1048576,
+      "lines": {
+        "rate_in_nanousd": 500000000,
+        "rate_out_nanousd": 3000000000,
+        "rate_cached_nanousd": 50000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Audio input bills $1.00 (not reported apart from text here)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-pro-image",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 120000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-flash-image",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 500000000,
+        "rate_out_nanousd": 60000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-flash-lite",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 250000000,
+        "rate_out_nanousd": 1500000000,
+        "rate_cached_nanousd": 25000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Audio input bills $0.50 (not reported apart from text here)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-flash-lite-image",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 250000000,
+        "rate_out_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-flash-tts-preview",
+      "type": "tts",
+      "lines": {
+        "rate_in_nanousd": 1000000000,
+        "rate_out_nanousd": 20000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text in, audio out (25 audio tokens per second)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.1-pro-preview",
+      "type": "chat",
+      "aliases": [
+        "gemini-3.1-pro-preview-customtools"
+      ],
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 12000000000,
+        "rate_cached_nanousd": 200000000,
+        "rate_in_nanousd@prompt_over=200000": 4000000000,
+        "rate_out_nanousd@prompt_over=200000": 18000000000,
+        "rate_cached_nanousd@prompt_over=200000": 400000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.5-flash-lite",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 300000000,
+        "rate_out_nanousd": 2500000000,
+        "rate_cached_nanousd": 30000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.5-transcribe",
+      "type": "stt",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 12000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Audio in (25 tokens per second), text out."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.6-flash",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 750000000,
+        "rate_out_nanousd": 3750000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Price through 2026-12-31; $1.50 in / $7.50 out / $0.15 cached from 2027-01-01."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 750000000,
+        "rate_out_nanousd": 3750000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Price through 2026-12-31; $1.50 in / $7.50 out / $0.15 cached from 2027-01-01."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash-lite-tts",
+      "type": "tts",
+      "lines": {
+        "rate_in_nanousd": 500000000,
+        "rate_out_nanousd": 6000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Price through 2026-12-31; $1.00 in / $12.00 out from 2027-01-01. Text in, audio out (25 audio tokens per second)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3.8-flash-tts",
+      "type": "tts",
+      "lines": {
+        "rate_in_nanousd": 500000000,
+        "rate_out_nanousd": 9000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Price through 2026-12-31; $1.00 in / $18.00 out from 2027-01-01. Text in, audio out (25 audio tokens per second)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-4-argon",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 100000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Introductory price through 2026-11-30; $4.00 in / $20.00 out / $0.20 cached from 2026-12-01."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-4-carbon",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 2000000000,
+        "rate_out_nanousd": 10000000000,
+        "rate_cached_nanousd": 100000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Introductory price through 2026-11-30; $4.00 in / $20.00 out / $0.20 cached from 2026-12-01."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-4-hydrogen",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 1500000000,
+        "rate_out_nanousd": 7500000000,
+        "rate_cached_nanousd": 75000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "google",
+      "model": "gemini-decision-1",
+      "type": "chat",
+      "lines": {
+        "rate_in_nanousd": 100000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Decisions API: input only, zero output tokens."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-embedding-001",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 150000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      }
+    },
+    {
+      "provider": "google",
+      "model": "gemini-embedding-2",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 200000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Text input price; image, audio and video input bill higher."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-nano-banana-2.1",
+      "type": "image",
+      "lines": {
+        "rate_in_nanousd": 1500000000,
+        "rate_out_nanousd": 30000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Token-priced image model: rate_out is the image output price (text and thinking output bill lower at Google)."
+    },
+    {
+      "provider": "google",
+      "model": "gemini-omni-1.2-flash",
+      "type": "video",
+      "lines": {
+        "rate_in_nanousd": 1500000000,
+        "rate_out_nanousd": 12000000000
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "rate_out is the video output price (5,792 tokens per second of 720p video, about $0.07 per second)."
+    }
+  ],
+  "defaults": [
+    {
+      "provider": "google",
+      "type": "embedding",
+      "lines": {
+        "rate_in_nanousd": 200000000,
+        "rate_out_nanousd": 0
+      },
+      "source": {
+        "url": "https://aistudio.google.com/docs/pricing",
+        "read_at": "2026-11-16"
+      },
+      "note": "Priced as gemini-embedding-2 text input, Google's current embedding model."
+    }
+  ]
+}

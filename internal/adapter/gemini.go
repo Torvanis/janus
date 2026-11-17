@@ -89,6 +89,7 @@ func (a *Gemini) Discover(ctx context.Context, up Upstream, client *http.Client)
 		SupportedMethods []string `json:"supportedGenerationMethods"`
 	}
 	native := map[string]nativeModel{}
+	nativeRows := map[string]map[string]json.RawMessage{}
 	nativeErr := ""
 	if endpoint := geminiNativeModelsURL(up.BaseURL); endpoint != "" {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -102,6 +103,17 @@ func (a *Gemini) Discover(ctx context.Context, up Upstream, client *http.Client)
 				if err = json.Unmarshal(body, &payload); err == nil {
 					for _, m := range payload.Models {
 						native[strings.TrimPrefix(m.Name, "models/")] = m
+					}
+					var raw struct {
+						Models []map[string]json.RawMessage `json:"models"`
+					}
+					if json.Unmarshal(body, &raw) == nil {
+						for _, row := range raw.Models {
+							var name string
+							if json.Unmarshal(row["name"], &name) == nil {
+								nativeRows[strings.TrimPrefix(name, "models/")] = row
+							}
+						}
 					}
 				}
 			}
@@ -121,6 +133,7 @@ func (a *Gemini) Discover(ctx context.Context, up Upstream, client *http.Client)
 				m.ContextWindow = n.InputTokenLimit
 			}
 			m.Modalities = geminiModalities(m.Name, n.SupportedMethods)
+			m.Capabilities = mergeCapabilities(rowCapabilities("google", nativeRows[m.Name]), m.Capabilities)
 		} else {
 			m.Modalities = geminiModalities(m.Name, nil)
 		}
@@ -156,7 +169,7 @@ func geminiModalities(name string, methods []string) []string {
 func (a *Gemini) Prepare(up Upstream, req *Request) (*Prepared, error) {
 	if geminiNativeRequest(req) {
 		// Built-in tools exist only on the native API (gemini_native.go).
-		body, err := chatToGeminiNative(req.Body)
+		body, err := chatToGeminiNative(req.Body, req.Model)
 		if err != nil {
 			return nil, err
 		}

@@ -2,7 +2,7 @@ import { ChatAdminPage } from './ChatAdmin';
 import type { ReactNode } from 'react';
 import { AdminOverview } from './Overview';
 import { UpstreamsPage } from './Upstreams';
-import { AdminModelsPage } from './Models';
+import { AdminModelsSection } from './PricingAccuracy';
 import { GrantsPage } from './Grants';
 import { ServiceTokensPage } from './ServiceTokens';
 import { ManagedModelsPage } from './ManagedModels';
@@ -31,7 +31,8 @@ export default function AdminRoutes(): ReactNode {
       {/* Header policies moved to a tab of Policy rules. */}
       <Route path="header-policies" element={<Navigate to="/admin/rules/headers" replace />} />
       <Route path="upstreams/:id" element={<UpstreamsPage />} />
-      <Route path="models" element={<AdminModelsPage />} />
+      <Route path="models" element={<AdminModelsSection />} />
+      <Route path="models/:tab" element={<AdminModelsSection />} />
       <Route path="managed-models" element={<ManagedModelsPage />} />
       <Route path="grants" element={<GrantsPage />} />
       <Route path="chat" element={<ChatAdminPage />} />

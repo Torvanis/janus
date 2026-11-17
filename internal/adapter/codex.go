@@ -511,7 +511,9 @@ type codexUsage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	// X.ai reports the exact bill, hosted tool calls included, in ticks.
-	CostInUSDTicks     *int64 `json:"cost_in_usd_ticks"`
+	CostInUSDTicks *int64 `json:"cost_in_usd_ticks"`
+	// OpenRouter / Perplexity Responses API quotes (quoted_cost.go).
+	quotedCostFields
 	InputTokensDetails struct {
 		CachedTokens int64 `json:"cached_tokens"`
 	} `json:"input_tokens_details"`
@@ -521,14 +523,16 @@ type codexUsage struct {
 }
 
 func (u *codexUsage) usage() Usage {
-	// Responses reports cached input as a subset of input_tokens, the
-	// OpenAI convention (CachedDisjoint=false).
+	// Responses reports cached input as a part of input_tokens, the
+	// convention every Usage carries.
 	out := Usage{TokensIn: u.InputTokens, TokensOut: u.OutputTokens, TokensCached: u.InputTokensDetails.CachedTokens, Reported: true}
-	if u.CostInUSDTicks != nil && *u.CostInUSDTicks > 0 {
+	if u.CostInUSDTicks != nil {
 		// The exact cost, including xAI's per-search fees the token rate
-		// card cannot express.
-		out.CostNano = (*u.CostInUSDTicks + xaiTicksPerNanoUSD/2) / xaiTicksPerNanoUSD
-		out.CostReported = true
+		// card cannot express. A quoted 0 is a price, not a missing one.
+		out.CostNano, out.CostReported = quotedNanoFromTicks(*u.CostInUSDTicks)
+	}
+	if !out.CostReported {
+		out.CostNano, out.CostReported = u.quote()
 	}
 	return out
 }

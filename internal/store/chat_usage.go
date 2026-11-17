@@ -31,7 +31,7 @@ const requestCountExpr = "COALESCE(SUM(CASE WHEN chat_subcall = 0 THEN 1 ELSE 0 
 // chatOwnUsageClause keeps the rows a Chat reply's notes and footer may
 // read: never the gateway's own calls that share the request id (Security
 // Gateway classifier calls, auto-routing evaluation and judge calls).
-const chatOwnUsageClause = "client_app NOT IN ('" + InternalClientApp + "','" + InternalRoutingClientApp + "')"
+const chatOwnUsageClause = "client_app NOT IN ('" + InternalClientApp + "','" + InternalRoutingClientApp + "','" + InternalProbeClientApp + "')"
 
 // ChatUsageTotals is the sum of every usage event recorded for one Chat
 // reply (all of its rounds and sub-calls).

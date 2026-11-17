@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/store"
 	"github.com/torvanis/janus/internal/subscription"
 )
@@ -89,8 +90,9 @@ func (s *Server) runSubscriptionChecks(ctx context.Context) {
 
 // recheckResult is the outcome of renewAndRecheck.
 type recheckResult struct {
-	models  []string
-	catalog map[string]subscription.Reasoning
+	models   []string
+	catalog  map[string]subscription.Reasoning
+	reported map[string]adapter.Capabilities
 	// err is the definitive error after renewal (a ReauthError when the
 	// vendor refused the refresh token or the fresh credential). nil with
 	// ok=false means renewal hit an outage: keep the original verdict.
@@ -117,13 +119,13 @@ func (s *Server) renewAndRecheck(ctx context.Context, route *personalRoute, clie
 		}
 		return recheckResult{}, false
 	}
-	models, catalog, err := subscription.FetchModels(ctx, route.provider, client, token)
+	models, catalog, reported, err := subscription.FetchModels(ctx, route.provider, client, token)
 	if err != nil {
 		return recheckResult{err: err}, false
 	}
 	s.Logger.InfoContext(ctx, "subscription check: renewed a refused access token",
 		"subscription_id", conn.ID, "provider", route.provider.ID())
-	return recheckResult{models: models, catalog: catalog}, true
+	return recheckResult{models: models, catalog: catalog, reported: reported}, true
 }
 
 // checkSubscription verifies one connection and records the outcome. It
@@ -137,7 +139,7 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	client := s.upstreamHTTPClient(ctx)
+	client := s.ownPersonalClient(ctx, provider)
 	route := &personalRoute{provider: provider, conn: conn}
 
 	// Renew early so an unused refresh token does not age out.
@@ -155,7 +157,7 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 		_ = s.Store.RecordSubscriptionCheck(ctx, conn.ID, "Could not renew the sign-in: "+apiErr.Message, nil)
 		return ""
 	}
-	models, catalog, err := subscription.FetchModels(ctx, provider, client, token)
+	models, catalog, reported, err := subscription.FetchModels(ctx, provider, client, token)
 	if err != nil {
 		var reauth *subscription.ReauthError
 		// A refused credential is usually an access token the vendor
@@ -167,7 +169,7 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 		// another 2 days, chat worked 80 s earlier).
 		if errors.As(err, &reauth) && conn.AutoRenews {
 			if renewed, ok := s.renewAndRecheck(ctx, route, client); ok {
-				models, catalog, err = renewed.models, renewed.catalog, nil
+				models, catalog, reported, err = renewed.models, renewed.catalog, renewed.reported, nil
 			} else if renewed.err != nil {
 				err = renewed.err
 			}
@@ -186,6 +188,7 @@ func (s *Server) checkSubscription(ctx context.Context, conn *store.Subscription
 	// The catalog is the cheap check; its reasoning facts keep the proxy's
 	// fitting current as vendors add levels.
 	s.refreshReasoningFacts(ctx, conn, models, catalog)
+	s.storeReportedCapabilities(ctx, conn.ID, models, reported)
 	var usage []byte
 	if reporter, ok := provider.(subscription.UsageReporter); ok {
 		u, err := reporter.Usage(ctx, client, token, conn.Meta)

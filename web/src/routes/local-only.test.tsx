@@ -309,7 +309,7 @@ describe('User model catalog — per-model rates', () => {
   it('flag off: rate rows and the price sort render as today', async () => {
     renderAt(<UserModelsPage />, '/models');
     expect(await screen.findByText('claude-fable-5')).toBeTruthy();
-    expect(screen.getByText('Input')).toBeTruthy();
+    expect(screen.getByText('Price in / out')).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Sort: most expensive' })).toBeTruthy();
   });
 
@@ -318,7 +318,7 @@ describe('User model catalog — per-model rates', () => {
     renderAt(<UserModelsPage />, '/models');
 
     expect(await screen.findByText('claude-fable-5')).toBeTruthy();
-    expect(screen.queryByText('Input')).toBeNull();
+    expect(screen.queryByText('Price in / out')).toBeNull();
     expect(screen.queryByRole('option', { name: 'Sort: most expensive' })).toBeNull();
     expect(screen.queryByText(/\$/)).toBeNull();
     expect(screen.getAllByText('Chat').length).toBeGreaterThan(0);

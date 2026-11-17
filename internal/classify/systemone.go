@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/torvanis/janus/internal/adapter"
 	"github.com/torvanis/janus/internal/classtrace"
 	"github.com/torvanis/janus/internal/decisions"
 )
@@ -106,9 +107,9 @@ type s1Response struct {
 		Probabilities map[string]float64 `json:"probabilities"`
 	} `json:"answers"`
 	Usage struct {
-		InputTokens  int64    `json:"input_tokens"`
-		OutputTokens int64    `json:"output_tokens"`
-		Cost         *float64 `json:"cost"`
+		InputTokens  int64           `json:"input_tokens"`
+		OutputTokens int64           `json:"output_tokens"`
+		Cost         json.RawMessage `json:"cost"`
 	} `json:"usage"`
 }
 
@@ -216,6 +217,7 @@ func (s *SystemOne) Classify(ctx context.Context, text string, questions []Quest
 		out.Usage.TokensOut += p.res.Usage.TokensOut
 		out.Usage.TokensCached += p.res.Usage.TokensCached
 		out.Usage.CostUSD += p.res.Usage.CostUSD
+		out.Usage.CostNano += p.res.Usage.Nano()
 		out.Usage.CostReported = out.Usage.CostReported || p.res.Usage.CostReported
 		out.Calls += p.res.Calls
 		if p.res.Model != "" {
@@ -313,8 +315,9 @@ func (s *SystemOne) call(ctx context.Context, text string, questions []Question)
 	}
 	res = Result{Answers: map[string]Answer{}, Model: out.Model, Calls: 1,
 		Usage: Usage{TokensIn: out.Usage.InputTokens, TokensOut: out.Usage.OutputTokens}}
-	if out.Usage.Cost != nil {
-		res.Usage.CostUSD, res.Usage.CostReported = *out.Usage.Cost, true
+	if nano, ok := adapter.QuotedCostNano(out.Usage.Cost); ok {
+		res.Usage.CostNano, res.Usage.CostReported = nano, true
+		res.Usage.CostUSD = float64(nano) / 1e9
 	}
 	for _, q := range questions {
 		a, ok := out.Answers[q.ID]
@@ -448,7 +451,8 @@ func openAIResult(raw []byte, canon decisions.Request, questions []Question) (Re
 		return Result{}, fmt.Errorf("openai_decisions: %w", err)
 	}
 	res := Result{Answers: map[string]Answer{}, Model: resp.Model, Calls: 1,
-		Usage: Usage{TokensIn: resp.Usage.InputTokens, TokensOut: resp.Usage.OutputTokens, TokensCached: resp.Usage.CachedTokens}}
+		Usage: Usage{TokensIn: resp.Usage.InputTokens, TokensOut: resp.Usage.OutputTokens, TokensCached: resp.Usage.CachedTokens,
+			CostUSD: resp.Usage.CostUSD, CostNano: resp.Usage.CostNano, CostReported: resp.Usage.CostReported}}
 	for i, q := range questions {
 		a := resp.Answers[i]
 		var bad error

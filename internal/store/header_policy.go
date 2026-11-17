@@ -132,9 +132,13 @@ type HeaderLogSettings struct {
 	Mode headerpolicy.LogMode `json:"mode"`
 }
 
-// DefaultHeaderLogSettings: names and values, sensitive values masked.
+// DefaultHeaderLogSettings: header names only. Values are kept only when an
+// administrator chooses to: masking works from a list of known credential
+// header names, and no such list covers every header a client or a proxy in
+// front of the gateway may send (signed identity assertions, vendor key
+// headers, client addresses), so what is not asked for is not stored.
 func DefaultHeaderLogSettings() HeaderLogSettings {
-	return HeaderLogSettings{Mode: headerpolicy.LogValues}
+	return HeaderLogSettings{Mode: headerpolicy.LogNames}
 }
 
 // HeaderLogSettings reads the setting (default when never saved).

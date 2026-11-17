@@ -59,12 +59,24 @@ func (a *Bedrock) Discover(ctx context.Context, up Upstream, client *http.Client
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("parse Bedrock model list: %w", err)
 	}
+	rows := map[string]map[string]json.RawMessage{}
+	var raw struct {
+		ModelSummaries []map[string]json.RawMessage `json:"modelSummaries"`
+	}
+	if json.Unmarshal(body, &raw) == nil {
+		for _, row := range raw.ModelSummaries {
+			var id string
+			if json.Unmarshal(row["modelId"], &id) == nil {
+				rows[id] = row
+			}
+		}
+	}
 	out := make([]DiscoveredModel, 0, len(payload.ModelSummaries))
 	for _, m := range payload.ModelSummaries {
 		if m.ModelID == "" {
 			continue
 		}
-		out = append(out, DiscoveredModel{Name: m.ModelID, Modalities: bedrockModalities(m.OutputModalities)})
+		out = append(out, DiscoveredModel{Name: m.ModelID, Modalities: bedrockModalities(m.OutputModalities), Capabilities: rowCapabilities("bedrock", rows[m.ModelID])})
 	}
 	return out, nil
 }
@@ -176,8 +188,17 @@ func chatToConverse(body []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-// ExtractUsage reads the Converse usage block.
+// ExtractUsage reads the Converse usage block. TokensIn is the whole prompt:
+// Converse counts cache reads and writes beside inputTokens, and Bedrock
+// bills all three (see Usage).
 func (a *Bedrock) ExtractUsage(body []byte) (Usage, bool) {
+	u, ok := a.extractFreshUsage(body)
+	return u.withCacheInPrompt(), ok
+}
+
+// extractFreshUsage reads the Converse usage block as reported: TokensIn is
+// inputTokens, the fresh part only.
+func (a *Bedrock) extractFreshUsage(body []byte) (Usage, bool) {
 	var env struct {
 		Usage struct {
 			InputTokens      int64 `json:"inputTokens"`
@@ -199,9 +220,6 @@ func (a *Bedrock) ExtractUsage(body []byte) (Usage, bool) {
 		TokensCacheWrite5m: env.Usage.CacheWriteTokens,
 	}
 	u.Reported = u.TokensIn > 0 || u.TokensOut > 0
-	// Like the Anthropic API it fronts, Converse counts cache reads and
-	// writes OUTSIDE inputTokens; the cost function must add them.
-	u.CachedDisjoint = true
 	return u, u.Reported
 }
 
@@ -251,9 +269,10 @@ func (c *bedrockStreamCollector) Feed(line []byte) {
 }
 
 func (c *bedrockStreamCollector) record(payload []byte) {
-	if u, found := c.adapter.ExtractUsage(payload); found {
+	// Frames merge with TokensIn as the fresh part, so each part keeps its
+	// own largest value; Usage adds the parts.
+	if u, found := c.adapter.extractFreshUsage(payload); found {
 		c.usage.MergeStream(u)
-		c.usage.CachedDisjoint = true
 	}
 	var stop struct {
 		StopReason string `json:"stopReason"`
@@ -263,7 +282,9 @@ func (c *bedrockStreamCollector) record(payload []byte) {
 	}
 }
 
-func (c *bedrockStreamCollector) Usage() Usage { return c.usage }
+// Usage is the merged usage with TokensIn as the whole prompt (see
+// Bedrock.ExtractUsage).
+func (c *bedrockStreamCollector) Usage() Usage { return c.usage.withCacheInPrompt() }
 
 // --- response translation ----------------------------------------------------
 
@@ -298,8 +319,14 @@ func converseFinishReason(stop string) string {
 	}
 }
 
-func converseUsage(in, out, cached int64) map[string]any {
-	u := map[string]any{"prompt_tokens": in, "completion_tokens": out, "total_tokens": in + out}
+// converseUsage renders a Converse usage block in the OpenAI shape, in
+// OpenAI's own convention: prompt_tokens is the whole prompt (fresh
+// inputTokens, cache reads and cache writes, as Bedrock bills it),
+// prompt_tokens_details.cached_tokens the cache reads within it, and
+// total_tokens = prompt + completion.
+func converseUsage(in, out, cached, written int64) map[string]any {
+	prompt := in + cached + written
+	u := map[string]any{"prompt_tokens": prompt, "completion_tokens": out, "total_tokens": prompt + out}
 	if cached > 0 {
 		u["prompt_tokens_details"] = map[string]any{"cached_tokens": cached}
 	}
@@ -321,9 +348,10 @@ func (a *Bedrock) TransformResponse(req *Request, body []byte) ([]byte, error) {
 		} `json:"output"`
 		StopReason string `json:"stopReason"`
 		Usage      struct {
-			InputTokens          int64 `json:"inputTokens"`
-			OutputTokens         int64 `json:"outputTokens"`
-			CacheReadInputTokens int64 `json:"cacheReadInputTokens"`
+			InputTokens           int64 `json:"inputTokens"`
+			OutputTokens          int64 `json:"outputTokens"`
+			CacheReadInputTokens  int64 `json:"cacheReadInputTokens"`
+			CacheWriteInputTokens int64 `json:"cacheWriteInputTokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil || resp.Output == nil {
@@ -367,7 +395,7 @@ func (a *Bedrock) TransformResponse(req *Request, body []byte) ([]byte, error) {
 		"created": created,
 		"model":   req.Model,
 		"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finish}},
-		"usage":   converseUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheReadInputTokens),
+		"usage":   converseUsage(resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheReadInputTokens, resp.Usage.CacheWriteInputTokens),
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -420,6 +448,7 @@ type bedrockStreamTransformer struct {
 	toolIndex map[int]int
 	in, out   int64
 	cached    int64
+	written   int64
 	done      bool
 }
 
@@ -530,9 +559,10 @@ func (t *bedrockStreamTransformer) event(eventType string, payload []byte) (out 
 		} `json:"delta"`
 		StopReason string `json:"stopReason"`
 		Usage      *struct {
-			InputTokens          int64 `json:"inputTokens"`
-			OutputTokens         int64 `json:"outputTokens"`
-			CacheReadInputTokens int64 `json:"cacheReadInputTokens"`
+			InputTokens           int64 `json:"inputTokens"`
+			OutputTokens          int64 `json:"outputTokens"`
+			CacheReadInputTokens  int64 `json:"cacheReadInputTokens"`
+			CacheWriteInputTokens int64 `json:"cacheWriteInputTokens"`
 		} `json:"usage"`
 	}
 	var probe map[string]json.RawMessage
@@ -579,11 +609,12 @@ func (t *bedrockStreamTransformer) event(eventType string, payload []byte) (out 
 		return wrap(t.chunk(map[string]any{}, &finish, nil))
 	case ev.Usage != nil:
 		t.in, t.out, t.cached = ev.Usage.InputTokens, ev.Usage.OutputTokens, ev.Usage.CacheReadInputTokens
+		t.written = ev.Usage.CacheWriteInputTokens
 		if t.done {
 			return nil, true, nil
 		}
 		t.done = true
-		frame, err := t.chunk(nil, nil, converseUsage(t.in, t.out, t.cached))
+		frame, err := t.chunk(nil, nil, converseUsage(t.in, t.out, t.cached, t.written))
 		if err != nil {
 			return nil, true, err
 		}

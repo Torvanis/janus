@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/torvanis/janus/internal/usage"
 	"math"
 	"time"
+
+	"github.com/torvanis/janus/internal/capability"
 )
 
 // nowUTC is the single clock source for the store, kept swappable for tests.
@@ -178,17 +181,20 @@ type Model struct {
 	Metadata         map[string]MetadataField `json:"metadata"`
 	MetadataWarnings []string                 `json:"metadata_warnings"`
 	metadataState    metadataState
-	ID               string   `json:"id"`
-	UpstreamID       string   `json:"upstream_id"`
-	UpstreamName     string   `json:"upstream_name"`
-	AdapterType      string   `json:"adapter_type"`
-	Name             string   `json:"name"`
-	DisplayName      string   `json:"display_name"`
-	Status           string   `json:"status"`
-	Modalities       []string `json:"modalities"`
-	RateInNano       int64    `json:"rate_in_nanousd"`
-	RateOutNano      int64    `json:"rate_out_nanousd"`
-	RateCachedNano   int64    `json:"rate_cached_nanousd"`
+	ID               string `json:"id"`
+	UpstreamID       string `json:"upstream_id"`
+	UpstreamName     string `json:"upstream_name"`
+	AdapterType      string `json:"adapter_type"`
+	// UpstreamEnabled mirrors the owning upstream's enabled switch, read in
+	// the same join as UpstreamName. See Live.
+	UpstreamEnabled bool     `json:"upstream_enabled"`
+	Name            string   `json:"name"`
+	DisplayName     string   `json:"display_name"`
+	Status          string   `json:"status"`
+	Modalities      []string `json:"modalities"`
+	RateInNano      int64    `json:"rate_in_nanousd"`
+	RateOutNano     int64    `json:"rate_out_nanousd"`
+	RateCachedNano  int64    `json:"rate_cached_nanousd"`
 	// RateCacheWrite5mNano and RateCacheWrite1hNano price prompt-cache writes
 	// (5-minute and 1-hour TTL entries) the way some upstreams bill them.
 	// Models priced before migration 0013 carry 0, which is what was billed.
@@ -202,7 +208,28 @@ type Model struct {
 	// classifier (ClassifierRole* constants). Non-empty removes the model
 	// from the servable catalog, /v1/models and grant targeting; it is
 	// reachable only from the gateway's internal filter path.
-	ClassifierRole    string    `json:"classifier_role,omitempty"`
+	ClassifierRole string `json:"classifier_role,omitempty"`
+	// Capabilities is what the model can take, give and be asked: the value
+	// in force for each known key, with the source it came from (see
+	// internal/capability). A key that is absent is unknown.
+	Capabilities map[string]capability.Resolved `json:"capabilities"`
+	// CapabilityProbe is the last probe run, nil when never probed.
+	CapabilityProbe *capability.ProbeRun `json:"capability_probe,omitempty"`
+	// ThinkingOff is how Janus turns this model's thinking off: the
+	// thinking.off switch it sends for "no thinking", "never" when the
+	// model always thinks, empty when not known. Resolved at read time for
+	// the user's model list (Chat offers "Off" from it); never persisted.
+	ThinkingOff     string `json:"thinking_off,omitempty"`
+	capabilityState capability.State
+	// CostQuoted says the model's provider quotes the cost of each call,
+	// which is then the call's cost (adapter.QuotesCallCost). Resolved at
+	// read time for the admin model list; never persisted.
+	CostQuoted bool `json:"cost_quoted,omitempty"`
+	// CatalogAligned: the model has no administrator prices and follows the
+	// Janus price catalog (prices the provider publishes through its API
+	// still apply over it). Editing a price turns it off.
+	CatalogAligned bool `json:"catalog_aligned"`
+
 	RateEffectiveFrom time.Time `json:"rate_effective_from"`
 	DiscoveredAt      time.Time `json:"discovered_at"`
 	GrantCount        int       `json:"grant_count"`
@@ -361,6 +388,14 @@ func (m *Model) PublicName() string {
 	return m.Name
 }
 
+// Live reports whether the model can be offered to callers: enabled, on an
+// upstream that is enabled. A model on a disabled upstream keeps its status
+// and grants (re-enabling the upstream brings it back unchanged); it is only
+// left out of user-facing lists. Admin listings show it regardless.
+func (m *Model) Live() bool {
+	return m != nil && m.Status == ModelEnabled && m.UpstreamEnabled
+}
+
 // ValidationError reports a rejected write together with the offending field,
 // so the API layer can map it to a 400 with a param instead of a generic 500.
 type ValidationError struct {
@@ -382,6 +417,8 @@ type RateCard struct {
 	RateCachedNano       int64     `json:"rate_cached_nanousd"`
 	RateCacheWrite5mNano int64     `json:"rate_cache_write_5m_nanousd"`
 	RateCacheWrite1hNano int64     `json:"rate_cache_write_1h_nanousd"`
+	// Lines are the price lines in force with these rates (usage/lines.go).
+	Lines map[string]int64 `json:"lines,omitempty"`
 }
 
 // ErrNegativeRate is returned by SetModelRates when any dimension is below
@@ -747,8 +784,12 @@ type UsageEvent struct {
 	// nothing for these requests, so they record zero cost.
 	SubscriptionID string `json:"subscription_id,omitempty"`
 	UpstreamID     string `json:"upstream_id"`
-	ModelID        string `json:"model_id"`
-	ModelName      string `json:"model"`
+	// QuotedBy names the upstream that quoted the cost of a row recorded
+	// under usage.AccountingUpstreamCost ("Cost quoted by OpenRouter").
+	// Filled when rows are read for the request log; not stored.
+	QuotedBy  string `json:"cost_quoted_by,omitempty"`
+	ModelID   string `json:"model_id"`
+	ModelName string `json:"model"`
 	// RequestedModelName records the managed-model alias the caller actually
 	// asked for, when the request was addressed to one. ModelName always
 	// carries the UNDERLYING model, so model reporting keeps reflecting real
@@ -762,34 +803,58 @@ type UsageEvent struct {
 	RequestBytes       int64  `json:"request_bytes"`
 	ResponseBytes      int64  `json:"response_bytes"`
 	AttachmentCount    int    `json:"attachment_count"`
+	// TokensIn is the whole prompt, the way providers bill it: fresh
+	// input, cache reads and cache writes, for every provider (see
+	// adapter.Usage). TokensCached (cache reads) and TokensCacheWrite5m /
+	// TokensCacheWrite1h (cache writes with 5-minute and 1-hour TTLs) are
+	// parts of it billed at their own rates; persisted per event so
+	// historical usage keeps its own counts if a rate is ever repriced.
+	// The canonical cache-hit rate is TokensCached / TokensIn — see
+	// store.Totals for the aggregate form.
 	TokensIn           int64  `json:"tokens_in"`
 	TokensOut          int64  `json:"tokens_out"`
 	TokensCached       int64  `json:"tokens_cached"`
-	// TokensCacheWrite5m and TokensCacheWrite1h count prompt-cache write
-	// tokens (5-minute and 1-hour TTL entries) as reported by cache-billing
-	// upstreams (Anthropic reports them separately from input_tokens, so
-	// they are additive to TokensIn). Persisted per event so historical
-	// usage keeps its own counts if cache-write rates are ever repriced.
-	// Together with TokensIn and TokensCached these define the canonical
-	// cache-hit rate: TokensCached / (TokensIn + TokensCacheWrite5m +
-	// TokensCacheWrite1h) — see store.Totals for the aggregate form.
 	TokensCacheWrite5m int64  `json:"tokens_cache_write_5m"`
 	TokensCacheWrite1h int64  `json:"tokens_cache_write_1h"`
 	AccountingMode     string `json:"token_accounting_method"`
+	// BilledUnit and BilledQuantity are what was measured for a request
+	// billed by something other than tokens ("image" 2, "video_second" 8,
+	// "character" 1500); BilledLine is the price line that priced it, empty
+	// when the model has none for the unit. Empty / 0 for token billing.
+	BilledUnit     string  `json:"billed_unit,omitempty"`
+	BilledQuantity float64 `json:"billed_quantity,omitempty"`
+	BilledLine     string  `json:"billed_line,omitempty"`
+	// Measured is the measurement the proxy took, priced by applyUsage;
+	// StatusCheck marks a request that only asked how a provider job is
+	// going. Neither is stored.
+	Measured       *usage.UnitUse `json:"-"`
+	StatusCheck    bool           `json:"-"`
+	BilledOnResult bool           `json:"-"`
 	// CostNano is the request's cost in nano-USD, computed once at recording
 	// time. In local-only mode (JANUS_LOCAL_ONLY) cost tracking is off and
 	// new events record 0 here; the column and any historical values are kept
 	// untouched, so disabling the mode simply resumes cost tracking.
-	CostNano      int64  `json:"cost_nanousd"`
-	FinishReason  string `json:"finish_reason"`
-	HTTPStatus    int    `json:"http_status"`
-	LatencyMs     int    `json:"latency_ms"`
-	TTFBMs        int    `json:"ttfb_ms"`
-	UpstreamMs    int    `json:"upstream_latency_ms"`
-	UserAgent     string `json:"client_user_agent"`
-	ClientIP      string `json:"client_ip"`
-	XForwardedFor string `json:"x_forwarded_for"`
-	Referer       string `json:"referer"`
+	CostNano int64 `json:"cost_nanousd"`
+	// EstimatedCostNano is Janus's own price for a call whose cost the
+	// provider quoted (usage.AccountingUpstreamCost), computed at recording
+	// time with the same engine and the rates in force then, for the
+	// pricing accuracy report. It never changes what the call is billed
+	// (CostNano). nil means no estimate: every unquoted call (its cost IS
+	// Janus's price), a quoted call recorded before estimates existed whose
+	// price history could not price it, a job result that measures nothing
+	// on its own request, a personal subscription, local-only mode. 0 on a
+	// quoted call means Janus has no price that applies (no rate card, or no
+	// line for the measured unit).
+	EstimatedCostNano *int64 `json:"estimated_cost_nanousd,omitempty"`
+	FinishReason      string `json:"finish_reason"`
+	HTTPStatus        int    `json:"http_status"`
+	LatencyMs         int    `json:"latency_ms"`
+	TTFBMs            int    `json:"ttfb_ms"`
+	UpstreamMs        int    `json:"upstream_latency_ms"`
+	UserAgent         string `json:"client_user_agent"`
+	ClientIP          string `json:"client_ip"`
+	XForwardedFor     string `json:"x_forwarded_for"`
+	Referer           string `json:"referer"`
 	// ClientApp names the calling application — an agent harness, IDE
 	// plugin, or app — when it identifies itself via an attribution header.
 	// User-Agent only ever reveals the SDK, so this is the only way to tell

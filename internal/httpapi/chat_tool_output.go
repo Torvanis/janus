@@ -29,8 +29,8 @@ import (
 
 // chatToolOutputJudged marks a Chat proxy request whose tool output was
 // judged here (see secgw.WithToolOutputJudged).
-func chatToolOutputJudged(ctx context.Context) context.Context {
-	return secgw.WithToolOutputJudged(ctx)
+func chatToolOutputJudged(ctx context.Context, judgedMedia []string) context.Context {
+	return secgw.WithJudgedText(secgw.WithToolOutputJudged(ctx), judgedMedia)
 }
 
 // chatActivityWithheld is the activity a withheld tool result shows.
@@ -153,7 +153,7 @@ func (j *chatToolJudge) record(ctx context.Context, policy *store.SecgwPolicy, v
 			continue
 		}
 		v.Direction = store.SecgwDirectionToolOutput
-		row := v.ToStore(capture, encrypt)
+		row := v.ToStore(capture, encrypt, j.s.matchHashKey())
 		row.RequestID, row.UserID, row.ModelName = j.plan.RequestID, j.user.ID, j.plan.Model
 		rows = append(rows, row)
 	}
@@ -174,9 +174,14 @@ func (j *chatToolJudge) record(ctx context.Context, policy *store.SecgwPolicy, v
 // (made now or kept from an earlier reply) in every message sent, so one
 // withheld once is not shown to the model again on a later turn. Only the
 // new message's verdicts are recorded; earlier ones were when they were new.
-func (j *chatToolJudge) judgeMediaText(ctx context.Context, history []chatWireMessage) {
+//
+// It returns the texts it judged and left in place, exactly as they are
+// sent: the proxy's checks leave those, and only those, out of the person's
+// words. A block that merely looks like one (typed by the person, inside a
+// longer message) is not on the list and is judged as their message.
+func (j *chatToolJudge) judgeMediaText(ctx context.Context, history []chatWireMessage) (judged []string) {
 	if j == nil {
-		return
+		return nil
 	}
 	last := -1
 	for i := len(history) - 1; i >= 0 && last < 0; i-- {
@@ -196,9 +201,12 @@ func (j *chatToolJudge) judgeMediaText(ctx context.Context, history []chatWireMe
 			}
 			if out := j.judgeAs(ctx, "the text made of the attached file "+name, name, body, i == last); out != body {
 				parts[k] = chatPart{Type: "text", Text: out}
+			} else {
+				judged = append(judged, parts[k].Text)
 			}
 		}
 	}
+	return judged
 }
 
 // chatMediaTextOf reads a part made by chatMediaTextPart.

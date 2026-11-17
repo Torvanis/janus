@@ -187,7 +187,7 @@ func (r *classifierResolver) For(ctx context.Context, modelID string) (classify.
 	}
 	inner, err := classify.New(model.ClassifierRole, classify.Upstream{
 		ModelID: model.ID, ModelName: model.Name, BaseURL: upstream.BaseURL, APIKey: apiKey,
-		Client:     r.s.upstreamHTTPClient(ctx),
+		Client:     r.s.ownUpstreamClient(ctx, upstream.ID, upstream.BaseURL),
 		Meter:      r.s.meterClassifierCall(model, upstream),
 		UpstreamID: upstream.ID, AdapterType: upstream.AdapterType,
 		WireModel: prof.WireModel, Style: prof.CallStyle, MaxOptions: prof.MaxOptions,
@@ -290,6 +290,7 @@ func (s *Server) meterClassifierCall(model *store.Model, upstream *store.Upstrea
 			event.TokensIn, event.TokensOut, event.TokensCached = u.TokensIn, u.TokensOut, u.TokensCached
 			call := decisionCallFromUsage(u, 1)
 			event.CostNano, event.AccountingMode = s.decisionCost(ctx, model, call)
+			event.EstimatedCostNano = s.decisionEstimate(ctx, model, call, event.AccountingMode)
 			event.CostStatus = s.decisionCostStatus(ctx, model, call, event.CostNano)
 		}
 		s.writeUsage(ctx, event, "secgw: write classifier usage event", nil)
@@ -346,7 +347,7 @@ func (s *Server) recordSecgwViolations(ctx context.Context, event *store.UsageEv
 		if !v.Record {
 			continue
 		}
-		row := v.ToStore(capture, encrypt)
+		row := v.ToStore(capture, encrypt, s.matchHashKey())
 		row.RequestID, row.UsageEventID = event.RequestID, event.ID
 		row.UserID, row.ServiceTokenID, row.ModelName = event.UserID, event.ServiceTokenID, event.ModelName
 		rows = append(rows, row)
@@ -591,4 +592,14 @@ func (s *Server) handleRequestSecurity(w http.ResponseWriter, r *http.Request) {
 		"violations_scope_available": event.RequestID != "",
 		"action":                     event.SecgwAction,
 	})
+}
+
+// matchHashKey is the key match hashes are made with (see
+// secgw.Violation.KeyedHash): derived from the gateway's encryption key, so
+// it is the same on every replica and across restarts.
+func (s *Server) matchHashKey() []byte {
+	if s.Cipher == nil {
+		return nil
+	}
+	return s.Cipher.DeriveKey("secgw-match-hash")
 }
