@@ -320,6 +320,102 @@
     "affinity": {
       "type": "object"
     },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "auto renders only when replicaCount > 1; true/false force it",
+          "enum": [
+            "auto",
+            true,
+            false
+          ]
+        },
+        "maxUnavailable": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*%$"
+            }
+          ]
+        }
+      }
+    },
+    "topologySpread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "auto renders only when replicaCount > 1; true/false force it",
+          "enum": [
+            "auto",
+            true,
+            false
+          ]
+        },
+        "hostname": {
+          "type": "string",
+          "enum": [
+            "",
+            "ScheduleAnyway",
+            "DoNotSchedule"
+          ]
+        },
+        "zone": {
+          "type": "string",
+          "enum": [
+            "",
+            "ScheduleAnyway",
+            "DoNotSchedule"
+          ]
+        }
+      }
+    },
+    "topologySpreadConstraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "maxSkew",
+          "topologyKey",
+          "whenUnsatisfiable"
+        ]
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preStopSleepSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        }
+      }
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "trustedProxies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+        "not": {
+          "enum": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      }
+    },
     "extraEnv": {
       "type": "object",
       "propertyNames": {

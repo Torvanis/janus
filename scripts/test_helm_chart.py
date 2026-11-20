@@ -311,6 +311,91 @@ class ChartTest(unittest.TestCase):
                 result = self.run_helm(value, command="lint", args=["--strict"])
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def pod(self, text):
+        return deployment(text)["spec"]["template"]["spec"]
+
+    def test_ha_defaults_unchanged_for_one_replica(self):
+        text = self.render()
+        self.assertFalse(objects(text, "PodDisruptionBudget"))
+        pod = self.pod(text)
+        self.assertNotIn("topologySpreadConstraints", pod)
+        self.assertNotIn("lifecycle", pod["containers"][0])
+        self.assertEqual(pod["terminationGracePeriodSeconds"], 45)
+        self.assertNotIn("JANUS_TRUSTED_PROXIES", env(text))
+
+    def test_ha_auto_with_replicas(self):
+        text = self.render({"replicaCount": 3, "postgresql": {"enabled": False},
+                            "externalPostgresql": {"host": "db", "existingSecret": "db"}})
+        pdb = objects(text, "PodDisruptionBudget")[0]
+        selector = deployment(text)["spec"]["selector"]["matchLabels"]
+        self.assertEqual(pdb["spec"], {"maxUnavailable": 1, "selector": {"matchLabels": selector}})
+        self.assertEqual(self.pod(text)["topologySpreadConstraints"], [
+            {"maxSkew": 1, "topologyKey": "kubernetes.io/hostname",
+             "whenUnsatisfiable": "ScheduleAnyway", "labelSelector": {"matchLabels": selector}}])
+
+    def test_ha_forced_and_overridden(self):
+        text = self.render({"podDisruptionBudget": {"enabled": True, "maxUnavailable": "50%"},
+                            "topologySpread": {"enabled": True, "hostname": "DoNotSchedule",
+                                               "zone": "ScheduleAnyway"}})
+        self.assertEqual(objects(text, "PodDisruptionBudget")[0]["spec"]["maxUnavailable"], "50%")
+        spread = self.pod(text)["topologySpreadConstraints"]
+        self.assertEqual([(c["topologyKey"], c["whenUnsatisfiable"]) for c in spread],
+                         [("kubernetes.io/hostname", "DoNotSchedule"),
+                          ("topology.kubernetes.io/zone", "ScheduleAnyway")])
+        off = self.render({"replicaCount": 2, "podDisruptionBudget": {"enabled": False},
+                           "topologySpread": {"enabled": False}})
+        self.assertFalse(objects(off, "PodDisruptionBudget"))
+        self.assertNotIn("topologySpreadConstraints", self.pod(off))
+        raw = [{"maxSkew": 2, "topologyKey": "example.com/rack", "whenUnsatisfiable": "DoNotSchedule",
+                "labelSelector": {"matchLabels": {"app.kubernetes.io/component": "gateway"}}}]
+        text = self.render({"replicaCount": 2, "topologySpreadConstraints": raw})
+        self.assertEqual(self.pod(text)["topologySpreadConstraints"], raw)
+
+    def test_prestop_sleep_needs_kubernetes_130(self):
+        values = {"lifecycle": {"preStopSleepSeconds": 10}, "terminationGracePeriodSeconds": 50}
+        new = self.pod(self.render(values, args=["--kube-version", "1.31.0"]))
+        self.assertEqual(new["terminationGracePeriodSeconds"], 50)
+        self.assertEqual(new["containers"][0]["lifecycle"], {"preStop": {"sleep": {"seconds": 10}}})
+        self.assertIn("lifecycle", self.pod(self.render(values, args=["--kube-version", "1.30.0"]))["containers"][0])
+        old = self.pod(self.render(values, args=["--kube-version", "1.29.0"]))
+        self.assertNotIn("lifecycle", old["containers"][0])
+        self.assertEqual(old["terminationGracePeriodSeconds"], 50)
+        self.reject({"lifecycle": {"preStopSleepSeconds": 45}}, "must exceed lifecycle.preStopSleepSeconds")
+
+    def test_trusted_proxies(self):
+        text = self.render({"trustedProxies": ["10.42.0.0/16", "fd00::/8", "192.0.2.10"]})
+        self.assertEqual(env(text)["JANUS_TRUSTED_PROXIES"]["value"], "10.42.0.0/16,fd00::/8,192.0.2.10")
+        legacy = self.render({"extraEnv": {"JANUS_TRUSTED_PROXIES": "10.0.0.0/8"}})
+        self.assertEqual(env(legacy)["JANUS_TRUSTED_PROXIES"]["value"], "10.0.0.0/8")
+        self.reject({"trustedProxies": ["10.0.0.0/8"], "extraEnv": {"JANUS_TRUSTED_PROXIES": "10.0.0.0/8"}},
+                    "not both")
+
+    def test_ha_schema_guards(self):
+        for value in [{"podDisruptionBudget": {"enabled": "yes"}}, {"podDisruptionBudget": {"maxUnavailable": 0}},
+                      {"podDisruptionBudget": {"minAvailable": 1}}, {"topologySpread": {"hostname": "Maybe"}},
+                      {"topologySpreadConstraints": [{"maxSkew": 1}]}, {"lifecycle": {"preStopSleepSeconds": -1}},
+                      {"terminationGracePeriodSeconds": 0}, {"trustedProxies": ["0.0.0.0/0"]},
+                      {"trustedProxies": ["proxy.example.com"]}, {"trustedProxies": "10.0.0.0/8"}]:
+            with self.subTest(value=value):
+                self.reject(value, "values don't meet the specifications")
+
+    def test_ha_example_values(self):
+        example = CHART / "examples/values-ha-cloudnativepg.yaml"
+        text = self.render(args=["-f", str(example), "--kube-version", "1.31.0"], base=False)
+        self.assertEqual(deployment(text)["spec"]["replicas"], 3)
+        self.assertFalse(objects(text, "StatefulSet"))
+        self.assertEqual(objects(text, "PodDisruptionBudget")[0]["spec"]["maxUnavailable"], 1)
+        pod = self.pod(text)
+        self.assertEqual(pod["terminationGracePeriodSeconds"], 50)
+        self.assertEqual(pod["containers"][0]["lifecycle"]["preStop"]["sleep"]["seconds"], 10)
+        self.assertEqual(pod["topologySpreadConstraints"][0]["topologyKey"], "kubernetes.io/hostname")
+        self.assertEqual(env(text)["PGHOST"]["value"], "janus-db-rw")
+        self.assertEqual(env(text)["PGSSLMODE"]["value"], "verify-full")
+        self.assertEqual(env(text)["PGSSLROOTCERT"]["value"], "/etc/janus/postgresql/ca.crt")
+        self.assertEqual(objects(text, "Ingress")[0]["spec"]["ingressClassName"], "traefik")
+        result = self.run_helm(command="lint", args=["--strict", "-f", str(example)], base=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_package_roundtrip(self):
         with tempfile.TemporaryDirectory() as temp:
             result = subprocess.run([HELM, "package", str(CHART), "--destination", temp],

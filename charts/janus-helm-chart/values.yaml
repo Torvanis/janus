@@ -85,6 +85,37 @@ podAnnotations: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# High availability. More gateway replicas only help when PostgreSQL is also
+# redundant (external, e.g. CloudNativePG); see README "High availability with
+# CloudNativePG". "auto" turns a feature on only when replicaCount > 1, so a
+# single-replica install renders exactly as before; true/false force it.
+podDisruptionBudget:
+  enabled: auto
+  # Integer or percentage. Prefer maxUnavailable over minAvailable: it still
+  # lets a node drain proceed when another gateway pod is already Pending.
+  maxUnavailable: 1
+topologySpread:
+  enabled: auto
+  # whenUnsatisfiable per topology key: ScheduleAnyway, DoNotSchedule, or ""
+  # (no constraint for that key). Soft hostname spread lets a drained node's pod
+  # land on a surviving node instead of staying Pending.
+  hostname: ScheduleAnyway
+  # Set on multi-zone clusters (topology.kubernetes.io/zone).
+  zone: ""
+# Raw topologySpreadConstraints; when non-empty they replace the generated ones.
+topologySpreadConstraints: []
+lifecycle:
+  # Seconds the pod keeps serving after it is marked Terminating, so Service
+  # endpoints and the ingress stop routing to it before Janus drains. Uses the
+  # native preStop sleep action (the image has no shell) and is rendered only on
+  # Kubernetes >= 1.30. 0 = off.
+  preStopSleepSeconds: 0
+# Must exceed preStopSleepSeconds plus Janus' own 30-second request drain.
+terminationGracePeriodSeconds: 45
+# IPs or CIDRs of the reverse proxies (for example ingress-controller pods) whose
+# X-Forwarded-For Janus trusts for the client address. Sets
+# JANUS_TRUSTED_PROXIES. Never list 0.0.0.0/0.
+trustedProxies: []
 # Map of additional literal app settings. Secrets belong in secretEnv instead.
 # Chart-managed env (database, encryption, auth safety, listen URL) cannot be overridden.
 extraEnv: {}

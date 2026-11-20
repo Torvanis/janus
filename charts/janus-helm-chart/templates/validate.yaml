@@ -45,3 +45,9 @@
 {{- fail (printf "%s appears in both extraEnv and secretEnv" $key) -}}
 {{- end -}}
 {{- end -}}
+{{- if and .Values.trustedProxies (or (hasKey .Values.extraEnv "JANUS_TRUSTED_PROXIES") (hasKey .Values.secretEnv "JANUS_TRUSTED_PROXIES")) -}}
+{{- fail "set trusted proxies through trustedProxies or JANUS_TRUSTED_PROXIES in extraEnv/secretEnv, not both" -}}
+{{- end -}}
+{{- if ge (int .Values.lifecycle.preStopSleepSeconds) (int .Values.terminationGracePeriodSeconds) -}}
+{{- fail "terminationGracePeriodSeconds must exceed lifecycle.preStopSleepSeconds (plus Janus' 30-second drain)" -}}
+{{- end -}}
