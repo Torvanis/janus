@@ -144,7 +144,8 @@ replace an existing encryption key to make a startup error disappear.
 
 Gateway startup may initially retry while PostgreSQL initializes; the gateway
 checks its database and runs migrations at startup. Probes use `/healthz` and
-`/readyz`, with a five-minute startup allowance and 45-second termination grace.
+`/readyz`, with a five-minute startup allowance and 45-second termination grace
+(`terminationGracePeriodSeconds`).
 Single-replica upgrades use `Recreate` (brief downtime). Multi-replica PostgreSQL
 configurations use rolling updates with no surge, so upgrades do not temporarily
 exceed the configured gateway replica count.
@@ -172,8 +173,10 @@ ingress:
 ```
 
 `publicURL` must be HTTPS when ingress is enabled. The chart sets secure cookies
-from the URL. No certificate issuer is installed. Configure trusted proxy CIDRs
-explicitly for your deployment through `extraEnv`; do not trust every source.
+from the URL. No certificate issuer is installed. List the proxies in front of
+Janus (usually the ingress-controller pods) in `trustedProxies` so client IPs are
+read from `X-Forwarded-For`; do not trust every source. Existing installs that set
+`JANUS_TRUSTED_PROXIES` through `extraEnv` keep working; set one or the other.
 Set ingress-controller-specific streaming timeouts/body limits in
 `ingress.annotations` for your workload. Prometheus `/metrics` is served only on
 its own port (`metrics.port`, default 9464; the Service port named `metrics`),
@@ -213,6 +216,107 @@ unencrypted in-cluster connections: use external PostgreSQL with verified TLS
 when your threat model requires transport encryption. The bundled database
 initializes its named user as a PostgreSQL superuser; use a separately provisioned
 least-privilege external database role for stricter isolation.
+
+## High availability with CloudNativePG
+
+Several gateway replicas are only as available as the database behind them, and
+the bundled PostgreSQL is a single instance. For HA, run Janus against an HA
+PostgreSQL such as a [CloudNativePG](https://cloudnative-pg.io) cluster (the
+operator is installed separately; this chart does not depend on it). Janus keeps
+sessions and state in the database, so no sticky sessions or shared cache are
+needed. A complete values file is in
+[`examples/values-ha-cloudnativepg.yaml`](examples/values-ha-cloudnativepg.yaml).
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: janus-db
+  namespace: janus
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  storage:
+    size: 10Gi
+    # storageClass: a block- or local-backed class suitable for databases
+  bootstrap:
+    initdb:
+      database: janus
+      owner: janus
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required   # never two instances on one node
+  enablePDB: true
+  # `kubectl delete pod <primary>` first waits up to smartShutdownTimeout for
+  # clients to disconnect. The gateways' pooled connections never do, so the
+  # default 180 s is simply a 3-minute wait before the failover; 15 s is enough.
+  smartShutdownTimeout: 15
+  # Total shutdown budget per instance (default 1800 s); the fast shutdown gets
+  # stopDelay - smartShutdownTimeout. Raise it for large, write-heavy databases.
+  stopDelay: 60
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: preferred     # keep accepting writes if no standby is up
+```
+
+CloudNativePG creates `janus-db-rw` (the read-write Service that follows the
+primary), `janus-db-app` (key `password`) and `janus-db-ca` (key `ca.crt`), which
+the example consumes with `sslMode: verify-full`. Then:
+
+```sh
+helm install janus <chart> -n janus -f examples/values-ha-cloudnativepg.yaml
+```
+
+What the HA values do (all default to off for one replica, so single-replica
+installs render exactly as before):
+
+| Value | Default | Effect |
+|---|---|---|
+| `podDisruptionBudget.enabled`, `.maxUnavailable` | `auto`, `1` | PodDisruptionBudget when `replicaCount > 1` (`true`/`false` force it). `maxUnavailable` rather than `minAvailable`, so a drain still proceeds when a pod is already Pending |
+| `topologySpread.enabled`, `.hostname`, `.zone` | `auto`, `ScheduleAnyway`, `""` | Spread gateway pods across nodes (and zones when `zone` is set) when `replicaCount > 1`. Soft by default: on a three-node cluster a drained node's pod can still run on a survivor |
+| `topologySpreadConstraints` | `[]` | Raw constraints; when non-empty they replace the generated ones |
+| `lifecycle.preStopSleepSeconds` | `0` | Native `preStop` `sleep` (the image has no shell) so endpoints and the ingress stop routing to a terminating pod before it drains. Rendered only on Kubernetes 1.30 or later; NOTES warns when it is skipped |
+| `shutdown.delaySeconds` | unset | `JANUS_SHUTDOWN_DELAY`: on SIGTERM the gateway answers `/readyz` with 503 and keeps serving this long, so endpoints and the ingress stop routing to it before its port closes. Preferred over a preStop sleep (the example uses 10 and no preStop). Gateway default 0 |
+| `shutdown.graceSeconds` | unset | `JANUS_SHUTDOWN_GRACE`: how long in-flight requests and streams may run after the listener closes. Gateway default 30 |
+| `database.connectTimeoutSeconds` | unset | `JANUS_DB_CONNECT_TIMEOUT`: bound on each new PostgreSQL connection attempt (bundled or external). Gateway default 5 |
+| `terminationGracePeriodSeconds` | `45` | Must exceed `lifecycle.preStopSleepSeconds` + `shutdown.delaySeconds` + `shutdown.graceSeconds` (30 when unset) + 5 s for the usage writers (render fails otherwise) |
+| `trustedProxies` | `[]` | `JANUS_TRUSTED_PROXIES` (comma-joined IPs/CIDRs) |
+
+Unset `shutdown.*` and `database.connectTimeoutSeconds` values are left out of
+the rendered manifest, so existing installs render byte for byte as before.
+They take effect only with a gateway release that reads `JANUS_SHUTDOWN_DELAY`,
+`JANUS_SHUTDOWN_GRACE` and `JANUS_DB_CONNECT_TIMEOUT` (check the release notes);
+older gateways ignore them, and then only a preStop sleep
+(`lifecycle.preStopSleepSeconds`) delays the shutdown. Such a gateway release
+also answers a request whose credentials cannot be checked during a database
+failover with a retryable 503 instead of 401.
+
+Rolling updates stay `maxSurge: 0` / `maxUnavailable: 1`, so a rollout never runs
+more gateway pods than `replicaCount`; two of three serve during a rollout.
+
+Be honest about the remaining single points of failure:
+
+- **The entry point must be redundant too.** Three gateway pods do not help if
+  clients reach them through one node's IP. Use a load balancer, a VIP (for
+  example kube-vip or MetalLB), or DNS that covers every ingress node, and run
+  the ingress controller on more than one node.
+- **So must cluster DNS.** The gateways find `janus-db-rw` through CoreDNS, and
+  k3s runs a single CoreDNS replica by default: draining its node breaks name
+  resolution for every pod until it is rescheduled. Run at least two CoreDNS
+  replicas on different nodes (on k3s, persist the change, because k3s
+  re-applies its packaged CoreDNS manifest on restart).
+- `kubectl delete pod <primary>` is a planned shutdown, not a crash:
+  CloudNativePG waits up to `smartShutdownTimeout` (default 180 s) before it
+  fails over, which is why the manifest above lowers it.
+- A primary failover takes a few seconds; requests that write to the database in
+  that window can fail and should be retried by the client.
+- Each gateway replica counts as a licensed node: Community covers one node,
+  Business up to three nodes per instance (see COMMERCIAL-TERMS.md).
+- With `replicaCount > 1` and bundled PostgreSQL, the chart renders but NOTES
+  warns that the gateway is redundant and the database is not.
 
 ## SQLite evaluation
 
@@ -281,6 +385,9 @@ See `values.yaml` and `values.schema.json` for the complete interface.
 | `license.existingSecret`, `license.key` | Optional license file mounted read-only; no key supplied by chart |
 | `resources`, `postgresql.resources` | Separate gateway/database sizing |
 | `nodeSelector`, `tolerations`, `affinity` | Gateway scheduling; these do not configure PostgreSQL scheduling |
+| `podDisruptionBudget`, `topologySpread`, `topologySpreadConstraints`, `lifecycle.preStopSleepSeconds`, `shutdown.delaySeconds`, `shutdown.graceSeconds`, `terminationGracePeriodSeconds` | Gateway HA settings; see [High availability with CloudNativePG](#high-availability-with-cloudnativepg) |
+| `database.connectTimeoutSeconds` | PostgreSQL connect timeout (`JANUS_DB_CONNECT_TIMEOUT`); unset keeps the gateway default |
+| `trustedProxies` | Reverse-proxy IPs/CIDRs trusted for `X-Forwarded-For` (`JANUS_TRUSTED_PROXIES`) |
 | `podAnnotations` | Gateway pod annotations; change a rollout annotation to restart after Secret changes |
 | `extraEnv` | Map of additional **string** application env values |
 | `secretEnv` | Map of env names to `{name: existing-secret, key: secret-key}` |

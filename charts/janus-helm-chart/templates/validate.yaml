@@ -45,3 +45,20 @@
 {{- fail (printf "%s appears in both extraEnv and secretEnv" $key) -}}
 {{- end -}}
 {{- end -}}
+{{- if and .Values.trustedProxies (or (hasKey .Values.extraEnv "JANUS_TRUSTED_PROXIES") (hasKey .Values.secretEnv "JANUS_TRUSTED_PROXIES")) -}}
+{{- fail "set trusted proxies through trustedProxies or JANUS_TRUSTED_PROXIES in extraEnv/secretEnv, not both" -}}
+{{- end -}}
+{{- range $value, $env := dict "shutdown.delaySeconds" "JANUS_SHUTDOWN_DELAY" "shutdown.graceSeconds" "JANUS_SHUTDOWN_GRACE" "database.connectTimeoutSeconds" "JANUS_DB_CONNECT_TIMEOUT" -}}
+{{- $parts := splitList "." $value -}}
+{{- if and (not (kindIs "invalid" (index $.Values (index $parts 0) (index $parts 1)))) (or (hasKey $.Values.extraEnv $env) (hasKey $.Values.secretEnv $env)) -}}
+{{- fail (printf "set %s through %s or extraEnv/secretEnv, not both" $env $value) -}}
+{{- end -}}
+{{- end -}}
+{{- $delay := 0 -}}
+{{- if not (kindIs "invalid" .Values.shutdown.delaySeconds) -}}{{- $delay = int .Values.shutdown.delaySeconds -}}{{- end -}}
+{{- $grace := 30 -}}
+{{- if not (kindIs "invalid" .Values.shutdown.graceSeconds) -}}{{- $grace = int .Values.shutdown.graceSeconds -}}{{- end -}}
+{{- $needed := add (int .Values.lifecycle.preStopSleepSeconds) $delay $grace 5 -}}
+{{- if le (int .Values.terminationGracePeriodSeconds) (int $needed) -}}
+{{- fail (printf "terminationGracePeriodSeconds (%d) must exceed lifecycle.preStopSleepSeconds + shutdown.delaySeconds + shutdown.graceSeconds (30 when unset) + 5 = %d" (int .Values.terminationGracePeriodSeconds) (int $needed)) -}}
+{{- end -}}

@@ -1,7 +1,16 @@
 Janus {{ .Chart.AppVersion }} (chart {{ .Chart.Version }})
 
+{{ if .Values.ingress.enabled -}}
+The ingress is enabled, and this instance is UNCLAIMED until the first administrator exists:
+whoever reaches it first can create that account. Create the administrator NOW, privately,
+through this port-forward and http://127.0.0.1:8080:
+  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "janus.fullname" . }} 8080:{{ .Values.service.port }}
+If {{ .Values.ingress.host }} is already publicly reachable, install with ingress.enabled=false first,
+create the administrator, then enable the ingress.
+{{- else -}}
 Complete the first-administrator form PRIVATELY before enabling ingress:
   kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "janus.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
 
 Public URL: {{ .Values.publicURL }}
 Dev authentication is disabled; OIDC is optional. No default administrator password.
@@ -9,3 +18,12 @@ Back up the database AND the unchanged encryption key. Secrets are externally ma
 {{ if .Values.postgresql.enabled }}Bundled PostgreSQL is ONE instance, not an HA database. Its PVC is retained by the StatefulSet controller after deletion.{{ end }}
 {{ if eq .Values.database.type "sqlite" }}SQLite is evaluation-only: NEVER attach its PVC to multiple writers.{{ end }}
 Check your license's replica entitlement before scaling. See charts/janus-helm-chart/README.md.
+{{- if gt (int .Values.replicaCount) 1 }}
+{{ .Values.replicaCount }} gateway replicas: each replica counts as a licensed gateway node. Community covers one node; Business covers up to three nodes per instance.
+{{- if .Values.postgresql.enabled }}
+WARNING: the gateway is redundant, the bundled database is not. Bundled PostgreSQL is a single instance; use externalPostgresql with an HA PostgreSQL (for example CloudNativePG) for high availability.
+{{- end }}
+{{- end }}
+{{- if and (gt (int .Values.lifecycle.preStopSleepSeconds) 0) (not (include "janus.preStopSleep" .)) }}
+lifecycle.preStopSleepSeconds is ignored: the native preStop sleep action needs Kubernetes 1.30 or later (this cluster reports {{ .Capabilities.KubeVersion.Version }}).
+{{- end }}

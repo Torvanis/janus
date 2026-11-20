@@ -1,0 +1,63 @@
+# High-availability example: three gateway replicas on a CloudNativePG cluster.
+# See README.md "High availability with CloudNativePG" for the Cluster manifest
+# and the Secrets this file expects. Pre-create in the release namespace:
+#   janus-key      encryption key (64 hex characters), key JANUS_ENCRYPTION_KEY
+#   janus-license  license file, key license (three replicas = three licensed nodes)
+#   janus-tls      ingress TLS certificate (kubernetes.io/tls)
+# CloudNativePG creates janus-db-app (key password) and janus-db-ca (key ca.crt)
+# for a Cluster named janus-db.
+#
+# The shutdown.* and database.connectTimeoutSeconds settings need a gateway
+# release that reads JANUS_SHUTDOWN_DELAY, JANUS_SHUTDOWN_GRACE and
+# JANUS_DB_CONNECT_TIMEOUT; older releases ignore them (see README).
+#
+# helm install janus <chart> -n janus -f values-ha-cloudnativepg.yaml
+replicaCount: 3
+publicURL: https://janus.example.com
+encryptionKey:
+  existingSecret: janus-key
+license:
+  existingSecret: janus-license
+postgresql:
+  enabled: false
+externalPostgresql:
+  host: janus-db-rw          # CloudNativePG read-write Service; follows the primary
+  port: 5432
+  database: janus            # Cluster bootstrap.initdb.database / owner
+  username: janus
+  existingSecret: janus-db-app
+  passwordKey: password
+  sslMode: verify-full
+  caSecret: janus-db-ca
+  caKey: ca.crt
+database:
+  type: postgresql
+  # Give up on a connection attempt after 5 s, so the gateway reaches the new
+  # primary seconds after a crash instead of waiting ~2 min for TCP to time out.
+  connectTimeoutSeconds: 5
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+topologySpread:
+  enabled: true
+  hostname: ScheduleAnyway   # soft: a drained node's pod can land on a survivor
+  zone: ""                   # ScheduleAnyway on multi-zone clusters
+# The gateway turns /readyz to 503 on SIGTERM and keeps serving for 10 s while
+# endpoints and the ingress stop routing to it, then drains for up to 30 s.
+# This replaces a preStop sleep, so none is configured.
+shutdown:
+  delaySeconds: 10
+  graceSeconds: 30
+lifecycle:
+  preStopSleepSeconds: 0
+terminationGracePeriodSeconds: 50   # 10 s delay + 30 s drain + 5 s usage writers + margin
+# The ingress controller pods are the proxy in front of Janus. List their
+# addresses (often the pod CIDR, e.g. 10.42.0.0/16 on k3s) to log real client IPs.
+trustedProxies: []
+ingress:
+  enabled: true
+  className: traefik
+  host: janus.example.com
+  tls:
+    - secretName: janus-tls
+      hosts: [janus.example.com]

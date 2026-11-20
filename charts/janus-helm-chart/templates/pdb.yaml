@@ -1,0 +1,14 @@
+{{- if include "janus.autoEnabled" (list .Values.podDisruptionBudget.enabled .Values.replicaCount) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "janus.fullname" . }}
+  labels:
+    {{- include "janus.labels" . | nindent 4 }}
+spec:
+  {{- $max := .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ if kindIs "string" $max }}{{ $max | quote }}{{ else }}{{ int $max }}{{ end }}
+  selector:
+    matchLabels:
+      {{- include "janus.selector" . | nindent 6 }}
+{{- end }}

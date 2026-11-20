@@ -94,6 +94,15 @@
             "postgresql",
             "sqlite"
           ]
+        },
+        "connectTimeoutSeconds": {
+          "description": "JANUS_DB_CONNECT_TIMEOUT in seconds; null leaves it unset (gateway default 5)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 120
         }
       }
     },
@@ -319,6 +328,126 @@
     },
     "affinity": {
       "type": "object"
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "auto renders only when replicaCount > 1; true/false force it",
+          "enum": [
+            "auto",
+            true,
+            false
+          ]
+        },
+        "maxUnavailable": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*%$"
+            }
+          ]
+        }
+      }
+    },
+    "topologySpread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "auto renders only when replicaCount > 1; true/false force it",
+          "enum": [
+            "auto",
+            true,
+            false
+          ]
+        },
+        "hostname": {
+          "type": "string",
+          "enum": [
+            "",
+            "ScheduleAnyway",
+            "DoNotSchedule"
+          ]
+        },
+        "zone": {
+          "type": "string",
+          "enum": [
+            "",
+            "ScheduleAnyway",
+            "DoNotSchedule"
+          ]
+        }
+      }
+    },
+    "topologySpreadConstraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "maxSkew",
+          "topologyKey",
+          "whenUnsatisfiable"
+        ]
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preStopSleepSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        }
+      }
+    },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "delaySeconds": {
+          "description": "JANUS_SHUTDOWN_DELAY in seconds; null leaves it unset (gateway default 0)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 300
+        },
+        "graceSeconds": {
+          "description": "JANUS_SHUTDOWN_GRACE in seconds; null leaves it unset (gateway default 30)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 3600
+        }
+      }
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "trustedProxies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+        "not": {
+          "enum": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      }
     },
     "extraEnv": {
       "type": "object",
