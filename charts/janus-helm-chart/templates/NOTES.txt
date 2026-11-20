@@ -1,7 +1,16 @@
 Janus {{ .Chart.AppVersion }} (chart {{ .Chart.Version }})
 
+{{ if .Values.ingress.enabled -}}
+The ingress is enabled, and this instance is UNCLAIMED until the first administrator exists:
+whoever reaches it first can create that account. Create the administrator NOW, privately,
+through this port-forward and http://127.0.0.1:8080:
+  kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "janus.fullname" . }} 8080:{{ .Values.service.port }}
+If {{ .Values.ingress.host }} is already publicly reachable, install with ingress.enabled=false first,
+create the administrator, then enable the ingress.
+{{- else -}}
 Complete the first-administrator form PRIVATELY before enabling ingress:
   kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1 service/{{ include "janus.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
 
 Public URL: {{ .Values.publicURL }}
 Dev authentication is disabled; OIDC is optional. No default administrator password.

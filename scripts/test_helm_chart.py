@@ -92,6 +92,27 @@ class ChartTest(unittest.TestCase):
         self.assertFalse(objects(text, "Ingress"))
         self.assertFalse(objects(text, "ServiceMonitor"))
 
+    def notes(self, values=None):
+        result = self.run_helm(values, command="install",
+                               args=("--generate-name", "--dry-run=client"))
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        return result.stdout.split("NOTES:", 1)[1]
+
+    def test_notes_first_administrator(self):
+        private = "Complete the first-administrator form PRIVATELY before enabling ingress:"
+        text = self.notes()
+        self.assertIn(private, text)
+        self.assertNotIn("UNCLAIMED", text)
+        self.assertIn("port-forward --address 127.0.0.1 service/", text)
+        text = self.notes({"publicURL": "https://janus.example.com",
+                           "ingress": {"enabled": True, "host": "janus.example.com"}})
+        self.assertNotIn(private, text)
+        self.assertIn("UNCLAIMED until the first administrator exists", text)
+        self.assertIn("Create the administrator NOW, privately", text)
+        self.assertIn("port-forward --address 127.0.0.1 service/", text)
+        self.assertIn("If janus.example.com is already publicly reachable, "
+                      "install with ingress.enabled=false first", text)
+
     def test_security_and_probes(self):
         text = self.render()
         for kind, uid in [("Deployment", 65532), ("StatefulSet", 70)]:
