@@ -361,6 +361,60 @@ class ChartTest(unittest.TestCase):
         self.assertNotIn("lifecycle", old["containers"][0])
         self.assertEqual(old["terminationGracePeriodSeconds"], 50)
         self.reject({"lifecycle": {"preStopSleepSeconds": 45}}, "must exceed lifecycle.preStopSleepSeconds")
+        # 45 is not enough for a 10 s sleep plus the 30 s default drain plus 5 s.
+        self.reject({"lifecycle": {"preStopSleepSeconds": 10}}, "= 45")
+
+    def test_shutdown_and_connect_timeout_unset_by_default(self):
+        for values in [{}, {"database": {"type": "sqlite"}, "postgresql": {"enabled": False}},
+                       {"postgresql": {"enabled": False},
+                        "externalPostgresql": {"host": "db", "existingSecret": "db"}}]:
+            with self.subTest(values=values):
+                names = env(self.render(values))
+                for name in ["JANUS_SHUTDOWN_DELAY", "JANUS_SHUTDOWN_GRACE", "JANUS_DB_CONNECT_TIMEOUT"]:
+                    self.assertNotIn(name, names)
+
+    def test_shutdown_and_connect_timeout(self):
+        text = self.render({"shutdown": {"delaySeconds": 10, "graceSeconds": 120},
+                            "database": {"connectTimeoutSeconds": 7},
+                            "terminationGracePeriodSeconds": 140})
+        self.assertEqual(env(text)["JANUS_SHUTDOWN_DELAY"]["value"], "10s")
+        self.assertEqual(env(text)["JANUS_SHUTDOWN_GRACE"]["value"], "120s")
+        self.assertEqual(env(text)["JANUS_DB_CONNECT_TIMEOUT"]["value"], "7s")
+        self.assertEqual(self.pod(text)["terminationGracePeriodSeconds"], 140)
+        external = self.render({"postgresql": {"enabled": False}, "database": {"connectTimeoutSeconds": 5},
+                                "externalPostgresql": {"host": "db", "existingSecret": "db"}})
+        self.assertEqual(env(external)["JANUS_DB_CONNECT_TIMEOUT"]["value"], "5s")
+        # An explicit 0 delay is rendered (it is a choice, not an absence).
+        zero = self.render({"shutdown": {"delaySeconds": 0}})
+        self.assertEqual(env(zero)["JANUS_SHUTDOWN_DELAY"]["value"], "0s")
+        # SQLite has no PostgreSQL connection to time out.
+        sqlite = self.render({"database": {"type": "sqlite", "connectTimeoutSeconds": 5},
+                              "postgresql": {"enabled": False}})
+        self.assertNotIn("JANUS_DB_CONNECT_TIMEOUT", env(sqlite))
+
+    def test_termination_grace_covers_shutdown(self):
+        # 45 > 0 + 0 + 30 + 5 (defaults) renders; each part counts.
+        self.render({"terminationGracePeriodSeconds": 36})
+        self.reject({"terminationGracePeriodSeconds": 35}, "= 35")
+        self.reject({"shutdown": {"delaySeconds": 10}}, "= 45")
+        self.render({"shutdown": {"delaySeconds": 10}, "terminationGracePeriodSeconds": 46})
+        self.reject({"shutdown": {"graceSeconds": 60}}, "= 65")
+        self.reject({"shutdown": {"delaySeconds": 10, "graceSeconds": 30},
+                     "lifecycle": {"preStopSleepSeconds": 5}, "terminationGracePeriodSeconds": 50}, "= 50")
+        self.render({"shutdown": {"graceSeconds": 10}, "terminationGracePeriodSeconds": 16})
+
+    def test_shutdown_values_and_env_not_both(self):
+        for value, env_name in [({"shutdown": {"delaySeconds": 5}}, "JANUS_SHUTDOWN_DELAY"),
+                                ({"shutdown": {"graceSeconds": 5}}, "JANUS_SHUTDOWN_GRACE"),
+                                ({"database": {"connectTimeoutSeconds": 5}}, "JANUS_DB_CONNECT_TIMEOUT")]:
+            with self.subTest(env=env_name):
+                self.reject(merged(value, {"extraEnv": {env_name: "5s"}, "terminationGracePeriodSeconds": 60}),
+                            "not both")
+                self.reject(merged(value, {"secretEnv": {env_name: {"name": "s", "key": "k"}},
+                                           "terminationGracePeriodSeconds": 60}), "not both")
+        # Without the dedicated value, extraEnv keeps working as before.
+        legacy = self.render({"extraEnv": {"JANUS_SHUTDOWN_DELAY": "10s"}})
+        self.assertEqual(env(legacy)["JANUS_SHUTDOWN_DELAY"]["value"], "10s")
 
     def test_trusted_proxies(self):
         text = self.render({"trustedProxies": ["10.42.0.0/16", "fd00::/8", "192.0.2.10"]})
@@ -375,7 +429,12 @@ class ChartTest(unittest.TestCase):
                       {"podDisruptionBudget": {"minAvailable": 1}}, {"topologySpread": {"hostname": "Maybe"}},
                       {"topologySpreadConstraints": [{"maxSkew": 1}]}, {"lifecycle": {"preStopSleepSeconds": -1}},
                       {"terminationGracePeriodSeconds": 0}, {"trustedProxies": ["0.0.0.0/0"]},
-                      {"trustedProxies": ["proxy.example.com"]}, {"trustedProxies": "10.0.0.0/8"}]:
+                      {"trustedProxies": ["proxy.example.com"]}, {"trustedProxies": "10.0.0.0/8"},
+                      {"shutdown": {"delaySeconds": -1}}, {"shutdown": {"delaySeconds": 301}},
+                      {"shutdown": {"graceSeconds": 0}}, {"shutdown": {"graceSeconds": 3601}},
+                      {"shutdown": {"graceSeconds": "30s"}}, {"shutdown": {"drainSeconds": 5}},
+                      {"database": {"connectTimeoutSeconds": 0}}, {"database": {"connectTimeoutSeconds": 121}},
+                      {"database": {"connectTimeoutSeconds": "5"}}]:
             with self.subTest(value=value):
                 self.reject(value, "values don't meet the specifications")
 
@@ -387,7 +446,11 @@ class ChartTest(unittest.TestCase):
         self.assertEqual(objects(text, "PodDisruptionBudget")[0]["spec"]["maxUnavailable"], 1)
         pod = self.pod(text)
         self.assertEqual(pod["terminationGracePeriodSeconds"], 50)
-        self.assertEqual(pod["containers"][0]["lifecycle"]["preStop"]["sleep"]["seconds"], 10)
+        # The gateway's own shutdown delay replaces a preStop sleep.
+        self.assertNotIn("lifecycle", pod["containers"][0])
+        self.assertEqual(env(text)["JANUS_SHUTDOWN_DELAY"]["value"], "10s")
+        self.assertEqual(env(text)["JANUS_SHUTDOWN_GRACE"]["value"], "30s")
+        self.assertEqual(env(text)["JANUS_DB_CONNECT_TIMEOUT"]["value"], "5s")
         self.assertEqual(pod["topologySpreadConstraints"][0]["topologyKey"], "kubernetes.io/hostname")
         self.assertEqual(env(text)["PGHOST"]["value"], "janus-db-rw")
         self.assertEqual(env(text)["PGSSLMODE"]["value"], "verify-full")

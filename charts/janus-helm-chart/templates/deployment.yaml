@@ -109,6 +109,18 @@ spec:
             - name: PGSSLROOTCERT
               value: /etc/janus/postgresql/ca.crt
             {{- end }}
+            {{- if not (kindIs "invalid" .Values.database.connectTimeoutSeconds) }}
+            - name: JANUS_DB_CONNECT_TIMEOUT
+              value: {{ printf "%ds" (int .Values.database.connectTimeoutSeconds) | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.shutdown.delaySeconds) }}
+            - name: JANUS_SHUTDOWN_DELAY
+              value: {{ printf "%ds" (int .Values.shutdown.delaySeconds) | quote }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.shutdown.graceSeconds) }}
+            - name: JANUS_SHUTDOWN_GRACE
+              value: {{ printf "%ds" (int .Values.shutdown.graceSeconds) | quote }}
             {{- end }}
             {{- if .Values.license.existingSecret }}
             - name: JANUS_LICENSE_FILE

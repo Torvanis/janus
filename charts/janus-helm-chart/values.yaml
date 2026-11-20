@@ -27,6 +27,11 @@ license:
 # Every mode also requires encryptionKey.existingSecret.
 database:
   type: postgresql
+  # Bound on each new PostgreSQL connection attempt, in seconds
+  # (JANUS_DB_CONNECT_TIMEOUT, 1-120). null leaves it out, and the gateway
+  # uses its own default (5 s). Applies to bundled and external PostgreSQL.
+  # Needs a gateway release that reads JANUS_DB_CONNECT_TIMEOUT (see README).
+  connectTimeoutSeconds: null
 postgresql:
   enabled: true
   image: postgres:16-alpine
@@ -110,7 +115,22 @@ lifecycle:
   # native preStop sleep action (the image has no shell) and is rendered only on
   # Kubernetes >= 1.30. 0 = off.
   preStopSleepSeconds: 0
-# Must exceed preStopSleepSeconds plus Janus' own 30-second request drain.
+# Gateway shutdown timing. null leaves the variable out and keeps the
+# gateway's default. Needs a gateway release that reads these variables (see
+# README "High availability with CloudNativePG").
+shutdown:
+  # JANUS_SHUTDOWN_DELAY: seconds the gateway keeps serving after SIGTERM with
+  # /readyz already 503, so endpoints and the ingress stop routing to it
+  # before its port closes (0-300; gateway default 0). With multiple replicas
+  # prefer this over lifecycle.preStopSleepSeconds: the pod leaves the
+  # endpoints at once instead of after the sleep.
+  delaySeconds: null
+  # JANUS_SHUTDOWN_GRACE: seconds in-flight requests, streams included, get to
+  # finish once the listener closes (1-3600; gateway default 30).
+  graceSeconds: null
+# Must exceed lifecycle.preStopSleepSeconds + shutdown.delaySeconds +
+# shutdown.graceSeconds (30 when unset) + 5 s for the usage writers; the
+# render fails otherwise.
 terminationGracePeriodSeconds: 45
 # IPs or CIDRs of the reverse proxies (for example ingress-controller pods) whose
 # X-Forwarded-For Janus trusts for the client address. Sets

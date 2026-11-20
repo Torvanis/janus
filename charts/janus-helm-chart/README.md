@@ -248,6 +248,13 @@ spec:
     topologyKey: kubernetes.io/hostname
     podAntiAffinityType: required   # never two instances on one node
   enablePDB: true
+  # `kubectl delete pod <primary>` first waits up to smartShutdownTimeout for
+  # clients to disconnect. The gateways' pooled connections never do, so the
+  # default 180 s is simply a 3-minute wait before the failover; 15 s is enough.
+  smartShutdownTimeout: 15
+  # Total shutdown budget per instance (default 1800 s); the fast shutdown gets
+  # stopDelay - smartShutdownTimeout. Raise it for large, write-heavy databases.
+  stopDelay: 60
   postgresql:
     synchronous:
       method: any
@@ -272,8 +279,20 @@ installs render exactly as before):
 | `topologySpread.enabled`, `.hostname`, `.zone` | `auto`, `ScheduleAnyway`, `""` | Spread gateway pods across nodes (and zones when `zone` is set) when `replicaCount > 1`. Soft by default: on a three-node cluster a drained node's pod can still run on a survivor |
 | `topologySpreadConstraints` | `[]` | Raw constraints; when non-empty they replace the generated ones |
 | `lifecycle.preStopSleepSeconds` | `0` | Native `preStop` `sleep` (the image has no shell) so endpoints and the ingress stop routing to a terminating pod before it drains. Rendered only on Kubernetes 1.30 or later; NOTES warns when it is skipped |
-| `terminationGracePeriodSeconds` | `45` | Must exceed the preStop sleep plus Janus' 30-second request drain (render fails otherwise) |
+| `shutdown.delaySeconds` | unset | `JANUS_SHUTDOWN_DELAY`: on SIGTERM the gateway answers `/readyz` with 503 and keeps serving this long, so endpoints and the ingress stop routing to it before its port closes. Preferred over a preStop sleep (the example uses 10 and no preStop). Gateway default 0 |
+| `shutdown.graceSeconds` | unset | `JANUS_SHUTDOWN_GRACE`: how long in-flight requests and streams may run after the listener closes. Gateway default 30 |
+| `database.connectTimeoutSeconds` | unset | `JANUS_DB_CONNECT_TIMEOUT`: bound on each new PostgreSQL connection attempt (bundled or external). Gateway default 5 |
+| `terminationGracePeriodSeconds` | `45` | Must exceed `lifecycle.preStopSleepSeconds` + `shutdown.delaySeconds` + `shutdown.graceSeconds` (30 when unset) + 5 s for the usage writers (render fails otherwise) |
 | `trustedProxies` | `[]` | `JANUS_TRUSTED_PROXIES` (comma-joined IPs/CIDRs) |
+
+Unset `shutdown.*` and `database.connectTimeoutSeconds` values are left out of
+the rendered manifest, so existing installs render byte for byte as before.
+They take effect only with a gateway release that reads `JANUS_SHUTDOWN_DELAY`,
+`JANUS_SHUTDOWN_GRACE` and `JANUS_DB_CONNECT_TIMEOUT` (check the release notes);
+older gateways ignore them, and then only a preStop sleep
+(`lifecycle.preStopSleepSeconds`) delays the shutdown. Such a gateway release
+also answers a request whose credentials cannot be checked during a database
+failover with a retryable 503 instead of 401.
 
 Rolling updates stay `maxSurge: 0` / `maxUnavailable: 1`, so a rollout never runs
 more gateway pods than `replicaCount`; two of three serve during a rollout.
@@ -284,6 +303,14 @@ Be honest about the remaining single points of failure:
   clients reach them through one node's IP. Use a load balancer, a VIP (for
   example kube-vip or MetalLB), or DNS that covers every ingress node, and run
   the ingress controller on more than one node.
+- **So must cluster DNS.** The gateways find `janus-db-rw` through CoreDNS, and
+  k3s runs a single CoreDNS replica by default: draining its node breaks name
+  resolution for every pod until it is rescheduled. Run at least two CoreDNS
+  replicas on different nodes (on k3s, persist the change, because k3s
+  re-applies its packaged CoreDNS manifest on restart).
+- `kubectl delete pod <primary>` is a planned shutdown, not a crash:
+  CloudNativePG waits up to `smartShutdownTimeout` (default 180 s) before it
+  fails over, which is why the manifest above lowers it.
 - A primary failover takes a few seconds; requests that write to the database in
   that window can fail and should be retried by the client.
 - Each gateway replica counts as a licensed node: Community covers one node,
@@ -358,7 +385,8 @@ See `values.yaml` and `values.schema.json` for the complete interface.
 | `license.existingSecret`, `license.key` | Optional license file mounted read-only; no key supplied by chart |
 | `resources`, `postgresql.resources` | Separate gateway/database sizing |
 | `nodeSelector`, `tolerations`, `affinity` | Gateway scheduling; these do not configure PostgreSQL scheduling |
-| `podDisruptionBudget`, `topologySpread`, `topologySpreadConstraints`, `lifecycle.preStopSleepSeconds`, `terminationGracePeriodSeconds` | Gateway HA settings; see [High availability with CloudNativePG](#high-availability-with-cloudnativepg) |
+| `podDisruptionBudget`, `topologySpread`, `topologySpreadConstraints`, `lifecycle.preStopSleepSeconds`, `shutdown.delaySeconds`, `shutdown.graceSeconds`, `terminationGracePeriodSeconds` | Gateway HA settings; see [High availability with CloudNativePG](#high-availability-with-cloudnativepg) |
+| `database.connectTimeoutSeconds` | PostgreSQL connect timeout (`JANUS_DB_CONNECT_TIMEOUT`); unset keeps the gateway default |
 | `trustedProxies` | Reverse-proxy IPs/CIDRs trusted for `X-Forwarded-For` (`JANUS_TRUSTED_PROXIES`) |
 | `podAnnotations` | Gateway pod annotations; change a rollout annotation to restart after Secret changes |
 | `extraEnv` | Map of additional **string** application env values |

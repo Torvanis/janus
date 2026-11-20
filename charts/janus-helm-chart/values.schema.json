@@ -94,6 +94,15 @@
             "postgresql",
             "sqlite"
           ]
+        },
+        "connectTimeoutSeconds": {
+          "description": "JANUS_DB_CONNECT_TIMEOUT in seconds; null leaves it unset (gateway default 5)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 120
         }
       }
     },
@@ -395,6 +404,30 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 300
+        }
+      }
+    },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "delaySeconds": {
+          "description": "JANUS_SHUTDOWN_DELAY in seconds; null leaves it unset (gateway default 0)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 300
+        },
+        "graceSeconds": {
+          "description": "JANUS_SHUTDOWN_GRACE in seconds; null leaves it unset (gateway default 30)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 3600
         }
       }
     },
