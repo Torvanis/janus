@@ -9,6 +9,10 @@ Bring your own certificate, or use Let's Encrypt, after installing:
     sudo janus-ctl cert acme --domain ai.example.com --email you@example.com
 
 Other commands: janus-ctl status | upgrade [--version V] | cert self-signed | uninstall [--purge]
+
+Air-gapped server (no internet; sets JANUS_OFFLINE=true):
+    sudo python3 install.py --archive <file> --checksums SHA256SUMS --hostname ai.example.com --offline
+
 No-sudo trial in your home directory (loopback only, foreground):
     python3 install.py --user
 
@@ -673,6 +677,21 @@ def label_selinux():
         run(["restorecon", "-R", str(BIN), str(CTL), str(LIBEXEC)], check=False, capture=True)
 
 
+def resolve_hostname(args_hostname, env, offline):
+    """--hostname, else the installed public URL's host, else this machine's FQDN.
+
+    Offline, getfqdn() can stall for a long time without a resolver, so an
+    offline first install must name the host explicitly."""
+    hostname = args_hostname or host_from_url(env.get("JANUS_PUBLIC_URL", ""))
+    if not hostname:
+        if offline:
+            raise InstallError("--offline needs --hostname (the name or IP people will use to reach this server)")
+        hostname = socket.getfqdn()
+    if not valid_hostname(hostname):
+        raise InstallError(f"Invalid hostname {hostname!r}; pass --hostname ai.example.com")
+    return hostname
+
+
 def cmd_install(args, upgrade=False):
     need_root("The server install")
     need_systemd()
@@ -686,9 +705,9 @@ def cmd_install(args, upgrade=False):
         raise InstallError("Janus is not installed as a service here; run: sudo python3 install.py")
     env = read_env()
     https_port = https_port_of(env) if not first_install else args.https_port
-    hostname = args.hostname or host_from_url(env.get("JANUS_PUBLIC_URL", "")) or socket.getfqdn()
-    if not valid_hostname(hostname):
-        raise InstallError(f"Invalid hostname {hostname!r}; pass --hostname ai.example.com")
+    if args.offline:
+        env["JANUS_OFFLINE"] = "true"
+    hostname = resolve_hostname(args.hostname, env, args.offline)
 
     admin = None
     if first_install and not args.skip_admin:
@@ -786,6 +805,9 @@ def cmd_install(args, upgrade=False):
         print(f"               or https://{ips[0]}" + ("" if https_port == 443 else f":{https_port}")
               + " until DNS points here")
     print("  HTTP:        port 80 redirects to HTTPS")
+    offline = env.get("JANUS_OFFLINE", "").lower() == "true"
+    if offline:
+        print("  Offline:     yes (no update checks or license sync; JANUS_OFFLINE=true)")
     if admin:
         print(f"  Sign in as:  {admin[0]}")
         if admin[3]:
@@ -794,10 +816,11 @@ def cmd_install(args, upgrade=False):
     if info["self_signed"]:
         print("  Certificate: self-signed, so browsers will warn until you install a real one:")
         print("                 sudo janus-ctl cert install --cert fullchain.pem --key privkey.pem")
-        print("               or get a free one from Let's Encrypt (needs a public DNS name and port 80):")
-        print("                 sudo janus-ctl cert acme --domain "
-              + (hostname if "." in hostname and not is_ip(hostname) else "ai.example.com")
-              + " --email you@example.com")
+        if not offline:
+            print("               or get a free one from Let's Encrypt (needs a public DNS name and port 80):")
+            print("                 sudo janus-ctl cert acme --domain "
+                  + (hostname if "." in hostname and not is_ip(hostname) else "ai.example.com")
+                  + " --email you@example.com")
     else:
         print(f"  Certificate: {', '.join(info['names']) or info['subject']}, expires {info['not_after']}")
     print(f"  Config:      {ENV_FILE}  (back it up: it holds the encryption key)")
@@ -911,6 +934,10 @@ def cmd_cert(args):
         set_public_host(env, host)
         print(f"Created a new self-signed certificate for {', '.join(names)}.")
     elif args.cert_cmd == "acme":
+        if env.get("JANUS_OFFLINE", "").lower() == "true":
+            raise InstallError("Let's Encrypt needs internet access, and this server is offline (JANUS_OFFLINE=true). "
+                               "Use a certificate from your internal CA instead:\n"
+                               "  sudo janus-ctl cert install --cert fullchain.pem --key privkey.pem")
         if not valid_hostname(args.domain) or is_ip(args.domain) or "." not in args.domain:
             raise InstallError("--domain must be a public DNS name that points at this server")
         conf = {"domain": args.domain, "email": args.email or "",
@@ -1118,6 +1145,8 @@ def build_parser():
         p.add_argument("--version", default=DEFAULT_VERSION, help="release to install (default %(default)s)")
         p.add_argument("--archive", type=Path, help="install from a downloaded archive (offline)")
         p.add_argument("--checksums", type=Path, help="the release SHA256SUMS, required with --archive")
+        p.add_argument("--offline", action="store_true",
+                       help="air-gapped server: needs --archive and --checksums; sets JANUS_OFFLINE=true")
 
     p = sub.add_parser("install", help="install the system service (default command)")
     add_source(p)
@@ -1173,6 +1202,11 @@ def main(argv=None):
         raise InstallError("Only Linux is supported")
     if bool(getattr(args, "archive", None)) != bool(getattr(args, "checksums", None)):
         raise InstallError("--archive and --checksums must be provided together")
+    if getattr(args, "offline", False):
+        if not args.archive:
+            raise InstallError("--offline installs from a downloaded release: pass --archive <file> --checksums SHA256SUMS")
+        if getattr(args, "user", False):
+            raise InstallError("--offline is for the server install; leave it out with --user")
     if args.command == "install" and args.user:
         if args.archive:
             install(args.archive, args.checksums, args.prefix)

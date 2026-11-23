@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -168,6 +169,40 @@ class ServerInstallTests(unittest.TestCase):
         self.assertIn('AmbientCapabilities=CAP_NET_BIND_SERVICE', service)
         self.assertIn('EnvironmentFile=/etc/janus/janus.env', service)
         self.assertIn('--port 80 --https-port 443', units['janus-redirect.service'])
+
+    def test_offline_flag_parses_for_install_and_upgrade(self):
+        for cmd in ('install', 'upgrade'):
+            args = installer.build_parser().parse_args([cmd, '--archive', 'a.tar.gz', '--checksums', 'S', '--offline'])
+            self.assertTrue(args.offline)
+            self.assertFalse(installer.build_parser().parse_args([cmd]).offline)
+
+    @unittest.skipUnless(platform.system() == 'Linux', 'installer is Linux-only')
+    def test_offline_requires_archive_and_server_install(self):
+        with self.assertRaisesRegex(installer.InstallError, '--archive'):
+            installer.main(['--offline', '--hostname', 'ai.example.com'])
+        with self.assertRaisesRegex(installer.InstallError, '--archive'):
+            installer.main(['upgrade', '--offline'])
+        with self.assertRaisesRegex(installer.InstallError, '--user'):
+            installer.main(['--user', '--offline', '--archive', 'a.tar.gz', '--checksums', 'S'])
+
+    def test_offline_hostname_never_calls_getfqdn(self):
+        with mock.patch.object(installer.socket, 'getfqdn', side_effect=AssertionError('getfqdn called')):
+            with self.assertRaisesRegex(installer.InstallError, '--hostname'):
+                installer.resolve_hostname(None, {}, True)
+            self.assertEqual(installer.resolve_hostname('ai.example.com', {}, True), 'ai.example.com')
+            self.assertEqual(installer.resolve_hostname(None, {'JANUS_PUBLIC_URL': 'https://h.internal:8443'}, True),
+                             'h.internal')
+        with mock.patch.object(installer.socket, 'getfqdn', return_value='box.example.com'):
+            self.assertEqual(installer.resolve_hostname(None, {}, False), 'box.example.com')
+
+    def test_cert_acme_refused_offline(self):
+        args = installer.build_parser().parse_args(['cert', 'acme', '--domain', 'ai.example.com'])
+        with mock.patch.object(installer, 'need_root'), \
+                mock.patch.object(installer, 'read_env', return_value={'JANUS_OFFLINE': 'true',
+                                                                       'JANUS_PUBLIC_URL': 'https://ai.example.com'}), \
+                mock.patch.object(installer, 'obtain_acme', side_effect=AssertionError('ACME attempted')):
+            with self.assertRaisesRegex(installer.InstallError, 'cert install'):
+                installer.cmd_cert(args)
 
     @unittest.skipUnless(shutil.which('openssl'), 'openssl not installed')
     def test_cert_pair_check_rejects_mismatched_key(self):
